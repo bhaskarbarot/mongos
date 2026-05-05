@@ -1071,3 +1071,130 @@ Traceback (most recent call last):
   File "/home/elsner/.local/lib/python3.10/site-packages/click/utils.py", line 319, in echo
     file.flush()
 BrokenPipeError: [Errno 32] Broken pipe
+2026-05-05 16:37:56,565 | INFO | sql_chatbot | Starting schema discovery...
+2026-05-05 16:37:59,999 | INFO | sql_chatbot | Schema: discovered 45 tables
+2026-05-05 16:38:00,012 | INFO | sql_chatbot | Schema link: ai_notes.company → companies
+2026-05-05 16:38:00,020 | INFO | sql_chatbot | Schema link: bills.createdBy → users
+2026-05-05 16:38:00,024 | INFO | sql_chatbot | Schema link: campaigns.createdBy → users
+2026-05-05 16:38:00,035 | INFO | sql_chatbot | Schema link: commonnotes.contactId → contacts
+2026-05-05 16:38:00,037 | INFO | sql_chatbot | Schema link: commonnotes.createdBy → users
+2026-05-05 16:38:00,044 | INFO | sql_chatbot | Schema link: commonnotes.invoiceId → invoices
+2026-05-05 16:38:00,050 | INFO | sql_chatbot | Schema link: companies.companyOwner → users
+2026-05-05 16:38:00,053 | INFO | sql_chatbot | Schema link: companies.createdBy → users
+2026-05-05 16:38:00,055 | INFO | sql_chatbot | Schema link: companies.region → regions
+2026-05-05 16:38:00,061 | INFO | sql_chatbot | Schema link: contacts.company → companies
+2026-05-05 16:38:00,063 | INFO | sql_chatbot | Schema link: contacts.contactOwner → users
+2026-05-05 16:38:00,065 | INFO | sql_chatbot | Schema link: contacts.createdBy → users
+2026-05-05 16:38:00,075 | INFO | sql_chatbot | Schema link: createtasks.companyId → companies
+2026-05-05 16:38:00,078 | INFO | sql_chatbot | Schema link: createtasks.createdBy → users
+2026-05-05 16:38:00,081 | INFO | sql_chatbot | Schema link: createtasks.invoiceId → invoices
+2026-05-05 16:38:00,089 | INFO | sql_chatbot | Schema link: deals.company → companies
+2026-05-05 16:38:00,092 | INFO | sql_chatbot | Schema link: deals.contact → contacts
+2026-05-05 16:38:00,095 | INFO | sql_chatbot | Schema link: deals.owner → users
+2026-05-05 16:38:00,100 | INFO | sql_chatbot | Schema link: dealstagesettings.createdBy → users
+2026-05-05 16:38:00,118 | INFO | sql_chatbot | Schema link: invoices.company → companies
+2026-05-05 16:38:00,121 | INFO | sql_chatbot | Schema link: invoices.createdBy → users
+2026-05-05 16:38:00,130 | INFO | sql_chatbot | Schema link: meetings.createdBy → users
+2026-05-05 16:38:00,134 | INFO | sql_chatbot | Schema link: notes.createdBy → users
+2026-05-05 16:38:00,150 | INFO | sql_chatbot | Schema link: outreaches.assignedTo → users
+2026-05-05 16:38:00,153 | INFO | sql_chatbot | Schema link: outreaches.createdBy → users
+2026-05-05 16:38:00,156 | INFO | sql_chatbot | Schema link: outreaches.region → regions
+2026-05-05 16:38:00,201 | INFO | sql_chatbot | Schema link: sales.company → companies
+2026-05-05 16:38:00,204 | INFO | sql_chatbot | Schema link: sales.salesOwner → users
+2026-05-05 16:38:00,212 | INFO | sql_chatbot | Schema link: targets.createdBy → users
+2026-05-05 16:38:00,214 | INFO | sql_chatbot | Schema link: targets.userId → users
+2026-05-05 16:38:00,227 | INFO | sql_chatbot | Schema link: users.department → departments
+2026-05-05 16:38:00,229 | INFO | sql_chatbot | Schema link: users.regionId → regions
+2026-05-05 16:38:00,234 | INFO | sql_chatbot | Schema link: vendors.createdBy → users
+2026-05-05 16:38:00,234 | INFO | sql_chatbot | Schema discovery: 33 relationships found
+2026-05-05 16:38:00,234 | INFO | sql_chatbot | Schema cache warmed: 45 tables
+2026-05-05 16:38:00,235 | INFO | sql_chatbot | ╔══════════════════════════════════════════════╗
+2026-05-05 16:38:00,236 | INFO | sql_chatbot | ║  SQL Chatbot Agent Ready                     ║
+2026-05-05 16:38:00,236 | INFO | sql_chatbot | ╠══════════════════════════════════════════════╣
+2026-05-05 16:38:00,236 | INFO | sql_chatbot | ║  Tables       : 45 discovered                ║
+2026-05-05 16:38:00,237 | INFO | sql_chatbot | ║  FK Links     : 33 relationships             ║
+2026-05-05 16:38:00,237 | INFO | sql_chatbot | ║  Primary LLM  : debopam/Text-to-SQL__Qwen2.5-Coder-3B-FineTuned:latest ║
+2026-05-05 16:38:00,237 | INFO | sql_chatbot | ║  Fallback LLM : a-kore/Arctic-Text2SQL-R1-7B:latest ║
+2026-05-05 16:38:00,238 | INFO | sql_chatbot | ║  Reasoning    : llama-3.1-8b-instant         ║
+2026-05-05 16:38:00,238 | INFO | sql_chatbot | ║  Groq API     : connected                    ║
+2026-05-05 16:38:00,238 | INFO | sql_chatbot | ║  Startup      : 3797ms                       ║
+2026-05-05 16:38:00,238 | INFO | sql_chatbot | ╚══════════════════════════════════════════════╝
+2026-05-05 16:38:40,665 | INFO | sql_chatbot | ═══ Pipeline START | query: give me revenue of january 2026 ═══
+2026-05-05 16:38:40,665 | INFO | sql_chatbot | Schema pre-warmed: 45 tables, 0ms
+2026-05-05 16:38:40,666 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me revenue of january 2026
+2026-05-05 16:38:40,667 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (2ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:38:40,673 | INFO | sql_chatbot | FastPath route: general | query: give me revenue of january 2026
+2026-05-05 16:38:40,681 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:38:40,681 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 14ms | tables=['invoices']
+2026-05-05 16:39:02,835 | INFO | sql_chatbot | ═══ Pipeline START | query: give me revenue of march 2026 ═══
+2026-05-05 16:39:02,835 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me revenue of march 2026
+2026-05-05 16:39:02,836 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:39:02,836 | INFO | sql_chatbot | FastPath route: general | query: give me revenue of march 2026
+2026-05-05 16:39:02,842 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:39:02,843 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 7ms | tables=['invoices']
+2026-05-05 16:39:41,047 | INFO | sql_chatbot | ═══ Pipeline START | query: share me revenue of last year december ═══
+2026-05-05 16:39:41,386 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 332ms
+2026-05-05 16:39:41,387 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: requires comparison between time periods | query: share me revenue of last year december
+2026-05-05 16:39:41,388 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (340ms) | requires comparison between time periods
+2026-05-05 16:39:41,388 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 16:39:41,843 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 454ms
+2026-05-05 16:39:41,844 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: share me revenue of last year december
+2026-05-05 16:39:41,844 | INFO | sql_chatbot | Decomposed into 2 sub-queries (455ms): ['total paid invoices in last year decembe', 'grand total in USD for all paid invoices']
+2026-05-05 16:39:41,844 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 16:39:41,845 | INFO | sql_chatbot | FastPath route: general | query: total paid invoices in last year december
+2026-05-05 16:39:41,847 | INFO | sql_chatbot | FastPath route: general | query: grand total in USD for all paid invoices in last year decemb
+2026-05-05 16:39:41,848 | INFO | sql_chatbot | FastPath MISS — escalating to classifier
+2026-05-05 16:39:41,855 | INFO | sql_chatbot | Text2SQL: processing query: total paid invoices in last year december
+2026-05-05 16:39:41,858 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 16:39:49,598 | INFO | sql_chatbot | Text2SQL: primary model won (0ms): SELECT SUM(NULLIF(document->>'grandtotal_in_usd','')::numeric) AS total_paid_inv
+2026-05-05 16:40:01,881 | INFO | sql_chatbot | Text2SQL generated: SELECT SUM(NULLIF(document->>'grandtotal_in_usd','')::numeric) AS total_paid_invoices FROM "invoices
+2026-05-05 16:40:01,887 | INFO | sql_chatbot | Text2SQL: done in 20032ms | rows=1 | tables=['invoices']
+2026-05-05 16:40:01,888 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 20043ms | sources=['text2sql', 'fast_path']
+2026-05-05 16:40:01,888 | INFO | sql_chatbot | Parallel execution done (20044ms): 2 results
+2026-05-05 16:40:01,890 | INFO | sql_chatbot | Synthesis format: default | query: share me revenue of last year december
+2026-05-05 16:40:02,676 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 785ms
+2026-05-05 16:40:02,679 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 16:40:02,681 | INFO | sql_chatbot | Synthesis done (793ms)
+2026-05-05 16:40:02,682 | INFO | sql_chatbot | ═══ Pipeline DONE | total=21635ms | layer=complex | parts=2 | tables=['invoices'] ═══
+2026-05-05 16:40:34,054 | INFO | sql_chatbot | ═══ Pipeline START | query: give me previous year revenue ═══
+2026-05-05 16:40:34,054 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me previous year revenue
+2026-05-05 16:40:34,055 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:40:34,055 | INFO | sql_chatbot | FastPath route: general | query: give me previous year revenue
+2026-05-05 16:40:34,061 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:40:34,061 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 6ms | tables=['invoices']
+2026-05-05 16:43:59,999 | ERROR | asyncio | Exception in callback Loop._read_from_self
+handle: <Handle Loop._read_from_self>
+Traceback (most recent call last):
+  File "uvloop/cbhandles.pyx", line 66, in uvloop.loop.Handle._run
+  File "uvloop/loop.pyx", line 399, in uvloop.loop.Loop._read_from_self
+  File "uvloop/loop.pyx", line 404, in uvloop.loop.Loop._invoke_signals
+  File "uvloop/loop.pyx", line 379, in uvloop.loop.Loop._ceval_process_signals
+  File "/home/elsner/.local/lib/python3.10/site-packages/streamlit/web/bootstrap.py", line 43, in signal_handler
+    server.stop()
+  File "/home/elsner/.local/lib/python3.10/site-packages/streamlit/web/server/server.py", line 534, in stop
+    cli_util.print_to_cli("  Stopping...", fg="blue")
+  File "/home/elsner/.local/lib/python3.10/site-packages/streamlit/cli_util.py", line 34, in print_to_cli
+    click.secho(message, **kwargs)
+  File "/home/elsner/.local/lib/python3.10/site-packages/click/termui.py", line 634, in secho
+    return echo(message, file=file, nl=nl, err=err, color=color)
+  File "/home/elsner/.local/lib/python3.10/site-packages/click/utils.py", line 319, in echo
+    file.flush()
+BrokenPipeError: [Errno 32] Broken pipe
+2026-05-05 16:44:00,162 | ERROR | asyncio | Exception in callback Loop._read_from_self
+handle: <Handle Loop._read_from_self>
+Traceback (most recent call last):
+  File "uvloop/cbhandles.pyx", line 66, in uvloop.loop.Handle._run
+  File "uvloop/loop.pyx", line 399, in uvloop.loop.Loop._read_from_self
+  File "uvloop/loop.pyx", line 404, in uvloop.loop.Loop._invoke_signals
+  File "uvloop/loop.pyx", line 379, in uvloop.loop.Loop._ceval_process_signals
+  File "/home/elsner/.local/lib/python3.10/site-packages/streamlit/web/bootstrap.py", line 43, in signal_handler
+    server.stop()
+  File "/home/elsner/.local/lib/python3.10/site-packages/streamlit/web/server/server.py", line 534, in stop
+    cli_util.print_to_cli("  Stopping...", fg="blue")
+  File "/home/elsner/.local/lib/python3.10/site-packages/streamlit/cli_util.py", line 34, in print_to_cli
+    click.secho(message, **kwargs)
+  File "/home/elsner/.local/lib/python3.10/site-packages/click/termui.py", line 634, in secho
+    return echo(message, file=file, nl=nl, err=err, color=color)
+  File "/home/elsner/.local/lib/python3.10/site-packages/click/utils.py", line 319, in echo
+    file.flush()
+BrokenPipeError: [Errno 32] Broken pipe

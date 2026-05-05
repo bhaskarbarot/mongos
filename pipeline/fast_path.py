@@ -84,12 +84,20 @@ def _extract_month_year(text: str) -> Optional[Tuple[int, int]]:
 
 def _parse_time_condition(text: str) -> Optional[Dict[str, str]]:
     """
-    Extract a SQL WHERE clause fragment + human label for time expressions.
-    Returns dict with 'condition', 'label', optionally 'use_doc_date'.
+    Extract a SQL WHERE clause fragment + human label for ANY time expression.
+    Covers:
+      • Exact month+year         "april 2026", "december 2025"
+      • Last/previous year month "last year december", "previous year march"
+      • Last/this period         "last month", "this year", "last quarter"
+      • Last N units             "last 3 months", "past 2 years"
+      • Plain year               "2025", "2026"
+      • Date range               "between Jan 2025 and Mar 2025"
+    Returns dict with 'condition', 'label', optionally 'use_doc_date'; or None.
     """
+    import time as _time
     t = normalize_text(text)
 
-    # "between Month YYYY and Month YYYY / now / today"
+    # ── "between Month YYYY and Month YYYY / now / today" ─────────────────────
     bet = re.search(
         r"between\s+(\w+\s+\d{4}|\d{4}-\d{2}-\d{2})\s+(?:to|and)\s+"
         r"(\w+\s*\d{0,4}|now|today)",
@@ -110,7 +118,7 @@ def _parse_time_condition(text: str) -> Optional[Dict[str, str]]:
             "use_doc_date": True,
         }
 
-    # "last/past N months/days/weeks/years"
+    # ── "last/past N months/days/weeks/years" ─────────────────────────────────
     m = re.search(r"(?:last|past)\s+(\d+)\s+(month|day|week|year)s?", t)
     if m:
         n, unit = m.group(1), m.group(2)
@@ -119,23 +127,81 @@ def _parse_time_condition(text: str) -> Optional[Dict[str, str]]:
             "label":     f"last {n} {unit}s",
         }
 
-    # Named periods
+    # ── "last year <month>" / "previous year <month>" ─────────────────────────
+    # Must check BEFORE "last year" alone so we get the specific month.
+    _PREV_YEAR_PREFIX = r"(?:last\s+year|previous\s+year|prev\s+year|year\s+before)"
+    _MONTH_NAMES = (
+        r"(january|february|march|april|may|june|july|august|september|"
+        r"october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)"
+    )
+    # "<month> of last year" or "last year <month>"
+    prev_month_m = re.search(
+        rf"(?:{_PREV_YEAR_PREFIX}\s+{_MONTH_NAMES}"
+        rf"|{_MONTH_NAMES}\s+(?:of\s+)?{_PREV_YEAR_PREFIX})",
+        t, re.I,
+    )
+    if prev_month_m:
+        month_str = (prev_month_m.group(1) or prev_month_m.group(2)).lower()
+        # resolve month number
+        month_map = {
+            "january":1,"jan":1,"february":2,"feb":2,"march":3,"mar":3,
+            "april":4,"apr":4,"may":5,"june":6,"jun":6,"july":7,"jul":7,
+            "august":8,"aug":8,"september":9,"sep":9,"october":10,"oct":10,
+            "november":11,"nov":11,"december":12,"dec":12,
+        }
+        month_num = month_map.get(month_str)
+        if month_num:
+            last_year = _time.gmtime().tm_year - 1
+            ms        = f"{last_year:04d}-{month_num:02d}-01"
+            label     = f"{calendar.month_name[month_num]} {last_year}"
+            return {
+                "condition": f"date_trunc('month', updated_at) = DATE '{ms}'",
+                "label":     label,
+            }
+
+    # ── "this year <month>" / "<month> of this year" ──────────────────────────
+    curr_month_m = re.search(
+        rf"(?:this\s+year\s+{_MONTH_NAMES}|{_MONTH_NAMES}\s+(?:of\s+)?this\s+year)",
+        t, re.I,
+    )
+    if curr_month_m:
+        month_str = (curr_month_m.group(1) or curr_month_m.group(2)).lower()
+        month_map = {
+            "january":1,"jan":1,"february":2,"feb":2,"march":3,"mar":3,
+            "april":4,"apr":4,"may":5,"june":6,"jun":6,"july":7,"jul":7,
+            "august":8,"aug":8,"september":9,"sep":9,"october":10,"oct":10,
+            "november":11,"nov":11,"december":12,"dec":12,
+        }
+        month_num = month_map.get(month_str)
+        if month_num:
+            curr_year = _time.gmtime().tm_year
+            ms        = f"{curr_year:04d}-{month_num:02d}-01"
+            label     = f"{calendar.month_name[month_num]} {curr_year}"
+            return {
+                "condition": f"date_trunc('month', updated_at) = DATE '{ms}'",
+                "label":     label,
+            }
+
+    # ── Named periods (order matters — check combined before single) ───────────
     for keyword, cond, label in [
-        ("last month",   "date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month')", "last month"),
-        ("this month",   "date_trunc('month', updated_at) = date_trunc('month', NOW())",                       "this month"),
-        ("last quarter", "date_trunc('quarter', updated_at) = date_trunc('quarter', NOW() - INTERVAL '3 months')", "last quarter"),
-        ("this quarter", "date_trunc('quarter', updated_at) = date_trunc('quarter', NOW())",                    "this quarter"),
-        ("last year",    "date_trunc('year', updated_at) = date_trunc('year', NOW() - INTERVAL '1 year')",      "last year"),
-        ("this year",    "date_trunc('year', updated_at) = date_trunc('year', NOW())",                          "this year"),
-        ("last week",    "date_trunc('week', updated_at) = date_trunc('week', NOW() - INTERVAL '1 week')",      "last week"),
-        ("this week",    "date_trunc('week', updated_at) = date_trunc('week', NOW())",                          "this week"),
-        ("yesterday",    "date_trunc('day', updated_at) = date_trunc('day', NOW() - INTERVAL '1 day')",         "yesterday"),
-        ("today",        "date_trunc('day', updated_at) = date_trunc('day', NOW())",                            "today"),
+        ("last month",    "date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month')",    "last month"),
+        ("this month",    "date_trunc('month', updated_at) = date_trunc('month', NOW())",                          "this month"),
+        ("last quarter",  "date_trunc('quarter', updated_at) = date_trunc('quarter', NOW() - INTERVAL '3 months')","last quarter"),
+        ("this quarter",  "date_trunc('quarter', updated_at) = date_trunc('quarter', NOW())",                      "this quarter"),
+        ("previous year", "date_trunc('year', updated_at) = date_trunc('year', NOW() - INTERVAL '1 year')",        "last year"),
+        ("prev year",     "date_trunc('year', updated_at) = date_trunc('year', NOW() - INTERVAL '1 year')",        "last year"),
+        ("last year",     "date_trunc('year', updated_at) = date_trunc('year', NOW() - INTERVAL '1 year')",        "last year"),
+        ("year before",   "date_trunc('year', updated_at) = date_trunc('year', NOW() - INTERVAL '1 year')",        "last year"),
+        ("this year",     "date_trunc('year', updated_at) = date_trunc('year', NOW())",                            "this year"),
+        ("last week",     "date_trunc('week', updated_at) = date_trunc('week', NOW() - INTERVAL '1 week')",        "last week"),
+        ("this week",     "date_trunc('week', updated_at) = date_trunc('week', NOW())",                            "this week"),
+        ("yesterday",     "date_trunc('day', updated_at) = date_trunc('day', NOW() - INTERVAL '1 day')",           "yesterday"),
+        ("today",         "date_trunc('day', updated_at) = date_trunc('day', NOW())",                              "today"),
     ]:
         if keyword in t:
             return {"condition": cond, "label": label}
 
-    # "Month YYYY"
+    # ── "Month YYYY" (explicit month + year) ──────────────────────────────────
     month_year = _extract_month_year(t)
     if month_year:
         month, year = month_year
@@ -145,7 +211,7 @@ def _parse_time_condition(text: str) -> Optional[Dict[str, str]]:
             "label":     f"{calendar.month_name[month]} {year}",
         }
 
-    # Plain year
+    # ── Plain 4-digit year ────────────────────────────────────────────────────
     y = re.search(r"\b(20\d{2})\b", t)
     if y:
         return {
@@ -253,8 +319,33 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
 
     fields        = get_document_fields(agent, table)
     coalesce_expr = build_revenue_coalesce(fields)
-    where         = f"WHERE {time_cond['condition']}" if time_cond else ""
-    label         = time_cond["label"] if time_cond else "all time"
+
+    # ── Use the document's own date field, NOT updated_at ────────────────────
+    # updated_at = sync timestamp (all rows share the same date → wrong filter)
+    # We must filter on the actual business date stored in the JSONB document.
+    _DATE_FIELD_PRIORITY = [
+        "invoice_date", "sales_date", "due_date", "closeDate",
+        "close_date", "createdAt", "date", "order_date",
+    ]
+    fl = {f.lower(): f for f in fields}
+    doc_date_field = next(
+        (fl[d] for d in _DATE_FIELD_PRIORITY if d in fl), None
+    )
+    # Fallback: any field with 'date' in the name
+    if not doc_date_field:
+        doc_date_field = next((f for f in fields if "date" in f.lower()), None)
+
+    if time_cond and doc_date_field:
+        # Replace updated_at with NULLIF(document->>'field','')::timestamptz
+        doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+        date_condition = time_cond["condition"].replace("updated_at", doc_date_expr)
+        where = f"WHERE {date_condition}"
+    elif time_cond:
+        where = f"WHERE {time_cond['condition']}"
+    else:
+        where = ""
+
+    label = time_cond["label"] if time_cond else "all time"
 
     total_sql = f'SELECT COALESCE(SUM({coalesce_expr}), 0) AS total FROM "{table}" {where}'.strip()
     rows      = run_sql(agent, total_sql)
@@ -264,12 +355,13 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
 
     # Monthly breakdown when a range label is present
     range_label = label if time_cond else ""
-    if any(x in range_label for x in ["month", "quarter", "year"]):
-        b_sql = f"""SELECT to_char(date_trunc('month', updated_at), 'Mon YYYY'),
+    if any(x in range_label for x in ["month", "quarter", "year"]) and doc_date_field:
+        doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+        b_sql = f"""SELECT to_char(date_trunc('month', {doc_date_expr}), 'Mon YYYY'),
   COALESCE(SUM({coalesce_expr}), 0)
 FROM "{table}" {where}
-GROUP BY date_trunc('month', updated_at)
-ORDER BY date_trunc('month', updated_at)""".strip()
+GROUP BY date_trunc('month', {doc_date_expr})
+ORDER BY date_trunc('month', {doc_date_expr})""".strip()
         try:
             b_rows = run_sql(agent, b_sql)
             if b_rows:
@@ -1005,9 +1097,8 @@ def _fp_quarterly(agent, user_query: str) -> Optional[Dict]:
     if not any(kw in text for kw in ["revenue", "sales", "amount", "total", "collection", "billing"]):
         return None
 
-    year_m      = re.search(r"\b(20\d{2})\b", text)
-    year_filter = f"AND date_trunc('year', updated_at) = DATE '{year_m.group(1)}-01-01'" if year_m else ""
-    year_label  = year_m.group(1) if year_m else "all time"
+    year_m     = re.search(r"\b(20\d{2})\b", text)
+    year_label = year_m.group(1) if year_m else "all time"
 
     table_names = get_table_names(agent)
     table       = find_revenue_table(table_names)
@@ -1016,14 +1107,27 @@ def _fp_quarterly(agent, user_query: str) -> Optional[Dict]:
 
     fields        = get_document_fields(agent, table)
     coalesce_expr = build_revenue_coalesce(fields)
+
+    # Use document date field — NOT updated_at (sync timestamp, not invoice date)
+    _DATE_FIELD_PRIORITY = ["invoice_date", "sales_date", "due_date", "closeDate", "close_date", "date"]
+    fl = {f.lower(): f for f in fields}
+    doc_date_field = next((fl[d] for d in _DATE_FIELD_PRIORITY if d in fl), None)
+    if not doc_date_field:
+        doc_date_field = next((f for f in fields if "date" in f.lower()), None)
+
+    date_expr   = f"NULLIF(document->>'{doc_date_field}','')::timestamptz" if doc_date_field else "updated_at"
+    year_filter = f"AND date_trunc('year', {date_expr}) = DATE '{year_m.group(1)}-01-01'" if year_m else ""
+
     sql = f"""SELECT
-  'Q' || date_part('quarter', updated_at) || ' ' || date_part('year', updated_at) AS quarter,
+  'Q' || date_part('quarter', {date_expr}) || ' ' || date_part('year', {date_expr}) AS quarter,
   COALESCE(SUM({coalesce_expr}), 0) AS revenue,
   COUNT(*)::int AS invoice_count
 FROM "{table}"
-WHERE COALESCE(document->>'deleted','false') != 'true' {year_filter}
-GROUP BY date_part('year', updated_at), date_part('quarter', updated_at)
-ORDER BY date_part('year', updated_at), date_part('quarter', updated_at)""".strip()
+WHERE COALESCE(document->>'deleted','false') != 'true'
+  AND {date_expr} IS NOT NULL
+  {year_filter}
+GROUP BY date_part('year', {date_expr}), date_part('quarter', {date_expr})
+ORDER BY date_part('year', {date_expr}), date_part('quarter', {date_expr})""".strip()
 
     rows = run_sql(agent, sql)
     if not rows:
