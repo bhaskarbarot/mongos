@@ -1,0 +1,17 @@
+no,category,query,response_summary,processing_time_ms,collections_used,sql_query,accurate_response,accuracy_pct,log_issues
+1,LEADS,Which leads have not been contacted in 7 days,"Executive Summary: No data found for this query.
+
+Result is generated from publicleads.
+The response is based on executed SQL over current database data.
+If you want, I can also provide a row-level breakdown in table format.",86.0,publicleads,"[""SELECT email, posted_data, source, firstName, lastName, lifecycleStage, _id, createdAt, leadStatus, userType, phoneNumber, description\nFROM publicleads\nWHERE lifecycleStage = 'Not Contacted' AND createdAt < NOW() - INTERVAL '7 days'""]",NO_DATA,70.0,
+2,LEADS,List new leads from this week,"Executive Summary: No data found for this query.
+
+Result is generated from publicleads.
+The response is based on executed SQL over current database data.
+If you want, I can also provide a row-level breakdown in table format.",0.3,publicleads,"[""SELECT document->>'firstName' AS firstName, document->>'lastName' AS lastName, document->>'email' AS email, document->>'lifecycleStage' AS lifecycleStage, document->>'createdAt' AS createdAt\nFROM publicleads\nWHERE document->>'createdAt' >= NOW() - INTERVAL '7 days'\nORDER BY document->>'createdAt' DESC""]",NO_DATA,70.0,
+3,LEADS,List new leads this month,"Executive Summary: No data found for this query.
+
+Result is generated from publicleads.
+The response is based on executed SQL over current database data.
+If you want, I can also provide a row-level breakdown in table format.",81.9,publicleads,"[""SELECT document->>'firstName' AS firstName, document->>'lastName' AS lastName, document->>'email' AS email, document->>'lifecycleStage' AS lifecycleStage, document->>'createdAt' AS createdAt\nFROM publicleads\nWHERE document->>'createdAt' >= NOW() - INTERVAL '7 days'\nORDER BY document->>'createdAt' DESC""]",NO_DATA,70.0,
+SUMMARY,Total queries: 3,YES=0 | NO_DATA=3 | ERROR=0,TOTAL ACCURACY: 100.0%,168.2,—,Avg confidence score: 70.0%,TOTAL,100.0,

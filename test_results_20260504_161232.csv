@@ -1,0 +1,519 @@
+no,category,query,response_summary,processing_time_ms,collections_used,sql_query,accurate_response,accuracy_pct,log_issues
+1,LEADS,Which leads have not been contacted in 7 days,"Executive Summary: No data found for this query.  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",5462.4,publicleads,"SELECT email, posted_data, source, firstName, lastName, lifecycleStage, _id, createdAt, leadStatus, userType, phoneNumber, description
+FROM publicleads
+WHERE lifecycleStage = 'Not Contacted' AND createdAt < NOW() - INTERVAL '7 days'",NO_DATA,70.0,
+2,LEADS,List new leads from this week,"Executive Summary: No data found for this query.  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2002.5,publicleads,"SELECT document->>'firstName' AS firstName, document->>'lastName' AS lastName, document->>'email' AS email, document->>'lifecycleStage' AS lifecycleStage, document->>'createdAt' AS createdAt
+FROM publicleads
+WHERE document->>'createdAt' >= NOW() - INTERVAL '7 days'
+ORDER BY document->>'createdAt' DESC",NO_DATA,70.0,
+3,LEADS,List new leads this month,"Executive Summary: No data found for this query.  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1903.2,publicleads,"SELECT document->>'firstName', document->>'lastName', document->>'email', document->>'source', document->>'lifecycleStage', document->>'createdAt'
+FROM publicleads
+WHERE document->>'createdAt' >= NOW() - INTERVAL '1 month'
+  AND document->>'lifecycleStage' = 'New'",NO_DATA,70.0,
+4,LEADS,New leads this week,"Executive Summary: No data found for this query.  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1548.0,publicleads,"SELECT document->>'firstName', document->>'lastName', document->>'email', document->>'lifecycleStage', document->>'createdAt'
+FROM publicleads
+WHERE document->>'createdAt' >= NOW() - INTERVAL '7 days'",NO_DATA,70.0,
+5,LEADS,New leads this month,"Executive Summary: Found **1** result(s):  | col_1 | | --- | | 0 |  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1598.5,publicleads,"SELECT COUNT(*) AS new_leads_this_month
+FROM publicleads
+WHERE document->>'createdAt' >= '2023-01-01' AND document->>'createdAt' < '2023-02-01'",YES,92.0,
+6,LEADS,What is the conversion rate from lead to customer,"Executive Summary: No data found for this query.  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1162.7,publicleads,"SELECT COUNT(CASE WHEN leadStatus = 'Converted' THEN 1 ELSE NULL END) / COUNT(*) * 100 AS conversion_rate
+FROM publicleads",NO_DATA,70.0,
+7,LEADS,Conversion rate from lead to customer,"Executive Summary: No data found for this query.  Result is generated from publicleads. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1266.7,publicleads,"SELECT COUNT(CASE WHEN leadStatus = 'Converted' THEN 1 ELSE NULL END) / COUNT(*) * 100 AS conversion_rate
+FROM publicleads
+WHERE lifecycleStage = 'Customer'",NO_DATA,70.0,
+8,LEADS,Which customers have not given business in 3 months,"Executive Summary: All companies have given business in the last 3 months. None are inactive.  Result is generated from companies. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",14.9,companies,"SELECT
+  c.document->>'companyName' AS company,
+  c.document->>'email' AS email,
+  c.document->>'leadStatus' AS status,
+  c.updated_at::date AS last_sync
+FROM ""companies"" c
+WHERE COALESCE(c.document->>'deleted','false') != 'true'
+  AND COALESCE(c.document->>'_id','') NOT IN (SELECT document->>'company' FROM ""invoices"" WHERE document->>'company' IS NOT NULL AND updated_at >= NOW() - INTERVAL '3 months') AND COALESCE(c.document->>'_id','') NOT IN (SELECT document->>'company' FROM ""deals"" WHERE document->>'company' IS NOT NULL AND updated_at >= NOW() - INTERVAL '3 months')
+ORDER BY c.updated_at DESC
+LIMIT 50",YES,90.0,
+9,LEADS,Who is Ketul,"Executive Summary: **Search results for 'ketul':**  **User**: Ketul Trivedi | Email: demo@weekmate.com  Result is generated from users. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.1,users,"SELECT document->>'name' AS name, document->>'email' AS email,
+  document->>'department' AS dept
+FROM ""users""
+WHERE document->>'name' ILIKE '%ketul%'
+  AND COALESCE(document->>'isActive','true') != 'false'
+LIMIT 5",YES,97.0,
+10,REVENUE,Total revenue generated in FY2025,"Executive Summary: Total revenue for **all time**: **1,949,081.86**  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",5.6,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices""",YES,97.0,
+11,REVENUE,Total revenue this financial year,"Executive Summary: Total revenue for **all time**: **1,949,081.86**  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.0,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices""",YES,97.0,
+12,REVENUE,Total revenue of last month,"Executive Summary: Total revenue for **last month**: **1,949,081.86**  **Monthly Breakdown:** | Month | Revenue | | --- | --- | | Apr 2026 | 1,949,081.86 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-leve...",8.9,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month') | SELECT to_char(date_trunc('month', updated_at), 'Mon YYYY') AS month,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS revenue
+FROM ""invoices"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month')
+GROUP BY date_trunc('month', updated_at)
+ORDER BY date_trunc('month', updated_at)",YES,97.0,
+13,REVENUE,Show me total sales for last month,"Executive Summary: Total revenue for **last month**: **1,949,081.86**  **Monthly Breakdown:** | Month | Revenue | | --- | --- | | Apr 2026 | 1,949,081.86 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-leve...",6.6,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month') | SELECT to_char(date_trunc('month', updated_at), 'Mon YYYY') AS month,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS revenue
+FROM ""invoices"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month')
+GROUP BY date_trunc('month', updated_at)
+ORDER BY date_trunc('month', updated_at)",YES,97.0,
+14,REVENUE,Total sales for last month,"Executive Summary: Total revenue for **last month**: **1,949,081.86**  **Monthly Breakdown:** | Month | Revenue | | --- | --- | | Apr 2026 | 1,949,081.86 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-leve...",6.6,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month') | SELECT to_char(date_trunc('month', updated_at), 'Mon YYYY') AS month,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS revenue
+FROM ""invoices"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW() - INTERVAL '1 month')
+GROUP BY date_trunc('month', updated_at)
+ORDER BY date_trunc('month', updated_at)",YES,97.0,
+15,REVENUE,Total collection,"Executive Summary: Total revenue for **all time**: **1,949,081.86**  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.0,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices""",YES,97.0,
+16,REVENUE,Give me last 3 months revenue,"Executive Summary: Total revenue for **last 3 months**: **1,949,081.86**  **Monthly Breakdown:** | Month | Revenue | | --- | --- | | Apr 2026 | 1,949,081.86 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-l...",7.1,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices"" WHERE updated_at >= NOW() - INTERVAL '3 months' | SELECT to_char(date_trunc('month', updated_at), 'Mon YYYY') AS month,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS revenue
+FROM ""invoices"" WHERE updated_at >= NOW() - INTERVAL '3 months'
+GROUP BY date_trunc('month', updated_at)
+ORDER BY date_trunc('month', updated_at)",YES,97.0,
+17,INVOICES,Pending invoices,"Executive Summary: No data found for this query.  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1570.5,invoices,"SELECT document->>'invoice_number', NULLIF(document->>'grand_total','')::numeric, document->>'status' 
+FROM invoices 
+WHERE document->>'status' = 'Pending' 
+ORDER BY NULLIF(document->>'grand_total','')::numeric DESC",NO_DATA,70.0,
+18,INVOICES,Overdue payments,"Executive Summary: No data found for this query.  Result is generated from payments. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",1166.6,payments,"SELECT document->>'_id', document->>'payment_date', document->>'payment_fee', document->>'status'
+FROM payments
+WHERE document->>'status' = 'Overdue'",NO_DATA,70.0,
+19,INVOICES,Overdue invoice aging and outstanding amount by company,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",32438.9,—,—,ERROR,0.0,
+20,DEALS,How many deals are there,"Executive Summary: Total **deals**: **172**  Result is generated from deals. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.8,deals,"SELECT COUNT(*)::int FROM ""deals""",YES,98.0,
+21,DEALS,Give me all deals,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,6.7,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+22,DEALS,Give me closed won deals,Executive Summary: **26 Closed Won deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | Ketul | New | Deal  | Closed Won | 135.27 | 2026-04-20T18:30:00.000Z | | Karan | Closed Won | 1 | 2026-02-16T18:30:00.000Z | | 2/jan/2026 | Closed Won | 0.01 | 2026-01-20T18:30:00.000Z | |...,5.0,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Closed Won') ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+23,DEALS,Closed won deals,Executive Summary: **26 Closed Won deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | Ketul | New | Deal  | Closed Won | 135.27 | 2026-04-20T18:30:00.000Z | | Karan | Closed Won | 1 | 2026-02-16T18:30:00.000Z | | 2/jan/2026 | Closed Won | 0.01 | 2026-01-20T18:30:00.000Z | |...,4.6,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Closed Won') ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+24,DEALS,Which deals are stuck in the proposal stage,Executive Summary: **21 Quotation Sent deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | Cloud Infrastructure Setup - Energy Solutions | Quotation Sent | 4 | 2025-09-04T03:16:35.828Z | | API Integration Project - Botsford and Sons Services | Quotation Sent | 2410.06 | 2025...,4.6,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Quotation Sent') ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+25,DEALS,Opportunities lost in July,"Executive Summary: No **Closed Lost** deals found.  Result is generated from deals. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.2,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Closed Lost') AND (date_trunc('month', NULLIF(document->>'closeDate','')::timestamptz) = DATE '2026-07-01') ORDER BY updated_at DESC LIMIT 50",YES,90.0,
+26,DEALS,Lost deals last quarter,"Executive Summary: No **Closed Lost** deals found.  Result is generated from deals. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.8,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Closed Lost') AND (date_trunc('quarter', NULLIF(document->>'closeDate','')::timestamptz) = date_trunc('quarter', NOW() - INTERVAL '3 months')) ORDER BY updated_at DESC LIMIT 50",YES,90.0,
+27,DEALS,Sales pipeline by stage,"Executive Summary: **Deals** by stage:  | Stage | Revenue | | --- | --- | | Analysis - To be Quoted | 5,095,353.00 | | Negotiation | 141,119.00 | | Closed Lost | 65,036.00 | | Contract Under Review | 52,954.00 | | Quotation Sent | 44,817.00 | | Closed Won | 39,719.00 | | On Hold | 32,886.00 |  Resul...",5.3,deals,"SELECT COALESCE(document->>'stage', 'Unknown') AS stage,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grand_total_in_usd','')::numeric, 0)), 0) AS total
+FROM ""deals"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+28,DEALS,Pipeline distribution by stage,Executive Summary: **Deals** by stage:  | Stage | Count | | --- | --- | | Analysis - To be Quoted | 36 | | Closed Lost | 32 | | Closed Won | 26 | | On Hold | 22 | | Quotation Sent | 21 | | Negotiation | 20 | | Contract Under Review | 15 |  Result is generated from deals. The response is based on exe...,4.8,deals,"SELECT COALESCE(document->>'stage', 'Unknown') AS stage,
+  COUNT(*)::int AS count
+FROM ""deals"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+29,ANALYTICS,Top 10 customers by revenue,"Executive Summary: **Top 10 customers by revenue:**  | # | Customer | Revenue | Invoices | | --- | --- | --- | --- | | 1 | Automation Systemsaaa | 642,000.00 | 1 | | 2 | testing account by ketullll | 440,554.97 | 24 | | 3 | New Company Testing | 214,200.00 | 3 | | 4 | Digital Transformation | 79,176...",6.7,"invoices, companies","SELECT
+  COALESCE(c.document->>'companyName', c.document->>'name', i.document->>'company', 'Unknown') AS customer,
+  SUM(COALESCE(NULLIF(i.document->>'grand_total','')::numeric,NULLIF(i.document->>'grandtotal_in_usd','')::numeric,0)) AS total_revenue,
+  COUNT(*)::int AS invoice_count
+FROM ""invoices"" i
+LEFT JOIN ""companies"" c ON c.document->>'_id' = i.document->>'company'
+WHERE (COALESCE(i.document->>'deleted','false') != 'true')
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10",YES,97.0,
+30,ANALYTICS,Show me the top 10 customers by revenue,"Executive Summary: **Top 10 customers by revenue:**  | # | Customer | Revenue | Invoices | | --- | --- | --- | --- | | 1 | Automation Systemsaaa | 642,000.00 | 1 | | 2 | testing account by ketullll | 440,554.97 | 24 | | 3 | New Company Testing | 214,200.00 | 3 | | 4 | Digital Transformation | 79,176...",6.5,"invoices, companies","SELECT
+  COALESCE(c.document->>'companyName', c.document->>'name', i.document->>'company', 'Unknown') AS customer,
+  SUM(COALESCE(NULLIF(i.document->>'grand_total','')::numeric,NULLIF(i.document->>'grandtotal_in_usd','')::numeric,0)) AS total_revenue,
+  COUNT(*)::int AS invoice_count
+FROM ""invoices"" i
+LEFT JOIN ""companies"" c ON c.document->>'_id' = i.document->>'company'
+WHERE (COALESCE(i.document->>'deleted','false') != 'true')
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10",YES,97.0,
+31,ANALYTICS,Which sales rep closed the most deals this quarter,"Executive Summary: **Quarterly Revenue — all time:**  | Quarter | Revenue | Invoices | | --- | --- | --- | | Q2 2026 | 1,949,081.86 | 167 | | **TOTAL** | **1,949,081.86** | |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also...",5.6,invoices,"SELECT
+  'Q' || date_part('quarter', updated_at) || ' ' || date_part('year', updated_at) AS quarter,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS revenue,
+  COUNT(*)::int AS invoice_count
+FROM ""invoices""
+WHERE COALESCE(document->>'deleted','false') != 'true'
+
+GROUP BY date_part('year', updated_at), date_part('quarter', updated_at)
+ORDER BY date_part('year', updated_at), date_part('quarter', updated_at)",YES,97.0,
+32,ANALYTICS,Top performing sales owners in last 6 months with monthly trend,"Executive Summary: **Sales** by salesOwner (last 6 months):  | Salesowner | Revenue | | --- | --- | | 683d42063652aae35dec7f9c | 245,751.20 | | 683fd7aedcbb6d28891ae370 | 188,832.90 | | 683d94c4dcbb6d28891adba9 | 133,966.12 | | 683d563bdcbb6d28891ad99e | 106,426.72 | | 684009dfc8a83f8ec6c28797 | 50,...",5.5,sales,"SELECT COALESCE(document->>'salesOwner', 'Unknown') AS salesOwner,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grand_total_in_usd','')::numeric, 0)), 0) AS total
+FROM ""sales"" WHERE updated_at >= NOW() - INTERVAL '6 months'
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+33,ANALYTICS,Funnel performance and conversion to closed won by owner,Executive Summary: **Target vs Achieved — all time:**  | User | Team | Period | Target (USD) | Achieved (USD) | Achievement % | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi | Sales Team | Month 1/2026 | 500 | 0.01 | 0.0% | | Rohan Pandey | Account | Month 1/2026 | 500 | 0 | 0.0% | | Kartik ...,25.1,"targets, users, sales","SELECT
+  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
+  t.document->>'teamName' AS team,
+  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
+  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) AS achieved_usd,
+  CASE
+    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
+    THEN ROUND(
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    ELSE 0
+  END AS achievement_pct
+FROM ""targets"" t
+LEFT JOIN ""users"" u ON u.document->>'_id' = t.document->>'userId'
+WHERE 1=1
+  
+  
+ORDER BY NULLIF(t.document->>'year','')::int DESC,
+         NULLIF(t.document->>'month','')::int DESC,
+         user_name",YES,97.0,
+34,ANALYTICS,Best product and project type combinations by value avg deal size and win rate,Executive Summary: **Deals** by type:  | Type | Count | | --- | --- | | Unknown | 29 | | Cross-sell | 27 | | Upsell | 22 | | Existing Client | 17 | | New Business | 17 | | Consulting | 16 | | Development | 16 | | Renewal | 14 | | Support | 14 |  Result is generated from deals. The response is based ...,4.8,deals,"SELECT COALESCE(document->>'type', 'Unknown') AS type,
+  COUNT(*)::int AS count
+FROM ""deals"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+35,ANALYTICS,High activity companies with weak payment conversion,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",38010.8,—,—,ERROR,0.0,
+36,TASKS,What tasks are pending,Executive Summary: **65 pending tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,5.4,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+37,TASKS,Pending tasks,Executive Summary: **65 pending tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,4.5,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+38,TASKS,What tasks are pending for the sales team,Executive Summary: **65 pending tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,4.5,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+39,TASKS,What tasks are pending for the users,Executive Summary: **65 pending tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,4.4,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+40,TASKS,Any follow-ups overdue this week,"Executive Summary: No overdue tasks found.  Result is generated from createtasks. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.5,createtasks,"SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (NULLIF(document->>'due_date', '')::timestamptz < NOW()) AND (COALESCE(document->>'status', '') != 'Completed') AND (date_trunc('week', updated_at) = date_trunc('week', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+41,CONTACTS,Last 5 contacts details,"Executive Summary: Found **5** result(s):  | col_1 | | --- | | — | |  | | — | |  | |  |  Result is generated from contacts. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",5784.1,contacts,"SELECT document->>'email', document->>'firstName', document->>'lastName', document->>'lifecycleStage', document->>'contactLinkedIn' FROM contacts ORDER BY document->>'createdAt' DESC LIMIT 5",YES,92.0,
+42,ORG,How many departments,"Executive Summary: Total **departments**: **4**  Result is generated from departments. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2.9,departments,"SELECT COUNT(*)::int FROM ""departments""",YES,98.0,
+43,CRM_GENERAL,Get details for this company Startup Accelerator,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",23201.8,—,—,ERROR,0.0,
+44,CRM_GENERAL,Get details for this contact Creola,Executive Summary: **20 contacts**:  | Name | Ref | Status | Date | Email | | --- | --- | --- | --- | --- | | Pankaj | 9662852648 | New | 2026-04-22T09:26:16.511Z | pankaj@elsner.com | | Ketul |  |  | 2026-04-16T05:36:09.553Z | 16april@mailinator.com | | ketul2 | — | — | 2026-04-09T12:22:16.408Z | k...,6.1,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+45,CRM_GENERAL,"Get details for this deal Compliance Audit Services - Hansen, Kutch and Swift Solutions",Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,5.4,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+46,CRM_GENERAL,Get details for this invoice ELSN/2025/4,"Executive Summary: **Invoice ELSN/2025/4 Details:**  - **Invoice #**: ELSN/2025/4 - **Total**: 6099.49 - **Currency**: XCD - **Status**: confirmed - **Invoice Date**: 2025-06-24T12:10:23.742Z - **Due Date**: 2025-08-29T12:10:23.742Z - **Tax**: {""total"":656.01,""rate"":12,""name"":""GST""} - **Subtotal**: ...",5.1,"invoices, companies, users","SELECT
+  i.document->>'invoice_number' AS invoice_number,
+  i.document->>'grand_total' AS total,
+  i.document->>'currency' AS currency,
+  i.document->>'payment_status' AS status,
+  i.document->>'invoice_date' AS invoice_date,
+  i.document->>'due_date' AS due_date,
+  i.document->>'tax_amount' AS tax,
+  i.document->>'subtotal' AS subtotal,
+  i.document->>'payment_history' AS payments
+  , COALESCE(co.document->>'companyName', i.document->>'company') AS company_name, u.document->>'name' AS created_by
+FROM ""invoices"" i
+LEFT JOIN ""companies"" co ON co.document->>'_id' = i.document->>'company'
+LEFT JOIN ""users"" u ON u.document->>'_id' = i.document->>'createdBy'
+WHERE i.document->>'invoice_number' ILIKE 'ELSN/2025/4'
+LIMIT 1",YES,99.0,
+47,CRM_LINKED,Get tasks linked to this company Startup Accelerator,Executive Summary: **68 tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder – Friend...,5.8,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+48,CRM_LINKED,Get contacts linked to this company Startup Accelerator,Executive Summary: **20 contacts**:  | Name | Ref | Status | Date | Email | | --- | --- | --- | --- | --- | | Pankaj | 9662852648 | New | 2026-04-22T09:26:16.511Z | pankaj@elsner.com | | Ketul |  |  | 2026-04-16T05:36:09.553Z | 16april@mailinator.com | | ketul2 | — | — | 2026-04-09T12:22:16.408Z | k...,3.4,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+49,CRM_LINKED,Get deals linked to this company Startup Accelerator,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,4.7,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+50,CRM_LINKED,Get invoices linked to this company Startup Accelerator,Executive Summary: **20 invoices**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | ELSN/2026/063 | confirmed | 10000 | 2026-04-20T00:00:00.000Z | | — | ELSN/2026/062 | paid | 2000 | 2026-04-16T00:00:00.000Z | | — | ELSN/2026/061 | paid | 25 | 2026-04-09T00:00:00.000Z ...,7.3,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+51,MEETINGS,Get meetings for today,"Executive Summary: No **meetings** records found.  Result is generated from meetings. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2.9,meetings,"SELECT document->>'title' AS name, document->>'start' AS date FROM ""meetings"" WHERE (date_trunc('day', updated_at) = date_trunc('day', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+52,MEETINGS,Get upcoming meetings for this user Ketul Trivedi,"Executive Summary: **1 meetings**:  | Name | Date | | --- | --- | | Client Call | 2025-08-20T04:30:00.000Z |  Result is generated from meetings. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2.9,meetings,"SELECT document->>'title' AS name, document->>'start' AS date FROM ""meetings""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+53,MEETINGS,Get all open tasks for this user Ketul Trivedi,Executive Summary: **65 pending tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,5.2,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+54,MEETINGS,Get tasks due this week,"Executive Summary: No tasks found.  Result is generated from createtasks. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",5.8,createtasks,"SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (date_trunc('week', updated_at) = date_trunc('week', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+55,CRM_DEALS,Get deals in this stage Analysis - To be Quoted,Executive Summary: **36 Analysis - To be Quoted deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | Test2 | Ketul |Deal | Analysis - To be Quoted | 100 | 2026-04-29T18:30:00.000Z | | Test 1 | Ketul | Deal | Analysis - To be Quoted | 215.66 | 2026-04-29T18:30:00.000Z | | New ...,4.9,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Analysis - To be Quoted') ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+56,CRM_DEALS,Get deals closing this month,"Executive Summary: No **deals** records found.  Result is generated from deals. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2.8,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals"" WHERE (date_trunc('month', updated_at) = date_trunc('month', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+57,CRM_DEALS,Get deals owned by this user Ketul Trivedi,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,6.7,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+58,CRM_INVOICES,Get invoices due this week,"Executive Summary: No **invoices** records found.  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.3,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices"" WHERE (date_trunc('week', updated_at) = date_trunc('week', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+59,CRM_INVOICES,Get invoices with status Unpaid,"Executive Summary: **Invoices** by payment_status:  | Payment_Status | Count | | --- | --- | | confirmed | 47 | | draft | 34 | | paid | 34 | | cancelled | 32 | | partial_payment | 20 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, ...",4.9,invoices,"SELECT COALESCE(document->>'payment_status', 'Unknown') AS payment_status,
+  COUNT(*)::int AS count
+FROM ""invoices"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+60,CRM_INVOICES,Get invoices with status Paid,"Executive Summary: **Invoices** by payment_status:  | Payment_Status | Count | | --- | --- | | confirmed | 47 | | draft | 34 | | paid | 34 | | cancelled | 32 | | partial_payment | 20 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, ...",5.2,invoices,"SELECT COALESCE(document->>'payment_status', 'Unknown') AS payment_status,
+  COUNT(*)::int AS count
+FROM ""invoices"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+61,CRM_INVOICES,Get invoices with status Partial,"Executive Summary: **Invoices** by payment_status:  | Payment_Status | Count | | --- | --- | | confirmed | 47 | | draft | 34 | | paid | 34 | | cancelled | 32 | | partial_payment | 20 |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, ...",3.7,invoices,"SELECT COALESCE(document->>'payment_status', 'Unknown') AS payment_status,
+  COUNT(*)::int AS count
+FROM ""invoices"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+62,SALES_ORDERS,Get confirmed sales orders,Executive Summary: **20 sales**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | SO01251 | Draft | 100 | 2026-04-21T12:45:22.908Z | | — | SO01250 | Draft | 100 | 2026-04-21T12:39:59.115Z | |  | SO01249 | Draft | 1000 | 2026-04-20T07:08:17.671Z | |  | SO01248 | Draft | ...,4.8,sales,"SELECT document->>'tax_name' AS name, document->>'sales_number' AS ref, document->>'status' AS status, document->>'grand_total' AS amount, document->>'sales_date' AS date FROM ""sales""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+63,SALES_ORDERS,Get cancelled sales orders,Executive Summary: **20 sales**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | SO01251 | Draft | 100 | 2026-04-21T12:45:22.908Z | | — | SO01250 | Draft | 100 | 2026-04-21T12:39:59.115Z | |  | SO01249 | Draft | 1000 | 2026-04-20T07:08:17.671Z | |  | SO01248 | Draft | ...,5.9,sales,"SELECT document->>'tax_name' AS name, document->>'sales_number' AS ref, document->>'status' AS status, document->>'grand_total' AS amount, document->>'sales_date' AS date FROM ""sales""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+64,SALES_ORDERS,Get draft sales orders,Executive Summary: **20 sales**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | SO01251 | Draft | 100 | 2026-04-21T12:45:22.908Z | | — | SO01250 | Draft | 100 | 2026-04-21T12:39:59.115Z | |  | SO01249 | Draft | 1000 | 2026-04-20T07:08:17.671Z | |  | SO01248 | Draft | ...,4.4,sales,"SELECT document->>'tax_name' AS name, document->>'sales_number' AS ref, document->>'status' AS status, document->>'grand_total' AS amount, document->>'sales_date' AS date FROM ""sales""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+65,SALES_ORDERS,Get sales orders owned by Ketul Trivedi,Executive Summary: **20 sales**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | SO01251 | Draft | 100 | 2026-04-21T12:45:22.908Z | | — | SO01250 | Draft | 100 | 2026-04-21T12:39:59.115Z | |  | SO01249 | Draft | 1000 | 2026-04-20T07:08:17.671Z | |  | SO01248 | Draft | ...,5.4,sales,"SELECT document->>'tax_name' AS name, document->>'sales_number' AS ref, document->>'status' AS status, document->>'grand_total' AS amount, document->>'sales_date' AS date FROM ""sales""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+66,SALES_ORDERS,Get sales orders between 2025-01-01 and 2025-12-31,"Executive Summary: No **sales** records found.  Result is generated from sales. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.5,sales,"SELECT document->>'tax_name' AS name, document->>'sales_number' AS ref, document->>'status' AS status, document->>'grand_total' AS amount, document->>'sales_date' AS date FROM ""sales"" WHERE (NULLIF(document->>'sales_date','')::timestamptz BETWEEN DATE '2025-01-01' AND 2025) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+67,SALES_ORDERS,Get sales orders between amount 1000 and 50000,"Executive Summary: No **sales** records found.  Result is generated from sales. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.3,sales,"SELECT document->>'tax_name' AS name, document->>'sales_number' AS ref, document->>'status' AS status, document->>'grand_total' AS amount, document->>'sales_date' AS date FROM ""sales"" WHERE (NULLIF(document->>'sales_date','')::timestamptz BETWEEN DATE 'amount 1000' AND 50000) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+68,FILTERS,Get companies by region USA,Executive Summary: **Companies** by region:  | Region | Count | | --- | --- | | 67b7284d1c7f0a1c60a0f4bf | 45 | | Unknown | 38 | | 67b728481c7f0a1c60a0f4bc | 29 | | 67b728531c7f0a1c60a0f4c2 | 28 |  Result is generated from companies. The response is based on executed SQL over current database data. ...,3.9,companies,"SELECT COALESCE(document->>'region', 'Unknown') AS region,
+  COUNT(*)::int AS count
+FROM ""companies"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+69,FILTERS,Get contacts by job title Manager,Executive Summary: **20 contacts**:  | Name | Ref | Status | Date | Email | | --- | --- | --- | --- | --- | | Pankaj | 9662852648 | New | 2026-04-22T09:26:16.511Z | pankaj@elsner.com | | Ketul |  |  | 2026-04-16T05:36:09.553Z | 16april@mailinator.com | | ketul2 | — | — | 2026-04-09T12:22:16.408Z | k...,3.8,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+70,FILTERS,Get contacts created this month,"Executive Summary: No **contacts** records found.  Result is generated from contacts. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.0,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts"" WHERE (date_trunc('month', updated_at) = date_trunc('month', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+71,REPORTS,Get pipeline summary for last month,"Executive Summary: No data found for this query.  Result is generated from activities. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",6649.4,activities,"SELECT 
+    document->>'_id' AS id,
+    document->>'name' AS name,
+    document->>'createdAt' AS createdAt,
+    document->>'updatedAt' AS updatedAt,
+    document->>'__v' AS __v
+FROM 
+    activities
+WHERE 
+    document->>'createdAt' >= NOW() - INTERVAL '1 month'
+ORDER BY 
+    document->>'createdAt' DESC",NO_DATA,70.0,
+72,REPORTS,Get leads by source for this month,"Executive Summary: No data found in **sources** grouped by sourceName.  Result is generated from sources. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.6,sources,"SELECT COALESCE(document->>'sourceName', 'Unknown') AS sourceName,
+  COUNT(*)::int AS count
+FROM ""sources"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW())
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",NO_DATA,70.0,
+73,REPORTS,Get deals by stage for this month,"Executive Summary: No data found in **deals** grouped by stage.  Result is generated from deals. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2.9,deals,"SELECT COALESCE(document->>'stage', 'Unknown') AS stage,
+  COUNT(*)::int AS count
+FROM ""deals"" WHERE date_trunc('month', updated_at) = date_trunc('month', NOW())
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",NO_DATA,70.0,
+74,REPORTS,Get revenue summary for last quarter,"Executive Summary: **Quarterly Revenue — all time:**  | Quarter | Revenue | Invoices | | --- | --- | --- | | Q2 2026 | 1,949,081.86 | 167 | | **TOTAL** | **1,949,081.86** | |  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also...",5.0,invoices,"SELECT
+  'Q' || date_part('quarter', updated_at) || ' ' || date_part('year', updated_at) AS quarter,
+  COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS revenue,
+  COUNT(*)::int AS invoice_count
+FROM ""invoices""
+WHERE COALESCE(document->>'deleted','false') != 'true'
+
+GROUP BY date_part('year', updated_at), date_part('quarter', updated_at)
+ORDER BY date_part('year', updated_at), date_part('quarter', updated_at)",YES,97.0,
+75,REPORTS,Get regional performance for this year,"Executive Summary: No target data found for all time.  Result is generated from targets, users. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.7,"targets, users","SELECT
+  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
+  t.document->>'teamName' AS team,
+  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
+  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) AS achieved_usd,
+  CASE
+    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
+    THEN ROUND(
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    ELSE 0
+  END AS achievement_pct
+FROM ""targets"" t
+LEFT JOIN ""users"" u ON u.document->>'_id' = t.document->>'userId'
+WHERE 1=1
+  
+  AND u.document->>'name' ILIKE '%this year%'
+ORDER BY NULLIF(t.document->>'year','')::int DESC,
+         NULLIF(t.document->>'month','')::int DESC,
+         user_name",YES,90.0,
+76,REPORTS,Get top products for last 6 months,Executive Summary: **6 products** (last 6 months):  | Name | Date | | --- | --- | | iiooss | 2025-12-18T11:05:21.962Z | | Yash-PC | 2025-06-02T06:43:04.489Z | | Maitry Rathod-PHP | 2025-06-02T06:38:29.342Z | | Salesforce Support Package | 2025-05-30T05:37:47.316Z | | ESO Content Management | 2025-05...,5.7,products,"SELECT document->>'name' AS name, document->>'updatedAt' AS date FROM ""products"" WHERE (updated_at >= NOW() - INTERVAL '6 months') ORDER BY updated_at DESC LIMIT 6",YES,95.0,
+77,REPORTS,Get lost leads and reasons for last month,"Executive Summary: No data found for this query.  Result is generated from deletedcompanies. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",7548.3,deletedcompanies,"SELECT 
+    leadLostAt,
+    reason
+FROM 
+    deletedcompanies
+WHERE 
+    leadLostAt >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month'",NO_DATA,70.0,
+78,TARGETS,Get target vs achieved for all users,Executive Summary: **Target vs Achieved — all time:**  | User | Team | Period | Target (USD) | Achieved (USD) | Achievement % | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi | Sales Team | Month 1/2026 | 500 | 0.01 | 0.0% | | Rohan Pandey | Account | Month 1/2026 | 500 | 0 | 0.0% | | Kartik ...,23.2,"targets, users, sales","SELECT
+  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
+  t.document->>'teamName' AS team,
+  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
+  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) AS achieved_usd,
+  CASE
+    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
+    THEN ROUND(
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    ELSE 0
+  END AS achievement_pct
+FROM ""targets"" t
+LEFT JOIN ""users"" u ON u.document->>'_id' = t.document->>'userId'
+WHERE 1=1
+  
+  
+ORDER BY NULLIF(t.document->>'year','')::int DESC,
+         NULLIF(t.document->>'month','')::int DESC,
+         user_name",YES,97.0,
+79,TARGETS,Get performance by user,Executive Summary: **Target vs Achieved — all time:**  | User | Team | Period | Target (USD) | Achieved (USD) | Achievement % | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi | Sales Team | Month 1/2026 | 500 | 0.01 | 0.0% | | Rohan Pandey | Account | Month 1/2026 | 500 | 0 | 0.0% | | Kartik ...,23.2,"targets, users, sales","SELECT
+  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
+  t.document->>'teamName' AS team,
+  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
+  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) AS achieved_usd,
+  CASE
+    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
+    THEN ROUND(
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    ELSE 0
+  END AS achievement_pct
+FROM ""targets"" t
+LEFT JOIN ""users"" u ON u.document->>'_id' = t.document->>'userId'
+WHERE 1=1
+  
+  
+ORDER BY NULLIF(t.document->>'year','')::int DESC,
+         NULLIF(t.document->>'month','')::int DESC,
+         user_name",YES,97.0,
+80,TARGETS,Get performance monthly,Executive Summary: **Target vs Achieved — all time:**  | User | Team | Period | Target (USD) | Achieved (USD) | Achievement % | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi | Sales Team | Month 1/2026 | 500 | 0.01 | 0.0% | | Rohan Pandey | Account | Month 1/2026 | 500 | 0 | 0.0% | | Kartik ...,20.8,"targets, users, sales","SELECT
+  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
+  t.document->>'teamName' AS team,
+  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
+  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) AS achieved_usd,
+  CASE
+    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
+    THEN ROUND(
+        COALESCE((
+            SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+            FROM ""sales"" s
+            WHERE s.document->>'salesOwner' = t.document->>'userId'
+              AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'month','')::numeric
+              AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+                  = NULLIF(t.document->>'year','')::numeric
+              AND COALESCE(s.document->>'deleted','false') != 'true'
+        ), 0) / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    ELSE 0
+  END AS achievement_pct
+FROM ""targets"" t
+LEFT JOIN ""users"" u ON u.document->>'_id' = t.document->>'userId'
+WHERE 1=1
+  
+  
+ORDER BY NULLIF(t.document->>'year','')::int DESC,
+         NULLIF(t.document->>'month','')::int DESC,
+         user_name",YES,97.0,
+81,TARGETS,Get performance quarterly,"Executive Summary: No data found for this query.  Result is generated from performance_data. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",6618.7,performance_data,"SELECT 
+    document->>'quarterlyPerformance' AS performance,
+    document->>'quarter' AS quarter
+FROM 
+    performance_data
+WHERE 
+    document->>'year' = '2023'
+ORDER BY 
+    document->>'quarter' ASC",NO_DATA,70.0,
+82,OUTREACH,Get interested leads for last 7 days,"Executive Summary: No outreach contacts found for the given filters.  Result is generated from outreaches. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.5,outreaches,"SELECT document->>'name' AS name, document->>'email' AS email, document->>'status' AS status, document->>'leadStatus' AS lead_status, document->>'region' AS region, document->>'priority' AS priority, document->>'interestedDate' AS interested_date
+FROM ""outreaches"" WHERE (COALESCE(document->>'isDeleted','false') != 'true') AND (NULLIF(document->>'interestedDate','')::timestamptz >= NOW() - INTERVAL '7 days') AND (document->>'interestedDate' IS NOT NULL)
+ORDER BY updated_at DESC
+LIMIT 50",YES,90.0,
+83,OUTREACH,Get unique touches and total touches,"Executive Summary: **Total outreach contacts**: **564**  Result is generated from outreaches. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.2,outreaches,"SELECT COUNT(*)::int AS total FROM ""outreaches"" WHERE (COALESCE(document->>'isDeleted','false') != 'true')",YES,97.0,
+84,OUTREACH,Get outreach contacts by region USA,"Executive Summary: No outreach contacts found for the given filters.  Result is generated from outreaches. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.3,outreaches,"SELECT document->>'name' AS name, document->>'email' AS email, document->>'status' AS status, document->>'leadStatus' AS lead_status, document->>'region' AS region, document->>'priority' AS priority, document->>'interestedDate' AS interested_date
+FROM ""outreaches"" WHERE (COALESCE(document->>'isDeleted','false') != 'true') AND ((document->>'region' ILIKE '%SA%'))
+ORDER BY updated_at DESC
+LIMIT 50",YES,90.0,
+85,SYSTEM,Get product details for JS Support Package - 40 Hours,Executive Summary: **20 products**:  | Name | Date | | --- | --- | | iiooss | 2025-12-18T11:05:21.962Z | | Yash-PC | 2025-06-02T06:43:04.489Z | | Maitry Rathod-PHP | 2025-06-02T06:38:29.342Z | | Salesforce Support Package | 2025-05-30T05:37:47.316Z | | ESO Content Management | 2025-05-08T03:06:54.18...,6.5,products,"SELECT document->>'name' AS name, document->>'updatedAt' AS date FROM ""products""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+86,SYSTEM,Get all payment methods,Executive Summary: **17 payments**:  | Name | Date | | --- | --- | | IDFC FIRST BANK Domestic | 2025-05-06T13:45:15.766Z | | MISC | — | | Bank Of America | — | | IDFC FIRST BANK International | 2025-05-06T13:37:45.228Z | | ECOMVA PTY LTD | 2025-05-07T11:03:29.436Z | | SBI Bank - HUF | — | | Correspo...,4.3,payments,"SELECT document->>'payment_name' AS name, document->>'updatedAt' AS date FROM ""payments""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+87,SYSTEM,Get all industries,Executive Summary: Found **19** result(s):  | col_1 | | --- | | — | | Entertainment | | Technology | | Finance | | Logistics & Transportation | | Government/Military | | Real Estate | | Healthcare | | Large Enterprise | | Non-profit | | Digital Marketing | | Transportation | | E-commerce & Retail | ...,35515.7,companies,"SELECT DISTINCT document->>'industry' AS industry 
+FROM companies",YES,92.0,
+88,SYSTEM,Get all technologies,Executive Summary: **20 technologies**:  | Name | | --- | | Node.js | | React | | Python | | NodeJS | | testingggg | | Test | | QA | | HTML | | Odoo | | BA | | Mobile | | Salesforce | | Server | | PIMCore | | ROR | | Native Mobile | | IOS | | PHP | | Bigcommerce | | Flutter |  Result is generated fr...,3.4,technologies,"SELECT document->>'name' AS name FROM ""technologies""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+89,SYSTEM,Get all sources,Executive Summary: **Sources** by sourceName:  | Sourcename | Count | | --- | --- | | Amsterdam IPM 2023 | 1 | | Apollo.io | 1 | | Berlin IPM 2023 | 1 | | Dubai Seamless 2025 | 1 | | ECommerce Expo leads 2024 | 1 | | Elsner.com | 1 | | Email Campaign | 1 | | Erpocean.com | 1 | | ETRetail mumbai summ...,3.5,sources,"SELECT COALESCE(document->>'sourceName', 'Unknown') AS sourceName,
+  COUNT(*)::int AS count
+FROM ""sources"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+90,ACCOUNT,Get account details for Startup Accelerator,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",36647.7,—,—,ERROR,0.0,
+91,ACCOUNT,Get account owner for Startup Accelerator,Executive Summary: **Deals** by owner:  | Owner | Count | | --- | --- | | 683d42063652aae35dec7f9c | 59 | | 683d94c4dcbb6d28891adba9 | 34 | | 683fd7aedcbb6d28891ae370 | 34 | | 684009dfc8a83f8ec6c28797 | 23 | | 683d563bdcbb6d28891ad99e | 21 | | 686e3f6a233ee115a9878b89 | 1 |  Result is generated from...,7.7,deals,"SELECT COALESCE(document->>'owner', 'Unknown') AS owner,
+  COUNT(*)::int AS count
+FROM ""deals"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+92,ACCOUNT,Get phone number for Startup Accelerator,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",35585.7,—,—,ERROR,0.0,
+93,ACCOUNT,Get email for Startup Accelerator,Executive Summary: **20 emails**:  | Name | Date | | --- | --- | | 6888668e0c9809be01ace440 | 2025-07-29T05:56:57.000Z | | 68886217a8b01a6f4a843a0a | 2025-07-29T04:54:55.000Z | | 68886217a8b01a6f4a843a04 | 2025-07-29T04:56:15.000Z | | 687e2d3eb11bd8686c756629 | 2025-07-21T12:05:48.000Z | | 687e2d3db...,5.3,emails,"SELECT id::text AS name, document->>'date' AS date FROM ""emails""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+94,ACCOUNT,Get account type for Startup Accelerator,"Executive Summary: **Commonnotes** by type:  | Type | Count | | --- | --- | | Company | 79 | | Deal | 14 | | Invoice | 10 | | Sales | 6 | | Contact | 4 |  Result is generated from commonnotes. The response is based on executed SQL over current database data. If you want, I can also provide a row-lev...",4.7,commonnotes,"SELECT COALESCE(document->>'type', 'Unknown') AS type,
+  COUNT(*)::int AS count
+FROM ""commonnotes"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+95,ACCOUNT,Get country for Startup Accelerator,Executive Summary: **Companies** by country:  | Country | Count | | --- | --- | | India | 27 | | Unknown | 11 | | United Kingdom | 8 | | Australia | 7 | | New Zealand | 7 | | Angola | 6 | | Austria | 6 | | USA | 6 | | Afghanistan | 5 | | Albania | 5 | | AmericanSamoa | 5 | | Andorra | 4 | | Netherla...,4.6,companies,"SELECT COALESCE(document->>'country', 'Unknown') AS country,
+  COUNT(*)::int AS count
+FROM ""companies"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+96,ACCOUNT,Get source for Startup Accelerator,Executive Summary: **Sources** by sourceName:  | Sourcename | Count | | --- | --- | | Amsterdam IPM 2023 | 1 | | Apollo.io | 1 | | Berlin IPM 2023 | 1 | | Dubai Seamless 2025 | 1 | | ECommerce Expo leads 2024 | 1 | | Elsner.com | 1 | | Email Campaign | 1 | | Erpocean.com | 1 | | ETRetail mumbai summ...,4.5,sources,"SELECT COALESCE(document->>'sourceName', 'Unknown') AS sourceName,
+  COUNT(*)::int AS count
+FROM ""sources"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+97,ACCOUNT,Get industry for Startup Accelerator,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",35574.4,—,—,ERROR,0.0,
+98,ACCOUNT,Get annual revenue for Startup Accelerator,"Executive Summary: Total revenue for **all time**: **1,949,081.86**  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",4.2,invoices,"SELECT COALESCE(SUM(COALESCE(NULLIF(document->>'grand_total','')::numeric, NULLIF(document->>'grandtotal_in_usd','')::numeric, 0)), 0) AS total FROM ""invoices""",YES,97.0,
+99,ACCOUNT,Get website for Startup Accelerator,"Executive Summary: I could not generate an answer for this query. Please try rephrasing with more specific details (e.g. add a date range, company name, status, or invoice number).  Result is generated from relevant tables. The response is based on executed SQL over current database data. If you wan...",34877.2,—,—,ERROR,0.0,
+100,ACCOUNT,Get total deals value for Startup Accelerator,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,5.2,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+101,ACCOUNT,Get total invoices amount for Startup Accelerator,Executive Summary: **20 invoices**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | ELSN/2026/063 | confirmed | 10000 | 2026-04-20T00:00:00.000Z | | — | ELSN/2026/062 | paid | 2000 | 2026-04-16T00:00:00.000Z | | — | ELSN/2026/061 | paid | 25 | 2026-04-09T00:00:00.000Z ...,7.2,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+102,ACCOUNT,Get tasks for Startup Accelerator,Executive Summary: **68 tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder – Friend...,7.5,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+103,ACCOUNT,Get meeting history for Startup Accelerator,"Executive Summary: **1 meetings**:  | Name | Date | | --- | --- | | Client Call | 2025-08-20T04:30:00.000Z |  Result is generated from meetings. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",2.9,meetings,"SELECT document->>'title' AS name, document->>'start' AS date FROM ""meetings""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+104,DEALS_MOD,Get all deals for Startup Accelerator,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,4.5,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+105,DEALS_MOD,Get open deals for Startup Accelerator,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,4.5,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+106,DEALS_MOD,Get deal stages for Startup Accelerator,Executive Summary: **Deals** by stage:  | Stage | Count | | --- | --- | | Analysis - To be Quoted | 36 | | Closed Lost | 32 | | Closed Won | 26 | | On Hold | 22 | | Quotation Sent | 21 | | Negotiation | 20 | | Contract Under Review | 15 |  Result is generated from deals. The response is based on exe...,3.7,deals,"SELECT COALESCE(document->>'stage', 'Unknown') AS stage,
+  COUNT(*)::int AS count
+FROM ""deals"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+107,DEALS_MOD,Get total deal amount for Startup Accelerator,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,6.6,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+108,DEALS_MOD,Get deals in Closed Won,Executive Summary: **26 Closed Won deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | Ketul | New | Deal  | Closed Won | 135.27 | 2026-04-20T18:30:00.000Z | | Karan | Closed Won | 1 | 2026-02-16T18:30:00.000Z | | 2/jan/2026 | Closed Won | 0.01 | 2026-01-20T18:30:00.000Z | |...,4.4,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Closed Won') ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+109,DEALS_MOD,Get deals in Closed Lost,Executive Summary: **32 Closed Lost deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | New Testing Deal  | Closed Lost | 0.01 | 2025-11-12T05:37:43.300Z | | Tirth Barot | Closed Lost | 0.01 | 2025-11-27T18:30:00.000Z | | New Deals  | Closed Lost | 0.02 | 2025-11-26T18:30:00...,4.4,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'stage' = 'Closed Lost') ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+110,DEALS_MOD,Get highest value deal,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,4.8,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+111,DEALS_MOD,Get lowest value deal,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,4.8,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+112,DEALS_MOD,Get overdue deals,Executive Summary: **50 overdue deals:**  | Name | Stage | Amount | Close Date | | --- | --- | --- | --- | | Test2 | Ketul |Deal | Analysis - To be Quoted | 100 | 2026-04-29T18:30:00.000Z | | Test 1 | Ketul | Deal | Analysis - To be Quoted | 215.66 | 2026-04-29T18:30:00.000Z | | New Test Deal | Anal...,6.5,deals,"SELECT document->>'name' AS name, document->>'stage' AS stage, NULLIF(document->>'grand_total_in_usd','')::numeric AS amount, document->>'closeDate' AS close_date FROM ""deals"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (NULLIF(document->>'closeDate', '')::timestamptz < NOW()) AND (document->>'stage' NOT IN ('Closed Won', 'Closed Lost')) ORDER BY updated_at DESC LIMIT 50",YES,97.0,
+113,DEALS_MOD,Get upcoming closing deals,Executive Summary: **20 deals**:  | Name | Amount | Date | Email | | --- | --- | --- | --- | | Ketul | New | Deal  | 100 | 2026-04-20T18:30:00.000Z |  | | Test2 | Ketul |Deal | 100 | 2026-04-29T18:30:00.000Z | — | | Test 1 | Ketul | Deal | 20000 | 2026-04-29T18:30:00.000Z | — | | Karan | 1 | 2026-02...,6.1,deals,"SELECT document->>'name' AS name, document->>'grand_total' AS amount, document->>'closeDate' AS date, document->>'lineupEmailComments' AS email FROM ""deals""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+114,CONTACTS_MOD,Get contact details for Creola,Executive Summary: **20 contacts**:  | Name | Ref | Status | Date | Email | | --- | --- | --- | --- | --- | | Pankaj | 9662852648 | New | 2026-04-22T09:26:16.511Z | pankaj@elsner.com | | Ketul |  |  | 2026-04-16T05:36:09.553Z | 16april@mailinator.com | | ketul2 | — | — | 2026-04-09T12:22:16.408Z | k...,5.9,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+115,CONTACTS_MOD,Get contact email for Creola,Executive Summary: **20 contacts**:  | Name | Ref | Status | Date | Email | | --- | --- | --- | --- | --- | | Pankaj | 9662852648 | New | 2026-04-22T09:26:16.511Z | pankaj@elsner.com | | Ketul |  |  | 2026-04-16T05:36:09.553Z | 16april@mailinator.com | | ketul2 | — | — | 2026-04-09T12:22:16.408Z | k...,3.9,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+116,CONTACTS_MOD,Get contact phone for Creola,Executive Summary: **20 contacts**:  | Name | Ref | Status | Date | Email | | --- | --- | --- | --- | --- | | Pankaj | 9662852648 | New | 2026-04-22T09:26:16.511Z | pankaj@elsner.com | | Ketul |  |  | 2026-04-16T05:36:09.553Z | 16april@mailinator.com | | ketul2 | — | — | 2026-04-09T12:22:16.408Z | k...,3.8,contacts,"SELECT document->>'firstName' AS name, document->>'phoneNumber' AS ref, document->>'leadStatus' AS status, document->>'updatedAt' AS date, document->>'email' AS email FROM ""contacts""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+117,CONTACTS_MOD,Get contacts by owner,Executive Summary: **Contacts** by contactOwner:  | Contactowner | Count | | --- | --- | | 683d42063652aae35dec7f9c | 59 | | 683fd7aedcbb6d28891ae370 | 26 | | 683d94c4dcbb6d28891adba9 | 22 | | 683d563bdcbb6d28891ad99e | 20 | | 684009dfc8a83f8ec6c28797 | 15 |  Result is generated from contacts. The r...,3.3,contacts,"SELECT COALESCE(document->>'contactOwner', 'Unknown') AS contactOwner,
+  COUNT(*)::int AS count
+FROM ""contacts"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+118,CONTACTS_MOD,Get contacts by source,Executive Summary: **Contacts** by source:  | Source | Count | | --- | --- | | 681068a4e1154b49c3b95f70 | 20 | | 682f1d731b601fe1bb699ebd | 15 | | 680b31b8a6c9bb2402dbc6bf | 14 | | 680b31eea6c9bb2402dbc6e2 | 14 | | 6953c4d861e33c71caf88edf | 14 | | 680b319fa6c9bb2402dbc6b5 | 13 | | 680b3222a6c9bb240...,3.3,contacts,"SELECT COALESCE(document->>'source', 'Unknown') AS source,
+  COUNT(*)::int AS count
+FROM ""contacts"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+119,CONTACTS_MOD,Get contacts by region,"Executive Summary: **Regions** by regionName:  | Regionname | Count | | --- | --- | | APAC | 1 | | EMEA | 1 | | UAE | 1 | | USA | 1 |  Result is generated from regions. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table fo...",3.0,regions,"SELECT COALESCE(document->>'regionName', 'Unknown') AS regionName,
+  COUNT(*)::int AS count
+FROM ""regions"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+120,CONTACTS_MOD,Get contacts by country,"Executive Summary: Total **contacts**: **142**  Result is generated from contacts. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.1,contacts,"SELECT COUNT(*)::int FROM ""contacts""",YES,98.0,
+121,CONTACTS_MOD,Get contacts by lead status,"Executive Summary: **Contacts** by leadStatus:  | Leadstatus | Count | | --- | --- | | Unknown | 117 | | New | 23 | | Unknown | 2 |  Result is generated from contacts. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table for...",3.0,contacts,"SELECT COALESCE(document->>'leadStatus', 'Unknown') AS leadStatus,
+  COUNT(*)::int AS count
+FROM ""contacts"" 
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20",YES,96.0,
+122,TASKS_MOD,Get tasks owned by Ketul Trivedi,Executive Summary: **68 tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder – Friend...,4.8,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+123,TASKS_MOD,Get tasks with priority High,Executive Summary: **16 tasks** (showing 16):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder – Friend...,5.0,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'priority' = 'High') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'priority' = 'High') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+124,TASKS_MOD,Get tasks with status Pending,Executive Summary: **65 pending tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,5.0,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (document->>'status' = 'Pending') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+125,TASKS_MOD,Get overdue tasks,Executive Summary: **65 overdue tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder ...,6.0,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (NULLIF(document->>'due_date', '')::timestamptz < NOW()) AND (COALESCE(document->>'status', '') != 'Completed') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') AND (NULLIF(document->>'due_date', '')::timestamptz < NOW()) AND (COALESCE(document->>'status', '') != 'Completed') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+126,TASKS_MOD,Get count of tasks by status,Executive Summary: **68 tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder – Friend...,5.2,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+127,TASKS_MOD,Get count of tasks by owner,Executive Summary: **68 tasks** (showing 20):  | Task | Status | Priority | Due Date | | --- | --- | --- | --- | | Overdue Payment Reminder – Friendly Follow-Up on Invoice #ELSN/2026/056 for testing account by ketullll | Pending | High | 2026-04-09T10:31:42.381Z | | Overdue Payment Reminder – Friend...,5.6,createtasks,"SELECT COUNT(*)::int FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') | SELECT COALESCE(document->>'Task', 'Unnamed') AS task, COALESCE(document->>'status', '—') AS status, COALESCE(document->>'priority', '—') AS priority, document->>'due_date' AS due_date FROM ""createtasks"" WHERE (COALESCE(document->>'deleted', 'false') != 'true') ORDER BY updated_at DESC LIMIT 20",YES,97.0,
+128,INVOICE_MOD,Get overdue invoices,Executive Summary: **20 invoices**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | ELSN/2026/063 | confirmed | 10000 | 2026-04-20T00:00:00.000Z | | — | ELSN/2026/062 | paid | 2000 | 2026-04-16T00:00:00.000Z | | — | ELSN/2026/061 | paid | 25 | 2026-04-09T00:00:00.000Z ...,7.9,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+129,INVOICE_MOD,Get invoices due this week,"Executive Summary: No **invoices** records found.  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",3.2,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices"" WHERE (date_trunc('week', updated_at) = date_trunc('week', NOW())) ORDER BY updated_at DESC LIMIT 20",YES,90.0,
+130,INVOICE_MOD,Get invoices pending payment,Executive Summary: **20 invoices**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | ELSN/2026/063 | confirmed | 10000 | 2026-04-20T00:00:00.000Z | | — | ELSN/2026/062 | paid | 2000 | 2026-04-16T00:00:00.000Z | | — | ELSN/2026/061 | paid | 25 | 2026-04-09T00:00:00.000Z ...,8.0,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+131,INVOICE_MOD,Get total invoiced amount,"Executive Summary: Found **1** result(s):  | col_1 | | --- | | 155961 |  Result is generated from bills. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",5623.4,bills,"SELECT SUM(NULLIF(document->>'taxableAmount','')::numeric) AS total_invoiced_amount
+FROM bills",YES,92.0,
+132,INVOICE_MOD,Get total remaining amount,"Executive Summary: No data found for this query.  Result is generated from invoices. The response is based on executed SQL over current database data. If you want, I can also provide a row-level breakdown in table format.",923.8,invoices,"SELECT SUM(document->>'tax_amount') - SUM(document->>'payment_fee_amount') AS total_remaining_amount
+FROM invoices",NO_DATA,70.0,
+133,INVOICE_MOD,Get invoices above 10000,Executive Summary: **20 invoices**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | ELSN/2026/063 | confirmed | 10000 | 2026-04-20T00:00:00.000Z | | — | ELSN/2026/062 | paid | 2000 | 2026-04-16T00:00:00.000Z | | — | ELSN/2026/061 | paid | 25 | 2026-04-09T00:00:00.000Z ...,10.2,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+134,INVOICE_MOD,Get invoices below 1000,Executive Summary: **20 invoices**:  | Name | Ref | Status | Amount | Date | | --- | --- | --- | --- | --- | | — | ELSN/2026/063 | confirmed | 10000 | 2026-04-20T00:00:00.000Z | | — | ELSN/2026/062 | paid | 2000 | 2026-04-16T00:00:00.000Z | | — | ELSN/2026/061 | paid | 25 | 2026-04-09T00:00:00.000Z ...,7.7,invoices,"SELECT document->>'companyName' AS name, document->>'invoice_number' AS ref, document->>'payment_status' AS status, document->>'grand_total' AS amount, document->>'invoice_date' AS date FROM ""invoices""  ORDER BY updated_at DESC LIMIT 20",YES,95.0,
+SUMMARY,Total queries: 134,YES=113 | NO_DATA=14 | ERROR=7,TOTAL ACCURACY: 94.8%,323310.9,—,Avg confidence score: 87.6%,TOTAL,94.8,

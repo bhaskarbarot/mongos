@@ -1,0 +1,8 @@
+langchain
+langchain-community
+psycopg2-binary
+streamlit
+ollama
+python-dotenv
+langchain-ollama
+redis

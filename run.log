@@ -1,0 +1,445 @@
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.4.13:8501
+
+2026-05-05 15:50:13,382 | INFO | sql_chatbot | Starting schema discovery...
+2026-05-05 15:50:16,974 | INFO | sql_chatbot | Schema: discovered 45 tables
+2026-05-05 15:50:16,987 | INFO | sql_chatbot | Schema link: ai_notes.company → companies
+2026-05-05 15:50:16,994 | INFO | sql_chatbot | Schema link: bills.createdBy → users
+2026-05-05 15:50:16,998 | INFO | sql_chatbot | Schema link: campaigns.createdBy → users
+2026-05-05 15:50:17,010 | INFO | sql_chatbot | Schema link: commonnotes.contactId → contacts
+2026-05-05 15:50:17,013 | INFO | sql_chatbot | Schema link: commonnotes.createdBy → users
+2026-05-05 15:50:17,021 | INFO | sql_chatbot | Schema link: commonnotes.invoiceId → invoices
+2026-05-05 15:50:17,027 | INFO | sql_chatbot | Schema link: companies.companyOwner → users
+2026-05-05 15:50:17,030 | INFO | sql_chatbot | Schema link: companies.createdBy → users
+2026-05-05 15:50:17,032 | INFO | sql_chatbot | Schema link: companies.region → regions
+2026-05-05 15:50:17,037 | INFO | sql_chatbot | Schema link: contacts.company → companies
+2026-05-05 15:50:17,040 | INFO | sql_chatbot | Schema link: contacts.contactOwner → users
+2026-05-05 15:50:17,042 | INFO | sql_chatbot | Schema link: contacts.createdBy → users
+2026-05-05 15:50:17,053 | INFO | sql_chatbot | Schema link: createtasks.companyId → companies
+2026-05-05 15:50:17,055 | INFO | sql_chatbot | Schema link: createtasks.createdBy → users
+2026-05-05 15:50:17,059 | INFO | sql_chatbot | Schema link: createtasks.invoiceId → invoices
+2026-05-05 15:50:17,066 | INFO | sql_chatbot | Schema link: deals.company → companies
+2026-05-05 15:50:17,068 | INFO | sql_chatbot | Schema link: deals.contact → contacts
+2026-05-05 15:50:17,071 | INFO | sql_chatbot | Schema link: deals.owner → users
+2026-05-05 15:50:17,074 | INFO | sql_chatbot | Schema link: dealstagesettings.createdBy → users
+2026-05-05 15:50:17,091 | INFO | sql_chatbot | Schema link: invoices.company → companies
+2026-05-05 15:50:17,095 | INFO | sql_chatbot | Schema link: invoices.createdBy → users
+2026-05-05 15:50:17,108 | INFO | sql_chatbot | Schema link: meetings.createdBy → users
+2026-05-05 15:50:17,114 | INFO | sql_chatbot | Schema link: notes.createdBy → users
+2026-05-05 15:50:17,134 | INFO | sql_chatbot | Schema link: outreaches.assignedTo → users
+2026-05-05 15:50:17,138 | INFO | sql_chatbot | Schema link: outreaches.createdBy → users
+2026-05-05 15:50:17,141 | INFO | sql_chatbot | Schema link: outreaches.region → regions
+2026-05-05 15:50:17,175 | INFO | sql_chatbot | Schema link: sales.company → companies
+2026-05-05 15:50:17,178 | INFO | sql_chatbot | Schema link: sales.salesOwner → users
+2026-05-05 15:50:17,184 | INFO | sql_chatbot | Schema link: targets.createdBy → users
+2026-05-05 15:50:17,187 | INFO | sql_chatbot | Schema link: targets.userId → users
+2026-05-05 15:50:17,198 | INFO | sql_chatbot | Schema link: users.department → departments
+2026-05-05 15:50:17,201 | INFO | sql_chatbot | Schema link: users.regionId → regions
+2026-05-05 15:50:17,205 | INFO | sql_chatbot | Schema link: vendors.createdBy → users
+2026-05-05 15:50:17,205 | INFO | sql_chatbot | Schema discovery: 33 relationships found
+2026-05-05 15:50:17,206 | INFO | sql_chatbot | Schema cache warmed: 45 tables
+2026-05-05 15:50:17,207 | INFO | sql_chatbot | ╔══════════════════════════════════════════════╗
+2026-05-05 15:50:17,207 | INFO | sql_chatbot | ║  SQL Chatbot Agent Ready                     ║
+2026-05-05 15:50:17,207 | INFO | sql_chatbot | ╠══════════════════════════════════════════════╣
+2026-05-05 15:50:17,208 | INFO | sql_chatbot | ║  Tables       : 45 discovered                ║
+2026-05-05 15:50:17,208 | INFO | sql_chatbot | ║  FK Links     : 33 relationships             ║
+2026-05-05 15:50:17,209 | INFO | sql_chatbot | ║  Primary LLM  : debopam/Text-to-SQL__Qwen2.5-Coder-3B-FineTuned:latest ║
+2026-05-05 15:50:17,209 | INFO | sql_chatbot | ║  Fallback LLM : a-kore/Arctic-Text2SQL-R1-7B:latest ║
+2026-05-05 15:50:17,209 | INFO | sql_chatbot | ║  Reasoning    : llama-3.1-8b-instant         ║
+2026-05-05 15:50:17,209 | INFO | sql_chatbot | ║  Groq API     : connected                    ║
+2026-05-05 15:50:17,210 | INFO | sql_chatbot | ║  Startup      : 3948ms                       ║
+2026-05-05 15:50:17,210 | INFO | sql_chatbot | ╚══════════════════════════════════════════════╝
+2026-05-05 15:50:36,720 | INFO | sql_chatbot | Guard: greeting detected
+2026-05-05 15:50:48,414 | INFO | sql_chatbot | ═══ Pipeline START | query: who is ketul? ═══
+2026-05-05 15:50:48,415 | INFO | sql_chatbot | Schema pre-warmed: 45 tables, 0ms
+2026-05-05 15:50:48,730 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 308ms
+2026-05-05 15:50:48,733 | INFO | sql_chatbot | Classifier LLM → SIMPLE | reason: single entity lookup with one action: find | query: who is ketul?
+2026-05-05 15:50:48,734 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (319ms) | single entity lookup with one action: find
+2026-05-05 15:50:48,736 | INFO | sql_chatbot | FastPath route: search | query: who is ketul?
+2026-05-05 15:50:48,744 | WARNING | sql_chatbot | FastPath specialized search failed: tuple index out of range
+2026-05-05 15:50:48,748 | INFO | sql_chatbot | FastPath MISS — escalating to classifier
+2026-05-05 15:50:48,748 | INFO | sql_chatbot | ═══ Fast-path MISS → Text2SQL
+2026-05-05 15:50:48,749 | INFO | sql_chatbot | Text2SQL: processing query: who is ketul?
+2026-05-05 15:51:16,785 | WARNING | sql_chatbot | Text2SQL: all attempts failed for query: who is ketul?
+2026-05-05 15:51:16,786 | WARNING | sql_chatbot | Text2SQL: no valid SQL for: who is ketul?
+2026-05-05 15:51:16,786 | INFO | sql_chatbot | ═══ SIMPLE path fully missed → escalating to COMPLEX
+2026-05-05 15:51:16,787 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 15:51:17,225 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 438ms
+2026-05-05 15:51:17,226 | INFO | sql_chatbot | Decompose: 1 sub-queries for query: who is ketul?
+2026-05-05 15:51:17,227 | INFO | sql_chatbot | Decomposed into 1 sub-queries (440ms): ['find user with name ketul']
+2026-05-05 15:51:17,227 | INFO | sql_chatbot | Executor: starting 1 sub-queries | workers=1 | per-query timeout=90s
+2026-05-05 15:51:17,228 | INFO | sql_chatbot | FastPath route: search | query: find user with name ketul
+2026-05-05 15:51:17,238 | INFO | sql_chatbot | FastPath HIT (specialized=search)
+2026-05-05 15:51:17,239 | INFO | sql_chatbot | Executor: completed 1/1 sub-queries in 11ms | sources=['fast_path']
+2026-05-05 15:51:17,239 | INFO | sql_chatbot | Parallel execution done (12ms): 1 results
+2026-05-05 15:51:17,243 | INFO | sql_chatbot | Synthesis format: default | query: who is ketul?
+2026-05-05 15:51:17,961 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 718ms
+2026-05-05 15:51:17,963 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 15:51:17,964 | INFO | sql_chatbot | Synthesis done (724ms)
+2026-05-05 15:51:17,964 | INFO | sql_chatbot | ═══ Pipeline DONE | total=29551ms | layer=complex | parts=1 | tables=['companies', 'contacts', 'users'] ═══
+2026-05-05 15:51:38,181 | INFO | sql_chatbot | ═══ Pipeline START | query: give me details of ketul  ═══
+2026-05-05 15:51:38,183 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me details of ketul 
+2026-05-05 15:51:38,184 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:51:38,198 | INFO | sql_chatbot | FastPath route: general | query: give me details of ketul 
+2026-05-05 15:51:38,204 | INFO | sql_chatbot | FastPath MISS — escalating to classifier
+2026-05-05 15:51:38,205 | INFO | sql_chatbot | ═══ Fast-path MISS → Text2SQL
+2026-05-05 15:51:38,206 | INFO | sql_chatbot | Text2SQL: processing query: give me details of ketul 
+2026-05-05 15:52:06,241 | WARNING | sql_chatbot | Text2SQL: all attempts failed for query: give me details of ketul 
+2026-05-05 15:52:06,242 | WARNING | sql_chatbot | Text2SQL: no valid SQL for: give me details of ketul 
+2026-05-05 15:52:06,243 | INFO | sql_chatbot | ═══ SIMPLE path fully missed → escalating to COMPLEX
+2026-05-05 15:52:06,243 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 15:52:06,627 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 383ms
+2026-05-05 15:52:06,627 | INFO | sql_chatbot | Decompose: 6 sub-queries for query: give me details of ketul 
+2026-05-05 15:52:06,628 | INFO | sql_chatbot | Decomposed into 6 sub-queries (384ms): ["get ketul's user details", "list ketul's notes", "list ketul's activities", "list ketul's meetings", "list ketul's emails", "list ketul's outreaches"]
+2026-05-05 15:52:06,628 | INFO | sql_chatbot | Executor: starting 6 sub-queries | workers=6 | per-query timeout=90s
+2026-05-05 15:52:06,630 | INFO | sql_chatbot | FastPath route: general | query: get ketul's user details
+2026-05-05 15:52:06,631 | INFO | sql_chatbot | FastPath route: general | query: list ketul's notes
+2026-05-05 15:52:06,632 | INFO | sql_chatbot | FastPath route: general | query: list ketul's activities
+2026-05-05 15:52:06,638 | INFO | sql_chatbot | FastPath route: general | query: list ketul's meetings
+2026-05-05 15:52:06,643 | INFO | sql_chatbot | FastPath route: general | query: list ketul's emails
+2026-05-05 15:52:06,648 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:52:06,649 | INFO | sql_chatbot | FastPath route: general | query: list ketul's outreaches
+2026-05-05 15:52:06,655 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:52:06,663 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:52:06,664 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:52:06,673 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:52:06,675 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:52:06,676 | INFO | sql_chatbot | Executor: completed 6/6 sub-queries in 47ms | sources=['fast_path', 'fast_path', 'fast_path', 'fast_path', 'fast_path', 'fast_path']
+2026-05-05 15:52:06,677 | INFO | sql_chatbot | Parallel execution done (49ms): 6 results
+2026-05-05 15:52:06,677 | INFO | sql_chatbot | Synthesis format: default | query: give me details of ketul 
+2026-05-05 15:52:08,022 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 1344ms
+2026-05-05 15:52:08,023 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 15:52:08,023 | INFO | sql_chatbot | Synthesis done (1346ms)
+2026-05-05 15:52:08,024 | INFO | sql_chatbot | ═══ Pipeline DONE | total=29845ms | layer=complex | parts=6 | tables=['activities', 'emails', 'meetings', 'notes', 'outreaches', 'users'] ═══
+2026-05-05 15:52:48,969 | INFO | sql_chatbot | ═══ Pipeline START | query: give me december 2025 revenue ═══
+2026-05-05 15:52:48,969 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me december 2025 revenue
+2026-05-05 15:52:48,971 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (2ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:52:48,972 | INFO | sql_chatbot | FastPath route: general | query: give me december 2025 revenue
+2026-05-05 15:52:48,979 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 15:52:48,980 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 8ms | tables=['invoices']
+2026-05-05 15:53:19,147 | INFO | sql_chatbot | ═══ Pipeline START | query: give me 2026 revenue ═══
+2026-05-05 15:53:19,149 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me 2026 revenue
+2026-05-05 15:53:19,150 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:53:19,150 | INFO | sql_chatbot | FastPath route: general | query: give me 2026 revenue
+2026-05-05 15:53:19,171 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 15:53:19,172 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 22ms | tables=['invoices']
+2026-05-05 15:53:42,457 | INFO | sql_chatbot | ═══ Pipeline START | query: give me 2025 revenue ═══
+2026-05-05 15:53:42,460 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me 2025 revenue
+2026-05-05 15:53:42,460 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:53:42,461 | INFO | sql_chatbot | FastPath route: general | query: give me 2025 revenue
+2026-05-05 15:53:42,466 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 15:53:42,467 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 6ms | tables=['invoices']
+2026-05-05 15:54:00,001 | INFO | sql_chatbot | ═══ Pipeline START | query: give me paid invoices list only  ═══
+2026-05-05 15:54:00,003 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me paid invoices list only 
+2026-05-05 15:54:00,003 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:54:00,004 | INFO | sql_chatbot | FastPath route: general | query: give me paid invoices list only 
+2026-05-05 15:54:00,023 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:54:00,024 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 20ms | tables=['invoices']
+2026-05-05 15:54:31,380 | INFO | sql_chatbot | ═══ Pipeline START | query: give me invoices status is paid  ═══
+2026-05-05 15:54:31,382 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me invoices status is paid 
+2026-05-05 15:54:31,382 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:54:31,382 | INFO | sql_chatbot | FastPath route: general | query: give me invoices status is paid 
+2026-05-05 15:54:31,393 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:54:31,394 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 12ms | tables=['invoices']
+2026-05-05 15:54:58,581 | INFO | sql_chatbot | ═══ Pipeline START | query: give me invoices that status is paid and in 2026 only  (referring to invoices) ═══
+2026-05-05 15:54:58,909 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 326ms
+2026-05-05 15:54:58,909 | INFO | sql_chatbot | Classifier LLM → SIMPLE | reason: one filter on invoices table with two conditions | query: give me invoices that status is paid and in 2026 only  (refe
+2026-05-05 15:54:58,910 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (327ms) | one filter on invoices table with two conditions
+2026-05-05 15:54:58,910 | INFO | sql_chatbot | FastPath route: general | query: give me invoices that status is paid and in 2026 only  (refe
+2026-05-05 15:54:58,922 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:54:58,923 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 13ms | tables=['invoices']
+2026-05-05 15:55:16,536 | INFO | sql_chatbot | ═══ Pipeline START | query: give me invoices that status is paid and in 2026 only with total  (referring to  ═══
+2026-05-05 15:55:16,794 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 256ms
+2026-05-05 15:55:16,795 | INFO | sql_chatbot | Classifier LLM → SIMPLE | reason: one filter, one aggregation on invoices table | query: give me invoices that status is paid and in 2026 only with t
+2026-05-05 15:55:16,795 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (257ms) | one filter, one aggregation on invoices table
+2026-05-05 15:55:16,796 | INFO | sql_chatbot | FastPath route: general | query: give me invoices that status is paid and in 2026 only with t
+2026-05-05 15:55:16,811 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:55:16,812 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 16ms | tables=['invoices']
+2026-05-05 15:55:56,639 | INFO | sql_chatbot | ═══ Pipeline START | query: give me invoices that status is paid and in 2026 with total of all invoices amou ═══
+2026-05-05 15:55:56,889 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 249ms
+2026-05-05 15:55:56,890 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: Multiple filters and aggregation on invoices table with total of all invoices amount | query: give me invoices that status is paid and in 2026 with total 
+2026-05-05 15:55:56,890 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (251ms) | Multiple filters and aggregation on invoices table with total of all invoices amount
+2026-05-05 15:55:56,891 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 15:55:57,163 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 272ms
+2026-05-05 15:55:57,164 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: give me invoices that status is paid and in 2026 with total 
+2026-05-05 15:55:57,165 | INFO | sql_chatbot | Decomposed into 2 sub-queries (274ms): ['list invoices with status paid and date ', 'sum total amount of all invoices']
+2026-05-05 15:55:57,165 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 15:55:57,166 | INFO | sql_chatbot | FastPath route: general | query: list invoices with status paid and date in 2026
+2026-05-05 15:55:57,169 | INFO | sql_chatbot | FastPath route: general | query: sum total amount of all invoices
+2026-05-05 15:55:57,176 | INFO | sql_chatbot | FastPath HIT (_fp_group_by)
+2026-05-05 15:55:57,177 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:55:57,178 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 12ms | sources=['fast_path', 'fast_path']
+2026-05-05 15:55:57,178 | INFO | sql_chatbot | Parallel execution done (13ms): 2 results
+2026-05-05 15:55:57,179 | INFO | sql_chatbot | Synthesis format: default | query: give me invoices that status is paid and in 2026 with total 
+2026-05-05 15:55:58,569 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 1390ms
+2026-05-05 15:55:58,571 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 15:55:58,572 | INFO | sql_chatbot | Synthesis done (1393ms)
+2026-05-05 15:55:58,572 | INFO | sql_chatbot | ═══ Pipeline DONE | total=1934ms | layer=complex | parts=2 | tables=['invoices'] ═══
+2026-05-05 15:57:02,750 | INFO | sql_chatbot | ═══ Pipeline START | query: how many deals are  ═══
+2026-05-05 15:57:02,751 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: how many deals are 
+2026-05-05 15:57:02,751 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:57:02,752 | INFO | sql_chatbot | FastPath route: general | query: how many deals are 
+2026-05-05 15:57:02,758 | INFO | sql_chatbot | FastPath HIT (_fp_count)
+2026-05-05 15:57:02,758 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 6ms | tables=['deals']
+2026-05-05 15:57:14,430 | INFO | sql_chatbot | ═══ Pipeline START | query: how many invoices are  ═══
+2026-05-05 15:57:14,430 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: how many invoices are 
+2026-05-05 15:57:14,431 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:57:14,431 | INFO | sql_chatbot | FastPath route: general | query: how many invoices are 
+2026-05-05 15:57:14,441 | INFO | sql_chatbot | FastPath HIT (_fp_count)
+2026-05-05 15:57:14,443 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 11ms | tables=['invoices']
+2026-05-05 15:57:38,042 | INFO | sql_chatbot | ═══ Pipeline START | query: give me all users by their departments names  (referring to invoices) ═══
+2026-05-05 15:57:38,268 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 223ms
+2026-05-05 15:57:38,269 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: multiple entities needed (users + invoices) and cross-entity analysis | query: give me all users by their departments names  (referring to 
+2026-05-05 15:57:38,269 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (225ms) | multiple entities needed (users + invoices) and cross-entity analysis
+2026-05-05 15:57:38,269 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 15:57:38,618 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 348ms
+2026-05-05 15:57:38,619 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: give me all users by their departments names  (referring to 
+2026-05-05 15:57:38,620 | INFO | sql_chatbot | Decomposed into 2 sub-queries (350ms): ['list all invoices with department name', 'list all users grouped by department nam']
+2026-05-05 15:57:38,621 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 15:57:38,622 | INFO | sql_chatbot | FastPath route: dept_users | query: list all invoices with department name
+2026-05-05 15:57:38,628 | INFO | sql_chatbot | FastPath route: dept_users | query: list all users grouped by department name
+2026-05-05 15:57:38,634 | INFO | sql_chatbot | FastPath HIT (specialized=dept_users)
+2026-05-05 15:57:38,638 | INFO | sql_chatbot | FastPath HIT (specialized=dept_users)
+2026-05-05 15:57:38,640 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 18ms | sources=['fast_path', 'fast_path']
+2026-05-05 15:57:38,640 | INFO | sql_chatbot | Parallel execution done (19ms): 2 results
+2026-05-05 15:57:38,641 | INFO | sql_chatbot | Synthesis format: list | query: give me all users by their departments names  (referring to 
+2026-05-05 15:57:39,405 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 764ms
+2026-05-05 15:57:39,406 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 15:57:39,407 | INFO | sql_chatbot | Synthesis done (766ms)
+2026-05-05 15:57:39,408 | INFO | sql_chatbot | ═══ Pipeline DONE | total=1366ms | layer=complex | parts=2 | tables=['departments', 'users'] ═══
+2026-05-05 15:58:17,125 | INFO | sql_chatbot | ═══ Pipeline START | query: give me all users name  ═══
+2026-05-05 15:58:17,127 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me all users name 
+2026-05-05 15:58:17,127 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:58:17,127 | INFO | sql_chatbot | FastPath route: general | query: give me all users name 
+2026-05-05 15:58:17,134 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:58:17,135 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 7ms | tables=['users']
+2026-05-05 15:58:32,025 | INFO | sql_chatbot | ═══ Pipeline START | query: give me top 5 invoices by amount ═══
+2026-05-05 15:58:32,026 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me top 5 invoices by amount
+2026-05-05 15:58:32,026 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:58:32,027 | INFO | sql_chatbot | FastPath route: general | query: give me top 5 invoices by amount
+2026-05-05 15:58:32,038 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:58:32,039 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 12ms | tables=['invoices']
+2026-05-05 15:58:45,511 | INFO | sql_chatbot | ═══ Pipeline START | query: give me last 5 contacts  ═══
+2026-05-05 15:58:45,512 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me last 5 contacts 
+2026-05-05 15:58:45,513 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 15:58:45,513 | INFO | sql_chatbot | FastPath route: general | query: give me last 5 contacts 
+2026-05-05 15:58:45,519 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 15:58:45,520 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 7ms | tables=['contacts']
+2026-05-05 16:01:23,536 | INFO | sql_chatbot | ═══ Pipeline START | query: What’s the conversion rate from lead to customer?
+ ═══
+2026-05-05 16:01:23,805 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 268ms
+2026-05-05 16:01:23,806 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: Requires computed insights beyond raw data (conversion rate) | query: What’s the conversion rate from lead to customer?
+
+2026-05-05 16:01:23,807 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (269ms) | Requires computed insights beyond raw data (conversion rate)
+2026-05-05 16:01:23,807 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 16:01:23,809 | INFO | sql_chatbot | Schema: discovered 45 tables
+2026-05-05 16:01:24,115 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 306ms
+2026-05-05 16:01:24,117 | INFO | sql_chatbot | Decompose: 3 sub-queries for query: What’s the conversion rate from lead to customer?
+
+2026-05-05 16:01:24,117 | INFO | sql_chatbot | Decomposed into 3 sub-queries (308ms): ['count all leads', 'count leads that became customers', 'count all customers']
+2026-05-05 16:01:24,118 | INFO | sql_chatbot | Executor: starting 3 sub-queries | workers=3 | per-query timeout=90s
+2026-05-05 16:01:24,120 | INFO | sql_chatbot | FastPath route: general | query: count all leads
+2026-05-05 16:01:24,124 | INFO | sql_chatbot | FastPath MISS — escalating to classifier
+2026-05-05 16:01:24,126 | INFO | sql_chatbot | FastPath route: general | query: count leads that became customers
+2026-05-05 16:01:24,126 | INFO | sql_chatbot | Text2SQL: processing query: count all leads
+2026-05-05 16:01:24,127 | INFO | sql_chatbot | FastPath route: general | query: count all customers
+2026-05-05 16:01:24,134 | INFO | sql_chatbot | FastPath MISS — escalating to classifier
+2026-05-05 16:01:24,138 | INFO | sql_chatbot | FastPath HIT (_fp_count)
+2026-05-05 16:01:24,140 | INFO | sql_chatbot | Text2SQL: processing query: count all customers
+2026-05-05 16:01:52,160 | WARNING | sql_chatbot | Text2SQL: all attempts failed for query: count all customers
+2026-05-05 16:01:52,161 | WARNING | sql_chatbot | Text2SQL: no valid SQL for: count all customers
+2026-05-05 16:01:52,161 | WARNING | sql_chatbot | [2] all stages failed (28034ms) — returning stub: count all customers
+2026-05-05 16:01:54,332 | WARNING | sql_chatbot | Text2SQL: all attempts failed for query: count all leads
+2026-05-05 16:01:54,333 | WARNING | sql_chatbot | Text2SQL: no valid SQL for: count all leads
+2026-05-05 16:01:54,334 | WARNING | sql_chatbot | [0] all stages failed (30214ms) — returning stub: count all leads
+2026-05-05 16:01:54,335 | INFO | sql_chatbot | Executor: completed 1/3 sub-queries in 30216ms | sources=['stub', 'fast_path', 'stub']
+2026-05-05 16:01:54,335 | INFO | sql_chatbot | Parallel execution done (30217ms): 3 results
+2026-05-05 16:01:54,336 | INFO | sql_chatbot | Synthesis format: default | query: What’s the conversion rate from lead to customer?
+
+2026-05-05 16:01:55,697 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 1361ms
+2026-05-05 16:01:55,699 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 16:01:55,700 | INFO | sql_chatbot | Synthesis done (1364ms)
+2026-05-05 16:01:55,700 | INFO | sql_chatbot | ═══ Pipeline DONE | total=32164ms | layer=complex | parts=3 | tables=['publicleads'] ═══
+2026-05-05 16:02:22,436 | INFO | sql_chatbot | ═══ Pipeline START | query: Give me closed won deals
+ ═══
+2026-05-05 16:02:22,437 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: Give me closed won deals
+
+2026-05-05 16:02:22,438 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:02:22,439 | INFO | sql_chatbot | FastPath route: general | query: Give me closed won deals
+
+2026-05-05 16:02:22,451 | INFO | sql_chatbot | FastPath HIT (_fp_deals_filter)
+2026-05-05 16:02:22,452 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 13ms | tables=['deals']
+2026-05-05 16:02:37,257 | INFO | sql_chatbot | ═══ Pipeline START | query: Which leads haven’t been contacted in 7 days?
+ ═══
+2026-05-05 16:02:37,679 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 420ms
+2026-05-05 16:02:37,680 | INFO | sql_chatbot | Classifier LLM → SIMPLE | reason: Single table focus with one filter and time-based condition | query: Which leads haven’t been contacted in 7 days?
+
+2026-05-05 16:02:37,680 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (422ms) | Single table focus with one filter and time-based condition
+2026-05-05 16:02:37,681 | INFO | sql_chatbot | FastPath route: general | query: Which leads haven’t been contacted in 7 days?
+
+2026-05-05 16:02:37,681 | INFO | sql_chatbot | FastPath MISS — escalating to classifier
+2026-05-05 16:02:37,682 | INFO | sql_chatbot | ═══ Fast-path MISS → Text2SQL
+2026-05-05 16:02:37,683 | INFO | sql_chatbot | Text2SQL: processing query: Which leads haven’t been contacted in 7 days?
+
+2026-05-05 16:02:38,922 | INFO | sql_chatbot | Text2SQL: primary model won (0ms): SELECT * FROM "outreaches" WHERE COALESCE(document->>'deleted','false')!='true' 
+2026-05-05 16:02:57,709 | INFO | sql_chatbot | Text2SQL generated: SELECT * FROM "outreaches" WHERE COALESCE(document->>'deleted','false')!='true' AND document->>'inte
+2026-05-05 16:02:57,716 | INFO | sql_chatbot | Text2SQL: done in 20034ms | rows=0 | tables=['outreaches']
+2026-05-05 16:02:57,717 | INFO | sql_chatbot | ═══ Text2SQL HIT | 20034ms | tables=['outreaches']
+2026-05-05 16:03:42,227 | INFO | sql_chatbot | ═══ Pipeline START | query: Show me the top 10 customers by revenue.
+ ═══
+2026-05-05 16:03:42,229 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: Show me the top 10 customers by revenue.
+
+2026-05-05 16:03:42,231 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (2ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:03:42,233 | INFO | sql_chatbot | FastPath route: general | query: Show me the top 10 customers by revenue.
+
+2026-05-05 16:03:42,256 | INFO | sql_chatbot | FastPath HIT (_fp_top_customers)
+2026-05-05 16:03:42,258 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 26ms | tables=['invoices', 'companies']
+2026-05-05 16:04:03,354 | INFO | sql_chatbot | ═══ Pipeline START | query: Which customers have not given business in 3 months?
+ ═══
+2026-05-05 16:04:03,641 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 286ms
+2026-05-05 16:04:03,641 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: This query requires cross-entity analysis between customers and deals. | query: Which customers have not given business in 3 months?
+
+2026-05-05 16:04:03,642 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (288ms) | This query requires cross-entity analysis between customers and deals.
+2026-05-05 16:04:03,642 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 16:04:04,025 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 383ms
+2026-05-05 16:04:04,026 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: Which customers have not given business in 3 months?
+
+2026-05-05 16:04:04,027 | INFO | sql_chatbot | Decomposed into 2 sub-queries (385ms): ['list all customers with last invoice dat', 'count invoices for each customer in the ']
+2026-05-05 16:04:04,027 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 16:04:04,028 | INFO | sql_chatbot | FastPath route: general | query: list all customers with last invoice date in the last 3 mont
+2026-05-05 16:04:04,031 | INFO | sql_chatbot | FastPath route: general | query: count invoices for each customer in the last 3 months
+2026-05-05 16:04:04,034 | INFO | sql_chatbot | FastPath HIT (_fp_count)
+2026-05-05 16:04:04,037 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 16:04:04,038 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 11ms | sources=['fast_path', 'fast_path']
+2026-05-05 16:04:04,039 | INFO | sql_chatbot | Parallel execution done (12ms): 2 results
+2026-05-05 16:04:04,039 | INFO | sql_chatbot | Synthesis format: default | query: Which customers have not given business in 3 months?
+
+2026-05-05 16:04:06,131 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 2091ms
+2026-05-05 16:04:06,131 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 16:04:06,131 | INFO | sql_chatbot | Synthesis done (2092ms)
+2026-05-05 16:04:06,132 | INFO | sql_chatbot | ═══ Pipeline DONE | total=2778ms | layer=complex | parts=2 | tables=['invoices'] ═══
+2026-05-05 16:04:25,870 | INFO | sql_chatbot | ═══ Pipeline START | query: What tasks are pending for the users by?
+ ═══
+2026-05-05 16:04:26,073 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 201ms
+2026-05-05 16:04:26,074 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: cross-entity analysis between users and tasks is required | query: What tasks are pending for the users by?
+
+2026-05-05 16:04:26,075 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (203ms) | cross-entity analysis between users and tasks is required
+2026-05-05 16:04:26,076 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 16:04:26,355 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 278ms
+2026-05-05 16:04:26,357 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: What tasks are pending for the users by?
+
+2026-05-05 16:04:26,358 | INFO | sql_chatbot | Decomposed into 2 sub-queries (281ms): ['list all users', 'count pending tasks grouped by user']
+2026-05-05 16:04:26,358 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 16:04:26,360 | INFO | sql_chatbot | FastPath route: general | query: list all users
+2026-05-05 16:04:26,364 | INFO | sql_chatbot | FastPath route: general | query: count pending tasks grouped by user
+2026-05-05 16:04:26,372 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 16:04:26,383 | INFO | sql_chatbot | FastPath HIT (_fp_tasks)
+2026-05-05 16:04:26,385 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 25ms | sources=['fast_path', 'fast_path']
+2026-05-05 16:04:26,385 | INFO | sql_chatbot | Parallel execution done (27ms): 2 results
+2026-05-05 16:04:26,386 | INFO | sql_chatbot | Synthesis format: default | query: What tasks are pending for the users by?
+
+2026-05-05 16:04:27,371 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 985ms
+2026-05-05 16:04:27,372 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 16:04:27,373 | INFO | sql_chatbot | Synthesis done (988ms)
+2026-05-05 16:04:27,374 | INFO | sql_chatbot | ═══ Pipeline DONE | total=1504ms | layer=complex | parts=2 | tables=['createtasks', 'users'] ═══
+2026-05-05 16:04:49,061 | INFO | sql_chatbot | ═══ Pipeline START | query: Total revenue generated in FY2025?
+ ═══
+2026-05-05 16:04:49,064 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: Total revenue generated in FY2025?
+
+2026-05-05 16:04:49,064 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:04:49,065 | INFO | sql_chatbot | FastPath route: general | query: Total revenue generated in FY2025?
+
+2026-05-05 16:04:49,074 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:04:49,076 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 12ms | tables=['invoices']
+2026-05-05 16:05:18,240 | INFO | sql_chatbot | ═══ Pipeline START | query: give me revenue of 2025  ═══
+2026-05-05 16:05:18,242 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me revenue of 2025 
+2026-05-05 16:05:18,243 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:05:18,244 | INFO | sql_chatbot | FastPath route: general | query: give me revenue of 2025 
+2026-05-05 16:05:18,255 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:05:18,259 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 15ms | tables=['invoices']
+2026-05-05 16:05:51,959 | INFO | sql_chatbot | ═══ Pipeline START | query: how many departments?
+ ═══
+2026-05-05 16:05:51,960 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: how many departments?
+
+2026-05-05 16:05:51,960 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:05:51,961 | INFO | sql_chatbot | FastPath route: general | query: how many departments?
+
+2026-05-05 16:05:51,968 | INFO | sql_chatbot | FastPath HIT (_fp_count)
+2026-05-05 16:05:51,969 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 8ms | tables=['departments']
+2026-05-05 16:06:16,813 | INFO | sql_chatbot | ═══ Pipeline START | query: overdue invoice aging and outstanding amount by company
+ ═══
+2026-05-05 16:06:17,128 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 312ms
+2026-05-05 16:06:17,129 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: requires cross-entity analysis and report generation | query: overdue invoice aging and outstanding amount by company
+
+2026-05-05 16:06:17,130 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (316ms) | requires cross-entity analysis and report generation
+2026-05-05 16:06:17,131 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 16:06:17,454 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 323ms
+2026-05-05 16:06:17,455 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: overdue invoice aging and outstanding amount by company
+
+2026-05-05 16:06:17,455 | INFO | sql_chatbot | Decomposed into 2 sub-queries (324ms): ['list all overdue invoices with company n', 'count overdue invoices grouped by compan']
+2026-05-05 16:06:17,456 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 16:06:17,457 | INFO | sql_chatbot | FastPath route: company_invoice | query: list all overdue invoices with company name and total outsta
+2026-05-05 16:06:17,458 | INFO | sql_chatbot | FastPath route: overdue_aging | query: count overdue invoices grouped by company
+2026-05-05 16:06:17,468 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 16:06:17,483 | INFO | sql_chatbot | FastPath HIT (specialized=overdue_aging)
+2026-05-05 16:06:17,486 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 29ms | sources=['fast_path', 'fast_path']
+2026-05-05 16:06:17,486 | INFO | sql_chatbot | Parallel execution done (31ms): 2 results
+2026-05-05 16:06:17,487 | INFO | sql_chatbot | Synthesis format: default | query: overdue invoice aging and outstanding amount by company
+
+2026-05-05 16:06:19,144 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 1655ms
+2026-05-05 16:06:19,144 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 16:06:19,145 | INFO | sql_chatbot | Synthesis done (1657ms)
+2026-05-05 16:06:19,146 | INFO | sql_chatbot | ═══ Pipeline DONE | total=2333ms | layer=complex | parts=2 | tables=['invoices'] ═══
+2026-05-05 16:06:45,681 | INFO | sql_chatbot | ═══ Pipeline START | query: total revenue this financial year
+ ═══
+2026-05-05 16:06:45,683 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: total revenue this financial year
+
+2026-05-05 16:06:45,685 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (2ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:06:45,685 | INFO | sql_chatbot | FastPath route: general | query: total revenue this financial year
+
+2026-05-05 16:06:45,693 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:06:45,694 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 9ms | tables=['invoices']
+2026-05-05 16:07:28,798 | INFO | sql_chatbot | ═══ Pipeline START | query: give me revenue of april 2026 ═══
+2026-05-05 16:07:28,799 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me revenue of april 2026
+2026-05-05 16:07:28,799 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (0ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:07:28,800 | INFO | sql_chatbot | FastPath route: general | query: give me revenue of april 2026
+2026-05-05 16:07:28,804 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:07:28,804 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 5ms | tables=['invoices']
+2026-05-05 16:08:04,187 | INFO | sql_chatbot | ═══ Pipeline START | query: give me revenue of april month only 2026 ═══
+2026-05-05 16:08:04,189 | INFO | sql_chatbot | Classifier SIMPLE fast-screen hit | query: give me revenue of april month only 2026
+2026-05-05 16:08:04,190 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (1ms) | clear single-intent pattern — no LLM needed
+2026-05-05 16:08:04,191 | INFO | sql_chatbot | FastPath route: general | query: give me revenue of april month only 2026
+2026-05-05 16:08:04,201 | INFO | sql_chatbot | FastPath HIT (_fp_revenue)
+2026-05-05 16:08:04,203 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 12ms | tables=['invoices']
+2026-05-05 16:10:14,959 | INFO | sql_chatbot | Guard: vague query: pending tasks
+2026-05-05 16:10:38,835 | INFO | sql_chatbot | ═══ Pipeline START | query: give me all pending tasks list by user name  ═══
+2026-05-05 16:10:39,097 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 261ms
+2026-05-05 16:10:39,097 | INFO | sql_chatbot | Classifier LLM → SIMPLE | reason: one lookup with filter by user name | query: give me all pending tasks list by user name 
+2026-05-05 16:10:39,098 | INFO | sql_chatbot | ═══ Classifier: SIMPLE (262ms) | one lookup with filter by user name
+2026-05-05 16:10:39,098 | INFO | sql_chatbot | FastPath route: general | query: give me all pending tasks list by user name 
+2026-05-05 16:10:39,106 | INFO | sql_chatbot | FastPath HIT (_fp_tasks)
+2026-05-05 16:10:39,106 | INFO | sql_chatbot | ═══ Layer 1 HIT (fast-path) | 8ms | tables=['createtasks']
+2026-05-05 16:12:43,941 | INFO | sql_chatbot | ═══ Pipeline START | query: give me all invoices list of april 2026 with that total  (referring to createtas ═══
+2026-05-05 16:12:44,325 | INFO | sql_chatbot | LLM [classify/Groq-8b] ✓ 384ms
+2026-05-05 16:12:44,326 | INFO | sql_chatbot | Classifier LLM → COMPLEX | reason: This query requires a list of invoices for a specific month with a total that involves a related entity (createtasks) | query: give me all invoices list of april 2026 with that total  (re
+2026-05-05 16:12:44,326 | INFO | sql_chatbot | ═══ Classifier: COMPLEX (385ms) | This query requires a list of invoices for a specific month with a total that involves a related entity (createtasks)
+2026-05-05 16:12:44,327 | INFO | sql_chatbot | ═══ COMPLEX path: Decompose → Parallel → Synthesize
+2026-05-05 16:12:44,328 | INFO | sql_chatbot | Schema: discovered 45 tables
+2026-05-05 16:12:44,758 | INFO | sql_chatbot | LLM [decompose/Groq-8b] ✓ 430ms
+2026-05-05 16:12:44,759 | INFO | sql_chatbot | Decompose: 2 sub-queries for query: give me all invoices list of april 2026 with that total  (re
+2026-05-05 16:12:44,760 | INFO | sql_chatbot | Decomposed into 2 sub-queries (432ms): ['list all invoices created in April 2026', 'total count of createtasks']
+2026-05-05 16:12:44,760 | INFO | sql_chatbot | Executor: starting 2 sub-queries | workers=2 | per-query timeout=90s
+2026-05-05 16:12:44,761 | INFO | sql_chatbot | FastPath route: general | query: list all invoices created in April 2026
+2026-05-05 16:12:44,764 | INFO | sql_chatbot | FastPath route: general | query: total count of createtasks
+2026-05-05 16:12:44,773 | INFO | sql_chatbot | FastPath HIT (_fp_tasks)
+2026-05-05 16:12:44,775 | INFO | sql_chatbot | FastPath HIT (_fp_list_records)
+2026-05-05 16:12:44,776 | INFO | sql_chatbot | Executor: completed 2/2 sub-queries in 15ms | sources=['fast_path', 'fast_path']
+2026-05-05 16:12:44,777 | INFO | sql_chatbot | Parallel execution done (16ms): 2 results
+2026-05-05 16:12:44,777 | INFO | sql_chatbot | Synthesis format: list | query: give me all invoices list of april 2026 with that total  (re
+2026-05-05 16:12:45,948 | INFO | sql_chatbot | LLM [synthesize/Groq-70b] ✓ 1170ms
+2026-05-05 16:12:45,950 | INFO | sql_chatbot | Synthesis done in 0ms
+2026-05-05 16:12:45,950 | INFO | sql_chatbot | Synthesis done (1172ms)
+2026-05-05 16:12:45,950 | INFO | sql_chatbot | ═══ Pipeline DONE | total=2010ms | layer=complex | parts=2 | tables=['createtasks', 'invoices'] ═══
