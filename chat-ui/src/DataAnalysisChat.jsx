@@ -348,7 +348,7 @@ function QueryPlan({ plan }) {
   if (!plan || typeof plan !== "object") return null;
   const items = [];
   if (plan.intent) items.push({ label: `Intent: ${plan.intent}`, color: "amber" });
-  if (plan.collection) items.push({ label: `Collection: ${plan.collection}`, color: "blue" });
+  if (plan.collection) items.push({ label: `Tables: ${plan.collection}`, color: "blue" });
   if (plan.filters && Object.keys(plan.filters).length) {
     items.push({ label: `Filters: ${Object.entries(plan.filters).map(([k, v]) => `${k}=${v}`).join(", ")}`, color: "purple" });
   }
@@ -507,15 +507,18 @@ function MessageBubble({ msg }) {
               )}
               <QueryPlan plan={msg.query_plan} />
               {msg.query_used && (
-                <Collapsible title="MongoDB Query">
-                  {typeof msg.query_used === "object"
-                    ? Object.entries(msg.query_used).map(([coll, spec]) => (
-                        <div key={coll}>
-                          <div className="query-collection-label">Collection: {coll}</div>
-                          <JsonView data={spec} />
-                        </div>
+                <Collapsible title="SQL Query">
+                  {Array.isArray(msg.query_used)
+                    ? msg.query_used.map((q, idx) => (
+                        <pre key={idx} className="json-view">
+                          {q}
+                        </pre>
                       ))
-                    : <JsonView data={msg.query_used} />}
+                    : (
+                        <pre className="json-view">
+                          {msg.query_used}
+                        </pre>
+                      )}
                 </Collapsible>
               )}
               {msg.data && !answerHasTable && <Collapsible title="Raw JSON"><JsonView data={msg.data} /></Collapsible>}

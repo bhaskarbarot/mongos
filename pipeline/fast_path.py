@@ -417,7 +417,9 @@ ORDER BY date_trunc('month', {doc_date_expr})""".strip()
 
 def _fp_count(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
-    if not any(kw in text for kw in ["how many", "count", "total number", "number of"]):
+    has_count_word = any(kw in text for kw in ["how many", "count", "total number", "number of"])
+    has_total_word = bool(re.search(r"\btotal\b", text))
+    if not (has_count_word or has_total_word):
         return None
 
     table_names = get_table_names(agent)
@@ -443,6 +445,10 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     if not table:
         return None
 
+    # "details/detail of <entity>" should be handled as grouped summary, not raw list.
+    if re.search(r"\bdetails?\b", text):
+        return None
+
     time_cond  = _parse_time_condition(text)
     where      = f"WHERE {time_cond['condition']}" if time_cond else ""
     time_label = f" for {time_cond['label']}" if time_cond else ""
@@ -456,12 +462,20 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     wants_list = any(kw in text for kw in [
         "give me", "show me", "show", "list", "names", "name", "what are", "tell me",
     ])
-    if wants_list and total > 0:
+    wants_all  = bool(re.search(r"\ball\b", text))
+
+    # Rule:
+    # - explicit count-only phrasing -> count only
+    # - "total" (without explicit count-only phrasing) -> count + list
+    # - "all" -> count + list
+    explicit_count_only = bool(re.search(r"\b(count|how many|number of|count of)\b", text)) and not has_total_word
+    include_list = (wants_all or (has_total_word and not explicit_count_only) or wants_list) and not explicit_count_only
+    if include_list and total > 0:
         fields    = get_document_fields(agent, table)
         name_expr = REGISTRY.display_name_expr(table, fields)
         list_sql  = (
             f'SELECT {name_expr} AS name FROM "{table}" {where} '
-            f'ORDER BY updated_at DESC LIMIT 50'
+            f'ORDER BY updated_at DESC LIMIT 100'
         ).strip()
         list_rows = run_sql(agent, list_sql)
         names     = [str(r[0]).strip() for r in list_rows if r and r[0] and str(r[0]).strip()]
@@ -495,7 +509,8 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
         "assigned", "priority", "region", "country", "currency",
     ]
     group_kw = next((kw for kw in GROUP_KEYWORDS if kw in text), None)
-    if not group_kw:
+    wants_detail_summary = bool(re.search(r"\bdetails?\b", text))
+    if not group_kw and not wants_detail_summary:
         return None
     # If the user is asking for a specific value of that field — not a group-by
     specific_val = re.search(
@@ -530,6 +545,14 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
     }
 
     table, group_field = None, None
+    DEFAULT_DETAIL_FIELD_BY_TABLE: Dict[str, List[str]] = {
+        "deals": ["stage", "type", "status", "category"],
+        "invoices": ["payment_status", "status", "type"],
+        "contacts": ["leadStatus", "lifecycleStage", "status", "type"],
+        "tasks": ["status", "priority", "type"],
+        "createtasks": ["status", "priority", "type"],
+        "companies": ["leadStatus", "lifecycleStage", "status", "category"],
+    }
 
     # Step 1 — explicitly mentioned entity table (highest priority)
     for t in table_names:
@@ -572,7 +595,26 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
                 table, group_field = t, match
                 break
     if not table or not group_field:
-        return None
+        # "details of <entity>" fallback: pick a sensible default grouping field.
+        if wants_detail_summary:
+            entity_table = None
+            for t in table_names:
+                tl = t.lower()
+                if re.search(rf"\b{re.escape(tl)}\b", text) or (
+                    tl.endswith("s") and re.search(rf"\b{re.escape(tl[:-1])}\b", text)
+                ):
+                    entity_table = t
+                    break
+            if entity_table:
+                fields = get_document_fields(agent, entity_table)
+                preferred = DEFAULT_DETAIL_FIELD_BY_TABLE.get(entity_table.lower(), ["status", "type", "category"])
+                for pref in preferred:
+                    group_field = next((f for f in fields if f.lower() == pref or pref in f.lower()), None)
+                    if group_field:
+                        table = entity_table
+                        break
+        if not table or not group_field:
+            return None
 
     wants_sum = any(kw in text for kw in _SUM_QUERY_KEYWORDS)
     time_cond = _parse_time_condition(text)
@@ -607,8 +649,12 @@ GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20""".strip()
         val    = row[0] if row[0] else "Unknown"
         metric = coerce_number(row[1])
         lines.append(f"| {val} | {fmt_number(metric)} |")
+    total_line = ""
+    if not wants_sum:
+        total_items = int(sum(coerce_number(r[1]) for r in rows))
+        total_line = f"**Total {table}: {fmt_number(total_items)}**\n\n"
     return {
-        "answer":      f"**{table.title()}** by {group_field}{time_label}:\n\n" + "\n".join(lines),
+        "answer":      total_line + f"**{table.title()}** by {group_field}{time_label}:\n\n" + "\n".join(lines),
         "tables_used": [table],
         "confidence":  0.96,
         "sql_queries": [sql],
@@ -711,6 +757,9 @@ def _fp_tasks(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
     if not any(kw in text for kw in ["task", "follow-up", "followup", "follow up", "todo"]):
         return None
+    # Let _fp_count handle explicit count intents for tasks.
+    if any(kw in text for kw in ["how many", "count", "number of", "total number"]):
+        return None
 
     table_names = get_table_names(agent)
     table       = resolve_entity_table("tasks", table_names, user_query)
@@ -786,8 +835,12 @@ def _fp_tasks(agent, user_query: str) -> Optional[Dict]:
 
 def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
-    if not re.search(r"\b(give me|tell me|show me|show|list|get|fetch|display|all)\b", text):
+    if not re.search(
+        r"\b(give me|tell me|show me|show|list|get|fetch|display|all|top|first|highest|lowest|biggest|largest|recent|latest|newest|oldest|cheapest|details?)\b",
+        text,
+    ):
         return None
+    wants_details = bool(re.search(r"\bdetails?\b", text))
 
     table_names = get_table_names(agent)
     table: Optional[str] = None
@@ -894,7 +947,10 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
     where = ("WHERE " + " AND ".join(f"({p})" for p in where_parts)) if where_parts else ""
 
     # ── Ordering / Limit ───────────────────────────────────────────────────────
-    amount_field = REGISTRY.get(table, "amount", fields)
+    amount_field = REGISTRY.get(table, "amount", fields) or next(
+        (f for f in fields if f.lower() in ["grand_total", "grand_total_in_usd", "amount", "total", "value"]),
+        None,
+    )
 
     # top N (explicit number) or bare "top" (→ 10) or singular noun (→ 1)
     top_match   = re.search(r"\btop\s+(\d+)\b", text)
@@ -969,9 +1025,19 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         num   = n_match.group(1) or n_match.group(2)
         limit = min(int(num), 100) if num else 20
         order = _date_desc()
+    elif re.search(r"\ball\b", text):
+        limit = 100
+        order = _date_desc()
+    elif wants_details:
+        limit = 100
+        order = _date_desc()
     else:
         limit = 20
         order = _date_desc()
+
+    count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
+    total_rows = run_sql(agent, count_sql)
+    total_count = coerce_number(total_rows[0][0] if total_rows else 0)
 
     sql  = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
     rows = run_sql(agent, sql)
@@ -980,7 +1046,7 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
             "answer":      f"No **{table}** records found.",
             "tables_used": [table],
             "confidence":  0.9,
-            "sql_queries": [sql],
+            "sql_queries": [count_sql, sql],
             "_entity":     table,
         }
 
@@ -992,11 +1058,16 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
 
     time_label = f" ({time_cond['label']})" if time_cond else ""
     label      = f"top {limit}" if top_match else str(len(rows))
+    summary = (
+        f"**Total {table}: {fmt_number(total_count)}**\n\n"
+        if (re.search(r"\ball\b", text) or wants_details)
+        else ""
+    )
     return {
-        "answer":      f"**{label} {table}**{time_label}:\n\n" + "\n".join(lines),
+        "answer":      summary + f"**{label} {table}**{time_label}:\n\n" + "\n".join(lines),
         "tables_used": [table],
         "confidence":  0.95,
-        "sql_queries": [sql],
+        "sql_queries": [count_sql, sql],
         "_entity":     table,
     }
 
