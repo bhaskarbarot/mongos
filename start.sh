@@ -126,7 +126,8 @@ python3 -m uvicorn api:app \
   --host 0.0.0.0 \
   --port 8000 \
   --log-level info \
-  >> "$ROOT/logs/backend.log" 2>&1 &
+  > >(tee -a "$ROOT/logs/backend.log") \
+  2> >(tee -a "$ROOT/logs/backend.log" >&2) &
 BACKEND_PID=$!
 
 READY=0
