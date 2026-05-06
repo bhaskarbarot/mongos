@@ -1,0 +1,18 @@
+[
+  {
+    "ts": 1778044083.9280026,
+    "query": "test",
+    "rating": 5,
+    "comment": "great",
+    "sources": [],
+    "query_plan": null
+  },
+  {
+    "ts": 1778044128.9236774,
+    "query": "q",
+    "rating": 4,
+    "comment": "",
+    "sources": [],
+    "query_plan": null
+  }
+]

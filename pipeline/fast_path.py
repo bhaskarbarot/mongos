@@ -201,6 +201,37 @@ def _parse_time_condition(text: str) -> Optional[Dict[str, str]]:
         if keyword in t:
             return {"condition": cond, "label": label}
 
+    # ── Financial year (India: Apr 1 – Mar 31) ────────────────────────────────
+    import time as _t
+    _now_month     = _t.gmtime().tm_mon
+    _now_year      = _t.gmtime().tm_year
+    _fy_start_year = _now_year if _now_month >= 4 else _now_year - 1
+
+    # "FY 2025" / "FY2025" / "financial year 2025" — explicit year first
+    fy_year_m = re.search(r"\bfy\s*(\d{4})\b|\bfinancial\s+year\s+(\d{4})\b", t, re.I)
+    if fy_year_m:
+        fy_y = int(fy_year_m.group(1) or fy_year_m.group(2))
+        return {
+            "condition": (f"updated_at >= DATE '{fy_y}-04-01'"
+                          f" AND updated_at < DATE '{fy_y+1}-04-01'"),
+            "label": f"FY {fy_y}-{str(fy_y+1)[-2:]}",
+        }
+    # "last/previous financial year" / "last FY" — must check BEFORE "this" variant
+    if re.search(r"\blast\s+financial\s+year\b|\blast\s+fy\b|\bprevious\s+(financial\s+year|fy)\b", t):
+        _lfy = _fy_start_year - 1
+        return {
+            "condition": (f"updated_at >= DATE '{_lfy}-04-01'"
+                          f" AND updated_at < DATE '{_lfy+1}-04-01'"),
+            "label": f"FY {_lfy}-{str(_lfy+1)[-2:]}",
+        }
+    # "this financial year" / "current FY" / "this FY"
+    if re.search(r"\bthis\s+financial\s+year\b|\bcurrent\s+(financial\s+year|fy)\b|\bthis\s+fy\b", t):
+        return {
+            "condition": (f"updated_at >= DATE '{_fy_start_year}-04-01'"
+                          f" AND updated_at < DATE '{_fy_start_year+1}-04-01'"),
+            "label": f"FY {_fy_start_year}-{str(_fy_start_year+1)[-2:]}",
+        }
+
     # ── "Month YYYY" (explicit month + year) ──────────────────────────────────
     month_year = _extract_month_year(t)
     if month_year:
@@ -298,6 +329,9 @@ def _classify_route(text: str) -> str:
 
 def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
+    # "sales order(s)" → NOT revenue, belongs to sales table list handler
+    if re.search(r"\bsales\s+order", text):
+        return None
     explicit_revenue = any(kw in text for kw in [
         "revenue", "income", "earning", "billing", "invoice total", "collection",
     ])
@@ -470,19 +504,59 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
     if specific_val:
         return None
 
+    # ── Entity-aware field aliases ─────────────────────────────────────────────
+    # Deals has no "status" field — its equivalent is "stage".
+    # "category" in deals maps to "type" or "project_type".
+    # This prevents _fp_group_by from falling through to the wrong table (e.g. bills).
+    _ENTITY_FIELD_MAP: Dict[str, Dict[str, str]] = {
+        "deals": {
+            "status":   "stage",
+            "category": "type",
+            "group":    "type",
+            "phase":    "stage",
+        },
+        "contacts": {
+            "status": "leadStatus",
+            "stage":  "lifecycleStage",
+        },
+        "companies": {
+            "status":    "leadStatus",
+            "stage":     "lifecycleStage",
+            "lifecycle": "lifecycleStage",
+        },
+        "invoices": {
+            "status": "payment_status",
+        },
+    }
+
     table, group_field = None, None
+
+    # Step 1 — explicitly mentioned entity table (highest priority)
     for t in table_names:
-        tl       = t.lower()
+        tl = t.lower()
         mentioned = re.search(rf"\b{re.escape(tl)}\b", text) or (
             tl.endswith("s") and re.search(rf"\b{re.escape(tl[:-1])}\b", text)
         )
-        if mentioned:
-            fields = get_document_fields(agent, t)
-            match  = next((f for f in fields if group_kw in f.lower()), None)
-            if match:
-                table, group_field = t, match
+        if not mentioned:
+            continue
+        fields = get_document_fields(agent, t)
+        fl_lower = {f.lower(): f for f in fields}
+        # Exact match first (e.g. "stage" must not pick "Pre_stage")
+        exact = next((f for f in fields if f.lower() == group_kw), None)
+        match = exact or next((f for f in fields if group_kw in f.lower()), None)
+        if match:
+            table, group_field = t, match
+            break
+        # Check semantic alias (e.g. "status" → "stage" for deals)
+        alias_field_kw = _ENTITY_FIELD_MAP.get(tl, {}).get(group_kw)
+        if alias_field_kw:
+            alias_match = next((f for f in fields if f.lower() == alias_field_kw
+                                or alias_field_kw in f.lower()), None)
+            if alias_match:
+                table, group_field = t, alias_match
                 break
 
+    # Step 2 — no explicitly mentioned table: search all tables
     if not table:
         for t in table_names:
             fields = get_document_fields(agent, t)
@@ -740,7 +814,10 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         if len(select_parts) >= 5:
             break
 
+    # ── Field filters ──────────────────────────────────────────────────────────
     field_filters: List[str] = []
+
+    # 1. Explicit "field is value" pattern  e.g. "currency is USD", "status is paid"
     for role in ["status", "currency", "owner"]:
         f = REGISTRY.get(table, role, fields)
         if f:
@@ -749,40 +826,152 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
                 val = vm.group(1).upper() if role == "currency" else vm.group(1)
                 field_filters.append(f"document->>'{f}' ILIKE '{val}'")
 
+    # 2. Status adjective detection  "paid invoices" / "list of paid invoices"
+    #    Checks for status words BEFORE the table noun — no "is/=" needed
+    if not any("payment_status" in ff or "status" in ff for ff in field_filters):
+        _STATUS_ADJECTIVES = {
+            # invoice payment_status values
+            r"\bpaid\b":                  ("payment_status", "paid"),
+            r"\bunpaid\b":                ("payment_status", None),      # NOT IN paid/cancelled
+            r"\bconfirmed\b":             ("payment_status", "confirmed"),
+            r"\bdraft\b":                 ("payment_status", "draft"),
+            r"\bcancell?ed\b":            ("payment_status", "cancelled"),
+            r"\bpartial[\s_]?payment\b":  ("payment_status", "partial_payment"),
+            # generic status values
+            r"\bpending\b":               ("status", "Pending"),
+            r"\bcompleted?\b":            ("status", "Completed"),
+            r"\bopen\b":                  ("status", "Open"),
+        }
+        for pattern, (field_kw, val) in _STATUS_ADJECTIVES.items():
+            if re.search(pattern, text):
+                # Find the actual field name in this table
+                actual = next((f for f in fields if f.lower() == field_kw
+                               or field_kw in f.lower()), None)
+                if actual:
+                    if val is None:  # "unpaid" → NOT IN (paid, cancelled)
+                        field_filters.append(
+                            f"COALESCE(document->>'{actual}','') NOT IN ('paid','cancelled')"
+                        )
+                    else:
+                        field_filters.append(f"document->>'{actual}' ILIKE '{val}'")
+                    break
+
+    # 3. Currency filter from query text  "USD invoices" / "invoices in INR"
+    if not any("currency" in ff.lower() for ff in field_filters):
+        cur_m = re.search(r"\b([A-Z]{3})\b", user_query)
+        if cur_m:
+            currency_field = REGISTRY.get(table, "currency", fields) or \
+                             next((f for f in fields if "currency" in f.lower()), None)
+            if currency_field:
+                field_filters.append(
+                    f"UPPER(document->>'{currency_field}') = '{cur_m.group(1)}'"
+                )
+
+    # ── Time filter using document date field (NOT updated_at) ────────────────
+    _DATE_FIELD_PRIORITY = [
+        "invoice_date", "sales_date", "due_date", "closeDate",
+        "close_date", "createdAt", "date", "order_date",
+    ]
+    fl_lower = {f.lower(): f for f in fields}
+    doc_date_field = next(
+        (fl_lower[d] for d in _DATE_FIELD_PRIORITY if d in fl_lower), None
+    )
+    if not doc_date_field:
+        doc_date_field = next((f for f in fields if "date" in f.lower()), None)
+
     time_cond   = _parse_time_condition(text)
     where_parts = []
     if time_cond:
         cond = time_cond["condition"]
-        if time_cond.get("use_doc_date"):
-            doc_date = REGISTRY.get(table, "date", fields)
-            if doc_date:
-                cond = cond.replace(
-                    "updated_at",
-                    f"NULLIF(document->>'{doc_date}','')::timestamptz",
-                )
+        # Replace updated_at with the real business date field
+        if doc_date_field:
+            doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+            cond = cond.replace("updated_at", doc_date_expr)
+            # Exclude nulls so partial-date rows don't bleed in
+            where_parts.append(f"{doc_date_expr} IS NOT NULL")
         where_parts.append(cond)
     where_parts.extend(field_filters)
     where = ("WHERE " + " AND ".join(f"({p})" for p in where_parts)) if where_parts else ""
 
-    top_match   = re.search(r"\btop\s+(\d+)\b", text)
-    n_match     = re.search(r"\blast\s+(\d+)\b|(\d+)\s+(?:record|row|result|item)s?\b", text)
-    first_match = re.search(r"\b(1st|first|oldest|earliest)\b", text)
+    # ── Ordering / Limit ───────────────────────────────────────────────────────
     amount_field = REGISTRY.get(table, "amount", fields)
 
+    # top N (explicit number) or bare "top" (→ 10) or singular noun (→ 1)
+    top_match   = re.search(r"\btop\s+(\d+)\b", text)
+    bare_top    = re.search(r"\btop\b", text) and not top_match       # "top invoice" / "top deal"
+    singular    = re.search(r"\b(the\s+)?(top|best|highest|biggest)\s+\w+\b", text) and \
+                  not re.search(r"\b(top|best)\s+\d+\b|\bplural\b", text)
+    n_match     = re.search(r"\blast\s+(\d+)\b|(\d+)\s+(?:record|row|result|item)s?\b", text)
+    first_match = re.search(r"\b(1st|first|oldest|earliest)\b", text)
+
+    # Synonyms for DESC: highest, biggest, largest, most, recent, latest, newest
+    sort_desc_kw = re.search(
+        r"\b(highest\s+to\s+(lower|lowest)|descend\w*|by\s+amount"
+        r"|largest\s+first|biggest\s+first|most\s+expensive"
+        r"|sort\w*\s+desc\w*|order\w*\s+desc\w*|highest\s+first"
+        r"|biggest|largest|most\b|recent|latest|newest)\b",
+        text,
+    )
+    # Synonyms for ASC: smallest, cheapest, lowest, oldest
+    sort_asc_kw = re.search(
+        r"\b(lowest\s+to\s+(higher|highest)|ascend\w*|smallest\s+first"
+        r"|cheapest\s+first|sort\w*\s+asc\w*|order\w*\s+asc\w*"
+        r"|lowest\s+first|smallest|cheapest|oldest)\b",
+        text,
+    )
+
+    # Build the ORDER BY with tie-breaker (#12 — ranking stability)
+    def _amount_desc():
+        base = f"NULLIF(document->>'{amount_field}','')::numeric DESC NULLS LAST"
+        if doc_date_field:
+            base += f", NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+        return base
+
+    def _amount_asc():
+        base = f"NULLIF(document->>'{amount_field}','')::numeric ASC NULLS LAST"
+        if doc_date_field:
+            base += f", NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+        return base
+
+    def _date_desc():
+        if doc_date_field:
+            return f"NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+        return "updated_at DESC"
+
+    # ── LIMIT: explicit top N always wins; sort direction only affects ORDER BY ──
+    # "top 5 invoices by amount highest to lowest" → LIMIT 5, ORDER BY amount DESC
+    # "give me invoices highest to lowest" → LIMIT 50, ORDER BY amount DESC
+    has_explicit_sort = bool(sort_asc_kw or sort_desc_kw)
+    has_amount_sort   = (sort_desc_kw or sort_asc_kw) and amount_field
+
     if first_match:
-        limit, order = 1, "updated_at ASC"
+        limit = 1
+        order = (f"NULLIF(document->>'{doc_date_field}','')::timestamptz ASC NULLS LAST"
+                 if doc_date_field else "updated_at ASC")
     elif top_match:
-        limit = min(int(top_match.group(1)), 50)
-        order = (
-            f"NULLIF(document->>'{amount_field}','')::numeric DESC NULLS LAST"
-            if amount_field else "updated_at DESC"
-        )
+        # "top N …" — N always sets the limit; sort direction sets order
+        limit = min(int(top_match.group(1)), 100)
+        order = (_amount_asc()  if sort_asc_kw  and amount_field else
+                 _amount_desc() if has_amount_sort               else
+                 _amount_desc() if amount_field                   else _date_desc())
+    elif bare_top and re.search(r"\b(invoice|deal|sales|order|customer)\b", text):
+        limit = 10
+        order = _amount_asc() if sort_asc_kw and amount_field else \
+                _amount_desc() if amount_field else _date_desc()
+    elif sort_asc_kw and amount_field:
+        limit = 50
+        order = _amount_asc()
+    elif sort_desc_kw and amount_field and \
+         re.search(r"\b(biggest|largest|most|highest|recent|latest|newest|descend)\b", text):
+        limit = 50
+        order = _amount_desc()
     elif n_match:
         num   = n_match.group(1) or n_match.group(2)
-        limit = (min(int(num), 50) if num else 20)
-        order = "updated_at DESC"
+        limit = min(int(num), 100) if num else 20
+        order = _date_desc()
     else:
-        limit, order = 20, "updated_at DESC"
+        limit = 20
+        order = _date_desc()
 
     sql  = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
     rows = run_sql(agent, sql)
@@ -1537,6 +1726,86 @@ def _fp_system_config(agent, user_query: str) -> Optional[Dict]:
 # HANDLER DISPATCH TABLES
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _fp_sales(agent, user_query: str) -> Optional[Dict]:
+    """
+    Handle 'give me sales orders', 'top sales order by amount', 'list sales' queries.
+    Routes explicitly to the `sales` table — prevents _fp_revenue from mishandling them.
+    """
+    text = normalize_text(user_query)
+    # Only trigger on explicit "sales order" phrase or "give me sales" without revenue intent
+    if not (re.search(r"\bsales\s+order", text) or
+            (re.search(r"\bsales\b", text) and
+             not re.search(r"\brevenue|income|billing|total\s+sales\b", text))):
+        return None
+
+    table_names = get_table_names(agent)
+    table = next((t for t in table_names if t.lower() == "sales"), None)
+    if not table:
+        return None
+
+    fields       = get_document_fields(agent, table)
+    amount_field = next((f for f in fields if f.lower() in
+                         ["grand_total_in_usd", "grand_total"]), None)
+    num_field    = next((f for f in fields if "sales_number" in f.lower() or "number" in f.lower()), None)
+    status_field = next((f for f in fields if f.lower() == "status"), None)
+    date_field   = next((f for f in fields if "sales_date" in f.lower() or "date" in f.lower()), None)
+
+    # Build select
+    select_parts = []
+    if num_field:    select_parts.append(f"document->>'{num_field}' AS sales_number")
+    if status_field: select_parts.append(f"document->>'{status_field}' AS status")
+    if amount_field: select_parts.append(
+        f"NULLIF(document->>'{amount_field}','')::numeric AS amount"
+    )
+    if date_field:   select_parts.append(f"document->>'{date_field}' AS date")
+    if not select_parts:
+        return None
+
+    # Ordering
+    top_match = re.search(r"\btop\s+(\d+)\b", text)
+    sort_desc = re.search(r"\bhighest|largest|by\s+amount|order\s+by\s+amount\b", text)
+
+    if top_match:
+        limit = min(int(top_match.group(1)), 50)
+    else:
+        limit = 20
+
+    order = (f"NULLIF(document->>'{amount_field}','')::numeric DESC NULLS LAST"
+             if (sort_desc or top_match) and amount_field
+             else f"NULLIF(document->>'{date_field}','')::timestamptz DESC NULLS LAST"
+             if date_field else "updated_at DESC")
+
+    # Status filter
+    where_parts = [f"COALESCE(document->>'deleted','false') != 'true'"]
+    for kw, val in [("confirmed", "Confirm"), ("draft", "Draft"), ("cancelled", "Cancel")]:
+        if kw in text and status_field:
+            where_parts.append(f"document->>'{status_field}' ILIKE '%{val}%'")
+            break
+
+    where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
+    sql   = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
+    rows  = run_sql(agent, sql)
+
+    if not rows:
+        return {"answer": "No sales orders found.", "tables_used": [table],
+                "confidence": 0.9, "sql_queries": [sql]}
+
+    headers = [p.split(" AS ")[-1].replace("_", " ").title() for p in select_parts]
+    lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in rows:
+        vals = ["—" if v is None else str(v) for v in row]
+        lines.append("| " + " | ".join(vals) + " |")
+
+    label = f"Top {limit}" if top_match else str(len(rows))
+    return {
+        "answer":      f"**{label} sales orders:**\n\n" + "\n".join(lines),
+        "tables_used": [table],
+        "confidence":  0.95,
+        "sql_queries": [sql],
+        "_entity":     table,
+    }
+
+
 _SPECIALIZED: Dict[str, Any] = {
     "search":           _fp_search,
     "quarterly":        _fp_quarterly,
@@ -1553,6 +1822,7 @@ _SPECIALIZED: Dict[str, Any] = {
 
 # General handlers tried in priority order when no specialized route matched
 _GENERAL = [
+    _fp_sales,          # before revenue — catches "sales orders" explicitly
     _fp_revenue,
     _fp_top_customers,
     _fp_deals_filter,
