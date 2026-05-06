@@ -21,7 +21,9 @@ import json
 import logging
 import os
 import re
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +34,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from config import settings
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -66,10 +70,10 @@ def _get_agent():
         return _agent
     except Exception as exc:
         _agent_error = str(exc)
-        LOGGER.error("Pipeline init failed: %s", exc)
+        LOGGER.error("Pipeline init failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=503,
-            detail=f"Database unavailable — start the PostgreSQL service first. ({exc})",
+            detail="Database unavailable — start the PostgreSQL service first.",
         )
 
 def _get_table_names_safe() -> list:
@@ -79,6 +83,48 @@ def _get_table_names_safe() -> list:
     except Exception:
         return []
 
+
+# ── E2: Safe error response helper ───────────────────────────────────────────
+
+def safe_error_response(exc: Exception, request_id: str = "") -> dict:
+    """Return a sanitized error dict — never exposes raw exception text."""
+    LOGGER.error("Internal error [RID:%s]: %s", request_id, exc, exc_info=True)
+    return {"error": "An internal error occurred", "request_id": request_id, "success": False}
+
+
+# ── E4: In-memory rate limiter (thread-safe, TTL=60s) ────────────────────────
+
+_rate_store: Dict[str, List[float]] = {}
+_rate_lock  = threading.Lock()
+
+def _check_rate(request: Request, limit: int, request_id: str = "") -> None:
+    """Raise HTTP 429 if the caller has exceeded `limit` requests in the last 60s.
+
+    Stale entries (IPs with no activity in the last 60s) are deleted on access
+    to prevent unbounded memory growth.
+    """
+    now = time.time()
+    ip  = request.client.host if request.client else "unknown"
+    key = f"{ip}:{request.url.path}"
+    with _rate_lock:
+        window = [t for t in _rate_store.get(key, []) if now - t < 60]
+        if not window:
+            # All timestamps expired — remove stale entry (memory leak prevention)
+            _rate_store.pop(key, None)
+        if len(window) >= limit:
+            _rate_store[key] = window
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "Rate limit exceeded, please slow down",
+                    "request_id": request_id,
+                    "success": False,
+                },
+            )
+        window.append(now)
+        _rate_store[key] = window
+
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="CRM AI Assistant API",
@@ -86,11 +132,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# E3: Hardened CORS — restrict origins, methods, and headers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # Vite dev server on any port
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.allowed_origins.split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -205,6 +252,7 @@ def _extract_structured_data(result: dict) -> Optional[Any]:
 
 @app.get("/health")
 async def health():
+    # No rate limiting on /health
     db_ok = _agent is not None
     return {
         "status":  "ok",
@@ -216,14 +264,16 @@ async def health():
 
 
 @app.get("/cache/status")
-async def cache_status():
+async def cache_status(request: Request):
+    _check_rate(request, 60, request_id=str(uuid.uuid4())[:8])
     # Cache is disabled — report honestly
     return {"redis_connected": False, "cache_disabled": True, "status": "disabled"}
 
 
 @app.get("/sources")
-async def sources():
+async def sources(request: Request):
     """Return available DB tables so the sidebar can show data sources."""
+    _check_rate(request, 60, request_id=str(uuid.uuid4())[:8])
     tables = _get_table_names_safe()
     return {
         "PostgreSQL (CRM)": {
@@ -234,8 +284,9 @@ async def sources():
 
 
 @app.get("/feedback/learnings")
-async def feedback_learnings():
+async def feedback_learnings(request: Request):
     """Return any saved feedback rules. Currently a stub."""
+    _check_rate(request, 60, request_id=str(uuid.uuid4())[:8])
     feedback_file = Path("logs/feedback_log.json")
     count = 0
     if feedback_file.exists():
@@ -255,11 +306,16 @@ async def feedback_learnings():
 
 
 @app.post("/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, request: Request):
     """
     Main chat endpoint.
     Accepts {query, history} → returns full response matching UI contract.
     """
+    # E5: generate correlation ID first so 429 responses also carry it
+    request_id = str(uuid.uuid4())[:8]
+    # E4: rate limit
+    _check_rate(request, 30, request_id=request_id)
+
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
@@ -268,19 +324,18 @@ async def chat(req: ChatRequest):
     mem = ConversationMemory()
     for msg in req.history[-6:]:
         if msg.role == "assistant":
-            # Try to set last_entity from previous response content
             pass  # ConversationMemory resolves pronouns; full rebuild not needed
 
-    LOGGER.info("POST /chat | query: %.80s", req.query)
+    LOGGER.info("[RID:%s] POST /chat | query: %.80s", request_id, req.query)
     t0 = time.perf_counter()
 
     try:
-        result = run_agent_query(_get_agent(), req.query, memory=mem)
+        result = run_agent_query(_get_agent(), req.query, memory=mem, request_id=request_id)
     except HTTPException:
         raise
     except Exception as exc:
-        LOGGER.error("Pipeline error: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {exc}")
+        err = safe_error_response(exc, request_id)
+        raise HTTPException(status_code=500, detail=err)
 
     elapsed_ms = round((time.perf_counter() - t0) * 1000)
 
@@ -307,12 +362,17 @@ async def chat(req: ChatRequest):
         "agent_time_ms":       round(latency_ms),
         "query_used":          query_used,
         "query_plan":          _build_query_plan(result),
+        "request_id":          request_id,
+        "metrics":             result.get("metrics"),
     }
 
 
 @app.post("/feedback")
-async def feedback(req: FeedbackRequest):
+async def feedback(req: FeedbackRequest, request: Request):
     """Store feedback to a local JSON file."""
+    request_id = str(uuid.uuid4())[:8]
+    _check_rate(request, 30, request_id=request_id)
+
     try:
         feedback_file = Path("logs/feedback_log.json")
         existing: list = []
@@ -330,30 +390,40 @@ async def feedback(req: FeedbackRequest):
             "query_plan":  req.query_plan,
         })
         feedback_file.write_text(json.dumps(existing, indent=2))
-        LOGGER.info("Feedback saved: rating=%d | query=%.60s", req.rating, req.query)
+        LOGGER.info("[RID:%s] Feedback saved: rating=%d | query=%.60s",
+                    request_id, req.rating, req.query)
     except Exception as exc:
-        LOGGER.warning("Feedback save error: %s", exc)
+        LOGGER.warning("[RID:%s] Feedback save error: %s", request_id, exc)
 
-    return {"status": "ok", "message": "Feedback received — thank you!"}
+    return {"status": "ok", "message": "Feedback received — thank you!", "request_id": request_id}
 
 
 @app.post("/cache/clear")
-async def cache_clear():
+async def cache_clear(request: Request):
     """Cache is disabled in this deployment."""
+    request_id = str(uuid.uuid4())[:8]
+    _check_rate(request, 30, request_id=request_id)
     return {
         "status": "ok",
         "cleared": False,
         "cache_disabled": True,
         "message": "Cache is disabled",
+        "request_id": request_id,
     }
 
 
 @app.post("/transcribe")
 async def transcribe(request: Request):
     """Audio transcription — not implemented in this deployment."""
+    request_id = str(uuid.uuid4())[:8]
+    _check_rate(request, 30, request_id=request_id)
     raise HTTPException(
         status_code=501,
-        detail="Voice transcription is not available in this deployment. Use text input.",
+        detail={
+            "error": "Voice transcription is not available in this deployment. Use text input.",
+            "request_id": request_id,
+            "success": False,
+        },
     )
 
 

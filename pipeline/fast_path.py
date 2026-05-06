@@ -53,6 +53,7 @@ from pipeline.utils import (
     fmt_number,
     format_rows_as_markdown_table,
     normalize_text,
+    sanitize_sql_value,
 )
 
 LOGGER = logging.getLogger("sql_chatbot")
@@ -382,7 +383,11 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
     label = time_cond["label"] if time_cond else "all time"
 
     total_sql = f'SELECT COALESCE(SUM({coalesce_expr}), 0) AS total FROM "{table}" {where}'.strip()
-    rows      = run_sql(agent, total_sql)
+    _res      = run_sql(agent, total_sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [total_sql]}
+    rows      = _res.rows
     total     = coerce_number(rows[0][0] if rows else 0)
     answer    = f"Total revenue for **{label}**: **{fmt_number(total)}**"
     sql_queries = [total_sql]
@@ -397,7 +402,8 @@ FROM "{table}" {where}
 GROUP BY date_trunc('month', {doc_date_expr})
 ORDER BY date_trunc('month', {doc_date_expr})""".strip()
         try:
-            b_rows = run_sql(agent, b_sql)
+            _b_res = run_sql(agent, b_sql)
+            b_rows = _b_res.rows
             if b_rows:
                 lines = ["\n**Monthly Breakdown:**", "| Month | Revenue |", "| --- | --- |"]
                 for r in b_rows:
@@ -454,7 +460,11 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     time_label = f" for {time_cond['label']}" if time_cond else ""
 
     count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
-    rows      = run_sql(agent, count_sql)
+    _res      = run_sql(agent, count_sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql]}
+    rows      = _res.rows
     total     = coerce_number(rows[0][0] if rows else 0)
     count_answer = f"Total **{table}**{time_label}: **{fmt_number(total)}**"
     sql_queries  = [count_sql]
@@ -477,7 +487,8 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
             f'SELECT {name_expr} AS name FROM "{table}" {where} '
             f'ORDER BY updated_at DESC LIMIT 100'
         ).strip()
-        list_rows = run_sql(agent, list_sql)
+        _list_res = run_sql(agent, list_sql)
+        list_rows = _list_res.rows
         names     = [str(r[0]).strip() for r in list_rows if r and r[0] and str(r[0]).strip()]
         sql_queries.append(list_sql)
         if names:
@@ -634,7 +645,11 @@ FROM "{table}" {where}
 GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20""".strip()
         metric_header = "Count"
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      f"No data found in **{table}** grouped by {group_field}.",
@@ -727,8 +742,12 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
         select_parts.append(f"document->>'{close_field}' AS close_date")
 
     sql  = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY updated_at DESC LIMIT 50".strip()
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
     label = matched_stage or ("overdue" if wants_overdue else "filtered")
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      f"No **{label}** deals found.",
@@ -810,11 +829,19 @@ def _fp_tasks(agent, user_query: str) -> Optional[Dict]:
     if not cols:
         return None
 
-    count_sql  = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
-    total_rows = run_sql(agent, count_sql)
-    total      = coerce_number(total_rows[0][0] if total_rows else 0)
-    sql        = f"SELECT {', '.join(cols)} FROM \"{table}\" {where} ORDER BY updated_at DESC LIMIT 20".strip()
-    rows       = run_sql(agent, sql)
+    count_sql   = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
+    _cnt_res    = run_sql(agent, count_sql)
+    if _cnt_res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql]}
+    total_rows  = _cnt_res.rows
+    total       = coerce_number(total_rows[0][0] if total_rows else 0)
+    sql         = f"SELECT {', '.join(cols)} FROM \"{table}\" {where} ORDER BY updated_at DESC LIMIT 20".strip()
+    _row_res    = run_sql(agent, sql)
+    if _row_res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql, sql]}
+    rows        = _row_res.rows
 
     if not rows:
         return {"answer": f"No {label} found.", "tables_used": [table], "confidence": 0.9, "sql_queries": [sql]}
@@ -876,7 +903,8 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         if f:
             vm = re.search(rf"\b{role}\s+(?:is|=|equals?|of)\s+([A-Za-z]{{2,}})", text, re.I)
             if vm:
-                val = vm.group(1).upper() if role == "currency" else vm.group(1)
+                val = sanitize_sql_value(vm.group(1).upper() if role == "currency" else vm.group(1))
+                # SAFE: val sanitized via sanitize_sql_value()
                 field_filters.append(f"document->>'{f}' ILIKE '{val}'")
 
     # 2. Status adjective detection  "paid invoices" / "list of paid invoices"
@@ -916,8 +944,10 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
             currency_field = REGISTRY.get(table, "currency", fields) or \
                              next((f for f in fields if "currency" in f.lower()), None)
             if currency_field:
+                cur_val = sanitize_sql_value(cur_m.group(1))
+                # SAFE: cur_val sanitized via sanitize_sql_value()
                 field_filters.append(
-                    f"UPPER(document->>'{currency_field}') = '{cur_m.group(1)}'"
+                    f"UPPER(document->>'{currency_field}') = '{cur_val}'"
                 )
 
     # ── Time filter using document date field (NOT updated_at) ────────────────
@@ -1035,12 +1065,20 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         limit = 20
         order = _date_desc()
 
-    count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
-    total_rows = run_sql(agent, count_sql)
+    count_sql   = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
+    _cnt_res    = run_sql(agent, count_sql)
+    if _cnt_res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql]}
+    total_rows  = _cnt_res.rows
     total_count = coerce_number(total_rows[0][0] if total_rows else 0)
 
-    sql  = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
-    rows = run_sql(agent, sql)
+    sql      = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
+    _row_res = run_sql(agent, sql)
+    if _row_res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql, sql]}
+    rows     = _row_res.rows
     if not rows:
         return {
             "answer":      f"No **{table}** records found.",
@@ -1109,8 +1147,13 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT {n}""".strip()
 FROM "{inv_table}" i {base_where}
 GROUP BY 1 ORDER BY 2 DESC LIMIT {n}""".strip()
 
-    rows       = run_sql(agent, sql)
+    _res       = run_sql(agent, sql)
     time_label = f" ({time_cond['label']})" if time_cond else ""
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [t for t in [inv_table, co_table] if t],
+                "confidence": 0.0, "sql_queries": [sql]}
+    rows       = _res.rows
     if not rows:
         return {
             "answer":      f"No customer revenue data found{time_label}.",
@@ -1160,9 +1203,10 @@ def _fp_targets(agent, user_query: str) -> Optional[Dict]:
     user_filter = ""
     user_m = re.search(r"(?:for|by|of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", user_query, re.I)
     if user_m:
-        uname   = user_m.group(1).strip()
+        uname   = sanitize_sql_value(user_m.group(1).strip())
         _GENERIC = {"all users", "all user", "every user", "each user", "this user", "the user"}
         if uname.lower() not in _GENERIC:
+            # SAFE: uname sanitized via sanitize_sql_value()
             user_filter = f"AND u.document->>'name' ILIKE '%{uname}%'"
 
     sales_exists = "sales" in table_names
@@ -1192,7 +1236,11 @@ WHERE 1=1 {period_filter} {user_filter}
 ORDER BY NULLIF(t.document->>'year','')::int DESC,
          NULLIF(t.document->>'month','')::int DESC, user_name""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["targets", "users"], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      f"No target data found for {period_label}.",
@@ -1224,7 +1272,7 @@ def _fp_search(agent, user_query: str) -> Optional[Dict]:
     m = re.search(r"(?:who is|who are|find|search for?)\s+(.+?)(?:\s*\??\s*$)", text, re.I)
     if not m:
         return None
-    term = m.group(1).strip().strip("?").strip()
+    term = sanitize_sql_value(m.group(1).strip().strip("?").strip())
     if len(term) < 2:
         return None
 
@@ -1232,11 +1280,13 @@ def _fp_search(agent, user_query: str) -> Optional[Dict]:
     results, sql_queries, tables_used = [], [], []
 
     if "users" in table_names:
+        # SAFE: term sanitized via sanitize_sql_value()
         sql = f"""SELECT document->>'name', document->>'email', document->>'department'
 FROM "users"
 WHERE document->>'name' ILIKE '%{term}%'
   AND COALESCE(document->>'isActive','true') != 'false' LIMIT 5"""
-        rows = run_sql(agent, sql)
+        _r = run_sql(agent, sql)
+        rows = _r.rows
         if rows:
             tables_used.append("users")
             sql_queries.append(sql)
@@ -1244,12 +1294,14 @@ WHERE document->>'name' ILIKE '%{term}%'
                 results.append(f"**User**: {r[0] or '—'} | Email: {r[1] or '—'}")
 
     if "contacts" in table_names and not results:
+        # SAFE: term sanitized via sanitize_sql_value()
         sql = f"""SELECT TRIM(CONCAT(COALESCE(document->>'firstName',''),' ',COALESCE(document->>'lastName',''))) AS name,
   document->>'email', document->>'jobTitle', document->>'phoneNumber'
 FROM "contacts"
 WHERE (document->>'firstName' ILIKE '%{term}%' OR document->>'lastName' ILIKE '%{term}%'
        OR document->>'email' ILIKE '%{term}%') LIMIT 5"""
-        rows = run_sql(agent, sql)
+        _r = run_sql(agent, sql)
+        rows = _r.rows
         if rows:
             tables_used.append("contacts")
             sql_queries.append(sql)
@@ -1259,11 +1311,13 @@ WHERE (document->>'firstName' ILIKE '%{term}%' OR document->>'lastName' ILIKE '%
                 )
 
     if "companies" in table_names and not results:
+        # SAFE: term sanitized via sanitize_sql_value()
         sql = f"""SELECT document->>'companyName', document->>'email', document->>'websiteUrl'
 FROM "companies"
 WHERE document->>'companyName' ILIKE '%{term}%'
   AND COALESCE(document->>'deleted','false') != 'true' LIMIT 5"""
-        rows = run_sql(agent, sql)
+        _r = run_sql(agent, sql)
+        rows = _r.rows
         if rows:
             tables_used.append("companies")
             sql_queries.append(sql)
@@ -1332,7 +1386,11 @@ WHERE document->>'{matched_field}' IS NOT NULL
   AND COALESCE(document->>'deleted','false') != 'true'
 ORDER BY 1""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [matched_table], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      f"No data found in **{matched_table}**.",
@@ -1389,7 +1447,11 @@ WHERE COALESCE(document->>'deleted','false') != 'true'
 GROUP BY date_part('year', {date_expr}), date_part('quarter', {date_expr})
 ORDER BY date_part('year', {date_expr}), date_part('quarter', {date_expr})""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      f"No revenue data found for {year_label}.",
@@ -1443,7 +1505,11 @@ WHERE NULLIF(i.document->>'due_date','')::timestamptz < NOW()
   AND COALESCE(i.document->>'deleted','false') != 'true'
 GROUP BY 1 ORDER BY outstanding_amount DESC LIMIT 30""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": tbl_used, "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      "No overdue invoices found.",
@@ -1494,7 +1560,11 @@ LEFT JOIN "users" u
 GROUP BY d.document->>'_id', d.document->>'name'
 ORDER BY d.document->>'name'"""
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["departments", "users"], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      "No department data found.",
@@ -1566,7 +1636,11 @@ WHERE COALESCE(c.document->>'deleted','false') != 'true'
   AND {not_in_clause}
 ORDER BY c.updated_at DESC LIMIT 50""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["companies"], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      f"All companies have given business in the last {interval}.",
@@ -1612,7 +1686,11 @@ GROUP BY u.document->>'_id', u.document->>'name', u.document->>'email'
 HAVING COUNT(t.id) > 0
 ORDER BY 3 DESC"""
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["users", "createtasks"], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      "No users have overdue tasks.",
@@ -1672,7 +1750,11 @@ FROM "deals"
 {where}
 GROUP BY 1 ORDER BY 3 DESC""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["deals"], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      "No open pipeline deals found.",
@@ -1742,7 +1824,12 @@ ORDER BY
   NULLIF(i.document->>'due_date','')::timestamptz ASC NULLS LAST
 LIMIT 50""".strip()
 
-    rows = run_sql(agent, sql)
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["invoices"] + (["companies"] if has_co else []),
+                "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
     if not rows:
         return {
             "answer":      "No pending invoices found.",
@@ -1855,7 +1942,11 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
 
     where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
     sql   = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
-    rows  = run_sql(agent, sql)
+    _res  = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [sql]}
+    rows  = _res.rows
 
     if not rows:
         return {"answer": "No sales orders found.", "tables_used": [table],

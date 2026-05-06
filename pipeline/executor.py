@@ -5,20 +5,20 @@ Executes each sub-query concurrently through the full pipeline:
 
 Features:
   • ThreadPoolExecutor with configurable concurrency
-  • Per-sub-query independent timeout (not total pool timeout)
+  • E8: concurrent.futures.wait() — never raises, always returns ordered results
   • Results always returned in original input order
   • Structured result objects with metadata for synthesizer
   • Graceful degradation — never raises, always returns a result per sub-query
 
 Public API:
-    run_parallel(sub_queries, agent) -> List[SubQueryResult]
+    run_parallel(sub_queries, agent, request_id="") -> List[SubQueryResult]
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, wait as futures_wait
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -27,9 +27,8 @@ from pipeline import fast_path, text2sql
 LOGGER = logging.getLogger("sql_chatbot")
 
 # ── Concurrency config ─────────────────────────────────────────────────────────
-_MAX_WORKERS          = 6     # max concurrent SQL threads
-_PER_QUERY_TIMEOUT_S  = 90    # seconds allowed per individual sub-query
-_POOL_DRAIN_TIMEOUT_S = 300   # hard ceiling for the whole pool to finish (all sub-queries)
+_MAX_WORKERS             = 6   # max concurrent SQL threads
+PER_QUERY_TIMEOUT_SECONDS = 45  # E8: wall-clock seconds for the entire parallel batch
 
 
 @dataclass
@@ -84,6 +83,26 @@ def _make_stub(
     )
 
 
+def _make_timeout_stub(
+    sub_query: str,
+    intent: str,
+    index: int,
+) -> SubQueryResult:
+    """Create a timeout stub result when a sub-query exceeded PER_QUERY_TIMEOUT_SECONDS."""
+    return SubQueryResult(
+        index       = index,
+        sub_query   = sub_query,
+        intent      = intent,
+        answer      = "Sub-query timed out.",
+        tables_used = [],
+        sql_queries = [],
+        confidence  = 0.0,
+        elapsed_ms  = PER_QUERY_TIMEOUT_SECONDS * 1000,
+        source      = "stub",
+        error       = "timeout",
+    )
+
+
 def _build_result(
     data: Dict[str, Any],
     sub_query: str,
@@ -109,10 +128,11 @@ def _build_result(
 
 
 def _execute_one(
-    index:     int,
-    sub_query: str,
-    intent:    str,
+    index:      int,
+    sub_query:  str,
+    intent:     str,
     agent,
+    request_id: str = "",
 ) -> SubQueryResult:
     """
     Execute a single sub-query through the full pipeline.
@@ -123,15 +143,17 @@ def _execute_one(
       3. stub       — returns "unavailable" — never raises
 
     Args:
-        index:     Position index in the original sub_queries list
-        sub_query: Natural language sub-query text
-        intent:    Intent label (count/list/sum/etc.)
-        agent:     LangChain AgentExecutor or DB agent (thread-safe for reads)
+        index:      Position index in the original sub_queries list
+        sub_query:  Natural language sub-query text
+        intent:     Intent label (count/list/sum/etc.)
+        agent:      LangChain AgentExecutor or DB agent (thread-safe for reads)
+        request_id: Correlation ID for log tracing (E5)
 
     Returns:
         SubQueryResult — always, never raises
     """
     t_start = time.monotonic()
+    rid_sub = f"[RID:{request_id}][SUB:{index}]"  # E5: log prefix
 
     # ── Stage 1: Fast path ────────────────────────────────────────────────────
     try:
@@ -139,11 +161,11 @@ def _execute_one(
         if result is not None:
             elapsed = int((time.monotonic() - t_start) * 1000)
             LOGGER.debug(
-                "[%d] fast_path HIT (%dms): %.60s", index, elapsed, sub_query
+                "%s fast_path HIT (%dms): %.60s", rid_sub, elapsed, sub_query
             )
             return _build_result(result, sub_query, intent, index, elapsed, "fast_path")
     except Exception as exc:
-        LOGGER.debug("[%d] fast_path error: %s | query: %.60s", index, exc, sub_query)
+        LOGGER.debug("%s fast_path error: %s | query: %.60s", rid_sub, exc, sub_query)
 
     # ── Stage 2: Text2SQL ─────────────────────────────────────────────────────
     try:
@@ -151,17 +173,17 @@ def _execute_one(
         if result is not None:
             elapsed = int((time.monotonic() - t_start) * 1000)
             LOGGER.debug(
-                "[%d] text2sql HIT (%dms): %.60s", index, elapsed, sub_query
+                "%s text2sql HIT (%dms): %.60s", rid_sub, elapsed, sub_query
             )
             return _build_result(result, sub_query, intent, index, elapsed, "text2sql")
     except Exception as exc:
-        LOGGER.debug("[%d] text2sql error: %s | query: %.60s", index, exc, sub_query)
+        LOGGER.debug("%s text2sql error: %s | query: %.60s", rid_sub, exc, sub_query)
 
     # ── Stage 3: Stub fallback ────────────────────────────────────────────────
     elapsed = int((time.monotonic() - t_start) * 1000)
     LOGGER.warning(
-        "[%d] all stages failed (%dms) — returning stub: %.60s",
-        index, elapsed, sub_query,
+        "%s all stages failed (%dms) — returning stub: %.60s",
+        rid_sub, elapsed, sub_query,
     )
     return _make_stub(sub_query, intent, index, elapsed, error="all pipeline stages failed")
 
@@ -169,37 +191,36 @@ def _execute_one(
 def run_parallel(
     sub_queries: List[Dict[str, str]],
     agent,
+    request_id: str = "",
 ) -> List[SubQueryResult]:
     """
     Execute all sub-queries concurrently using a thread pool.
 
-    Each sub-query runs independently through:
-      fast_path → text2sql → stub
+    E8: Uses concurrent.futures.wait() which never raises — futures that do not
+    complete within PER_QUERY_TIMEOUT_SECONDS are cancelled and replaced with a
+    timeout stub. The function ALWAYS returns a list of the same length as the input.
 
-    Results are ALWAYS returned in the same order as the input list,
-    regardless of which sub-query finishes first.
+    Results are ALWAYS returned in the same order as the input list.
 
     Args:
         sub_queries: List of {"sub_query": str, "intent": str}
-                     (output from decomposer.decompose())
         agent:       DB agent — must be thread-safe for concurrent reads.
-                     LangChain agents with a connection pool satisfy this.
+        request_id:  Correlation ID for log tracing (E5)
 
     Returns:
-        List[SubQueryResult] — same length as input, same order,
-        each with answer/tables/sql/confidence/timing/source metadata.
+        List[SubQueryResult] — same length as input, same order.
     """
     n       = len(sub_queries)
     workers = min(n, _MAX_WORKERS)
 
     LOGGER.info(
-        "Executor: starting %d sub-queries | workers=%d | per-query timeout=%ds",
-        n, workers, _PER_QUERY_TIMEOUT_S,
+        "[RID:%s] Executor: starting %d sub-queries | workers=%d | timeout=%ds",
+        request_id, n, workers, PER_QUERY_TIMEOUT_SECONDS,
     )
 
-    # Map future → index for order-preserving collection
-    results_map: Dict[int, SubQueryResult] = {}
-    future_to_idx: Dict[Future, int]       = {}
+    # Map future → original index for order-preserving assembly
+    future_to_idx: Dict[Future, int] = {}
+    results_map:   Dict[int, SubQueryResult] = {}
 
     t_pool_start = time.monotonic()
 
@@ -211,63 +232,58 @@ def run_parallel(
                 sq.get("sub_query", ""),
                 sq.get("intent", "general"),
                 agent,
+                request_id,
             )
             future_to_idx[fut] = i
 
-        # Drain futures — respect per-query timeout and hard pool ceiling
-        remaining_pool = max(
-            _POOL_DRAIN_TIMEOUT_S,
-            n * _PER_QUERY_TIMEOUT_S,
+        # E8: wait() never raises — returns (done, not_done)
+        done, not_done = futures_wait(
+            future_to_idx,
+            timeout=PER_QUERY_TIMEOUT_SECONDS,
         )
 
-        for future in as_completed(future_to_idx, timeout=remaining_pool):
+        # Collect completed futures
+        for future in done:
             idx = future_to_idx[future]
             sq  = sub_queries[idx]
             try:
-                sqr = future.result(timeout=_PER_QUERY_TIMEOUT_S)
-            except TimeoutError:
-                LOGGER.warning(
-                    "SubQuery [%d] timed out after %ds: %.60s",
-                    idx, _PER_QUERY_TIMEOUT_S, sq.get("sub_query", ""),
-                )
-                sqr = _make_stub(
-                    sq.get("sub_query", ""), sq.get("intent", "general"),
-                    idx, elapsed_ms=_PER_QUERY_TIMEOUT_S * 1000,
-                    error=f"timed out after {_PER_QUERY_TIMEOUT_S}s",
-                )
+                results_map[idx] = future.result()
             except Exception as exc:
                 LOGGER.warning(
-                    "SubQuery [%d] future raised: %s | query: %.60s",
-                    idx, exc, sq.get("sub_query", ""),
+                    "[RID:%s] Sub-query %d future raised: %s | query: %.60s",
+                    request_id, idx, exc, sq.get("sub_query", ""),
                 )
-                sqr = _make_stub(
+                results_map[idx] = _make_stub(
                     sq.get("sub_query", ""), sq.get("intent", "general"),
                     idx, error=str(exc),
                 )
-            results_map[idx] = sqr
 
-    # Handle any sub-queries that didn't complete (pool drain timeout)
-    for i, sq in enumerate(sub_queries):
-        if i not in results_map:
-            LOGGER.error(
-                "SubQuery [%d] missing from results (pool drain timeout): %.60s",
-                i, sq.get("sub_query", ""),
+        # E8: handle timed-out futures — cancel and create stub.
+        # Note: future.cancel() only stops futures that haven't started yet.
+        # Futures already running in a thread cannot be interrupted — those threads
+        # will continue in the background until their underlying HTTP timeout fires
+        # (Ollama has its own timeout). Their results are simply never collected.
+        for future in not_done:
+            idx = future_to_idx[future]
+            sq  = sub_queries[idx]
+            future.cancel()
+            LOGGER.warning(
+                "[RID:%s] Sub-query %d timed out after %ds: %.60s",
+                request_id, idx, PER_QUERY_TIMEOUT_SECONDS, sq.get("sub_query", ""),
             )
-            results_map[i] = _make_stub(
-                sq.get("sub_query", ""), sq.get("intent", "general"),
-                i, error="pool drain timeout — sub-query never completed",
+            results_map[idx] = _make_timeout_stub(
+                sq.get("sub_query", ""), sq.get("intent", "general"), idx,
             )
 
-    # Build ordered output
-    ordered = [results_map[i] for i in range(n)]
-
+    # Build ordered output (all indices guaranteed to be in results_map)
+    ordered  = [results_map[i] for i in range(n)]
     total_ms = int((time.monotonic() - t_pool_start) * 1000)
     sources  = [r.source for r in ordered]
     hits     = sum(1 for r in ordered if r.source != "stub")
 
     LOGGER.info(
-        "Executor: completed %d/%d sub-queries in %dms | sources=%s",
-        hits, n, total_ms, sources,
+        "[RID:%s] Executor: completed %d/%d sub-queries in %dms | sources=%s",
+        request_id, hits, n, total_ms, sources,
     )
 
     return ordered

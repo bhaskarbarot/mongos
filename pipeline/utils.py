@@ -79,6 +79,31 @@ def sanitize_for_sql(value: str) -> str:
     return value.replace("'", "''").replace(";", "").replace("--", "").strip()
 
 
+def sanitize_sql_value(val: str) -> str:
+    """Sanitize a user-provided string for safe interpolation into SQL WHERE clauses.
+
+    Steps: strip whitespace, enforce max 200 chars, escape single quotes,
+    remove SQL comment sequences, strip semicolons.
+
+    Note on '--' removal: this removes ALL '--' occurrences, including valid
+    hyphenated values such as "ACME--West". This is an intentional tradeoff —
+    the primary threat vector (SQL injection via comment hijacking) outweighs
+    the rare case of legitimate double-hyphens in CRM data. Additionally,
+    '--' inside a SQL string literal cannot start a comment anyway, so this
+    is defence-in-depth rather than a strict necessity.
+    """
+    if not isinstance(val, str):
+        val = str(val)
+    val = val.strip()[:200]
+    val = val.replace("'", "''")
+    # Remove -- anywhere in value (see docstring for tradeoff rationale)
+    val = val.replace("--", "")
+    # Remove block comments
+    val = re.sub(r"/\*.*?\*/", "", val, flags=re.DOTALL)
+    val = val.replace(";", "")
+    return val
+
+
 def query_hash(query: str) -> str:
     """Deterministic hash for query caching. Normalizes before hashing."""
     return hashlib.sha256(normalize_text(query).encode("utf-8")).hexdigest()[:16]
@@ -330,6 +355,21 @@ def is_greeting(text: str) -> bool:
 def is_blocked(text: str) -> bool:
     """Check if query contains destructive SQL patterns."""
     return any(p.search(text) for p in BLOCKED_SQL_PATTERNS)
+
+
+def sanitize_user_input(query: str) -> tuple[str, bool]:
+    """Sanitize raw user input before it enters the pipeline.
+
+    Returns:
+        (sanitized_query, was_truncated) — was_truncated is True if input exceeded 500 chars.
+        The caller is responsible for logging the truncation warning with the request_id.
+    """
+    if not isinstance(query, str):
+        query = str(query)
+    query = query.replace("\x00", "")
+    query = re.sub(r"\s+", " ", query).strip()
+    was_truncated = len(query) > 500
+    return query[:500], was_truncated
 
 
 def is_vague_query(text: str) -> bool:

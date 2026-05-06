@@ -134,7 +134,7 @@ echo ">>> [3/4] Starting FastAPI backend (port 8000)…"
 fuser -k 8000/tcp 2>/dev/null || true
 sleep 1
 
-CACHE_DISABLED=true REDIS_CACHE_TTL=0 python3 -m uvicorn api:app \
+python3 -m uvicorn api:app \
   --host 0.0.0.0 \
   --port 8000 \
   --log-level info \

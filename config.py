@@ -59,6 +59,12 @@ class Settings:
     log_file: str = os.getenv("QUERY_LOG_FILE", "logs/query.log")
     max_retries: int = int(os.getenv("AGENT_MAX_RETRIES", "0"))
 
+    # E3: Allowed CORS origins — comma-separated, no spaces
+    allowed_origins: str = os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:8501,http://localhost:3000,http://localhost:5173",
+    )
+
     @property
     def postgres_uri(self) -> str:
         return (

@@ -35,10 +35,12 @@ from typing import Any, Dict, List, Optional, Tuple
 LOGGER = logging.getLogger("sql_chatbot")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MODULE-LEVEL CACHES (thread-safe via _LOCK)
+# MODULE-LEVEL CACHES (thread-safe via _CACHE_LOCK)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_LOCK = threading.Lock()
+# E7: RLock (re-entrant) so discover_schema_links can call get_table_names/get_document_fields
+# without deadlocking while holding the lock.
+_CACHE_LOCK = threading.RLock()
 
 _TABLE_NAMES_CACHE:    List[str]                = []
 _TABLE_FIELDS_CACHE:   Dict[str, List[str]]     = {}
@@ -222,17 +224,42 @@ REGISTRY = SchemaRegistry()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# E6: TYPED SQL RESULT — callers can distinguish empty vs error
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SqlResult:
+    """Typed wrapper for run_sql() output.
+
+    Attributes:
+        rows:  Result rows (empty list if no data or on error).
+        error: None on success, error string on failure.
+    """
+
+    def __init__(self, rows: Optional[List[Any]] = None, error: Optional[str] = None) -> None:
+        self.rows  = rows if rows is not None else []
+        self.error = error
+
+    def ok(self) -> bool:
+        """True if the query completed without error."""
+        return self.error is None
+
+    def is_empty(self) -> bool:
+        """True if the query succeeded but returned no rows."""
+        return self.ok() and len(self.rows) == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SQL EXECUTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_sql(agent, sql: str, max_retries: int = 1) -> List[Any]:
+def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
     """Execute raw SQL via the LangChain sql_db_query tool.
 
     Features:
       • Finds sql_db_query tool from agent's tool list
       • Handles Decimal('...') strings in output (LangChain quirk)
       • Retries once on transient errors (connection reset, timeout)
-      • Returns empty list on all errors (never raises to caller)
+      • Never raises — always returns SqlResult (success or failure)
 
     Args:
         agent:       LangChain AgentExecutor with sql_db_query tool
@@ -240,7 +267,7 @@ def run_sql(agent, sql: str, max_retries: int = 1) -> List[Any]:
         max_retries: Number of retry attempts on transient failure
 
     Returns:
-        List of tuples/rows, or empty list on failure
+        SqlResult — callers check .ok() / .error to distinguish empty vs failed.
     """
     tool = next(
         (t for t in getattr(agent, "tools", [])
@@ -249,27 +276,27 @@ def run_sql(agent, sql: str, max_retries: int = 1) -> List[Any]:
     )
     if not tool:
         LOGGER.error("sql_db_query tool not found on agent")
-        return []
+        return SqlResult(error="sql_db_query tool not found on agent")
 
-    last_error = None
+    last_error: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
             raw = tool.run(sql)
 
             if isinstance(raw, list):
-                return raw
+                return SqlResult(rows=raw)
 
             if isinstance(raw, str):
                 # Handle LangChain Decimal('...') serialization
                 sanitized = re.sub(r"Decimal\('([^']+)'\)", r"'\1'", raw)
                 try:
                     parsed = ast.literal_eval(sanitized)
-                    return parsed if isinstance(parsed, list) else []
+                    return SqlResult(rows=parsed if isinstance(parsed, list) else [])
                 except (ValueError, SyntaxError) as exc:
                     LOGGER.debug("SQL result parse failed (attempt %d): %s", attempt, exc)
-                    return []
+                    return SqlResult(rows=[])
 
-            return []
+            return SqlResult(rows=[])
 
         except Exception as exc:
             last_error = exc
@@ -285,9 +312,9 @@ def run_sql(agent, sql: str, max_retries: int = 1) -> List[Any]:
                 time.sleep(0.5 * (attempt + 1))
                 continue
             LOGGER.warning("SQL execution failed: %s | SQL: %.100s", exc, sql)
-            return []
+            return SqlResult(error=str(exc))
 
-    return []
+    return SqlResult(error=str(last_error) if last_error else "unknown error")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -305,7 +332,7 @@ def invalidate_schema_cache() -> None:
     """Force refresh of all schema caches on next access."""
     global _TABLE_NAMES_CACHE, _TABLE_FIELDS_CACHE, _SCHEMA_LINKS
     global _TEXT2SQL_SCHEMA_CACHE, _SCHEMA_TIMESTAMP
-    with _LOCK:
+    with _CACHE_LOCK:
         _TABLE_NAMES_CACHE    = []
         _TABLE_FIELDS_CACHE   = {}
         _SCHEMA_LINKS         = {}
@@ -317,10 +344,13 @@ def invalidate_schema_cache() -> None:
 
 def get_table_names(agent) -> List[str]:
     """Return sorted list of all table names. Cached with TTL.
-    NOTE: does NOT hold _LOCK while calling tool.run() to avoid deadlock.
+
+    E7: double-checked locking — fast read outside lock, safe write inside lock.
+    SQL tool.run() is intentionally outside the lock to avoid blocking other threads.
     """
     global _TABLE_NAMES_CACHE, _SCHEMA_TIMESTAMP
 
+    # Fast path: no lock needed for a stale check
     if _TABLE_NAMES_CACHE and not _is_cache_stale():
         return _TABLE_NAMES_CACHE
 
@@ -333,21 +363,29 @@ def get_table_names(agent) -> List[str]:
         LOGGER.error("sql_db_list_tables tool not found")
         return []
 
+    # Execute outside lock — slow I/O must not hold the cache lock
     raw = tool.run("")
     if not isinstance(raw, str):
         return _TABLE_NAMES_CACHE or []
 
     tables = sorted([p.strip() for p in raw.split(",") if p.strip()])
-    _TABLE_NAMES_CACHE = tables
-    _SCHEMA_TIMESTAMP  = time.time()
-    LOGGER.info("Schema: discovered %d tables", len(tables))
-    return tables
+
+    # Safe path: write under lock, double-check to avoid duplicate writes
+    with _CACHE_LOCK:
+        if not _TABLE_NAMES_CACHE or _is_cache_stale():
+            _TABLE_NAMES_CACHE = tables
+            _SCHEMA_TIMESTAMP  = time.time()
+            LOGGER.info("Schema: discovered %d tables", len(tables))
+
+    return _TABLE_NAMES_CACHE
 
 
 def get_document_fields(agent, table: str) -> List[str]:
     """Return JSONB field names for a table. Cached per table.
-    NOTE: does NOT hold _LOCK while running SQL to avoid deadlock with discover_schema_links.
+
+    E7: double-checked locking — SQL execution is outside the lock.
     """
+    # Fast path: no lock needed for read
     if table in _TABLE_FIELDS_CACHE:
         return _TABLE_FIELDS_CACHE[table]
 
@@ -356,22 +394,26 @@ def get_document_fields(agent, table: str) -> List[str]:
             f"SELECT DISTINCT key FROM \"{table}\","
             f" jsonb_object_keys(document) AS key LIMIT 300"
         )
-        rows = run_sql(agent, sql)
-        fields = sorted([r[0] for r in rows if r and r[0]])
-        _TABLE_FIELDS_CACHE[table] = fields
-        LOGGER.debug("Schema: %s has %d fields", table, len(fields))
-        return fields
+        _res   = run_sql(agent, sql)
+        fields = sorted([r[0] for r in _res.rows if r and r[0]])
     except Exception as exc:
         LOGGER.warning("Schema: field discovery failed for %s: %s", table, exc)
-        _TABLE_FIELDS_CACHE[table] = []
-        return []
+        fields = []
+
+    # Safe path: write under lock, double-check to avoid overwriting a concurrent write
+    with _CACHE_LOCK:
+        if table not in _TABLE_FIELDS_CACHE:
+            _TABLE_FIELDS_CACHE[table] = fields
+            LOGGER.debug("Schema: %s has %d fields", table, len(fields))
+
+    return _TABLE_FIELDS_CACHE[table]
 
 
 def get_table_row_count(agent, table: str) -> int:
     """Quick row count for a table (used for schema context)."""
     try:
-        rows = run_sql(agent, f'SELECT COUNT(*)::int FROM "{table}"')
-        return int(rows[0][0]) if rows and rows[0] else 0
+        _res = run_sql(agent, f'SELECT COUNT(*)::int FROM "{table}"')
+        return int(_res.rows[0][0]) if _res.rows and _res.rows[0] else 0
     except Exception:
         return 0
 
@@ -397,7 +439,7 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
     if _SCHEMA_LINKS:
         return _SCHEMA_LINKS
 
-    with _LOCK:
+    with _CACHE_LOCK:
         if _SCHEMA_LINKS:
             return _SCHEMA_LINKS
 
@@ -418,15 +460,15 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                 if not target_name or target_name == table:
                     continue
 
-                # Validate with a sample value
+                # Validate with a sample value (SQL runs outside lock via RLock re-entrancy)
                 try:
-                    sample = run_sql(
+                    _s_res = run_sql(
                         agent,
                         f"SELECT document->>'{field}' FROM \"{table}\""
                         f" WHERE document->>'{field}' IS NOT NULL"
                         f" AND document->>'{field}' != '' LIMIT 1",
                     )
-                    val = sample[0][0] if sample and sample[0] else None
+                    val = _s_res.rows[0][0] if _s_res.rows and _s_res.rows[0] else None
                     if not val:
                         continue
 
@@ -436,12 +478,12 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                         continue
 
                     # Verify the ID exists in the target table
-                    verify = run_sql(
+                    _v_res = run_sql(
                         agent,
                         f"SELECT 1 FROM \"{target_name}\""
                         f" WHERE document->>'_id' = '{val_str}' LIMIT 1",
                     )
-                    if verify:
+                    if _v_res.rows:
                         links.setdefault(table, {})[field] = target_name
                         LOGGER.info("Schema link: %s.%s → %s", table, field, target_name)
 
@@ -484,7 +526,7 @@ def build_text2sql_schema(agent) -> str:
     if _TEXT2SQL_SCHEMA_CACHE:
         return _TEXT2SQL_SCHEMA_CACHE
 
-    with _LOCK:
+    with _CACHE_LOCK:
         if _TEXT2SQL_SCHEMA_CACHE:
             return _TEXT2SQL_SCHEMA_CACHE
 

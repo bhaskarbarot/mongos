@@ -535,14 +535,14 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
             return None
 
         # Execute the SQL
-        try:
-            rows = run_sql(agent, sql)
-        except Exception as exc:
-            LOGGER.warning("Text2SQL exec failed: %s | SQL: %.80s", exc, sql)
+        _res = run_sql(agent, sql)
+        if _res.error:
+            LOGGER.warning("Text2SQL exec failed: %s | SQL: %.80s", _res.error, sql)
             return None
 
+        rows        = _res.rows
         tables_used = _extract_tables_from_sql(sql)
-        body = _format_result(rows, sql, query)
+        body        = _format_result(rows, sql, query)
 
         # Confidence scoring
         confidence = 0.90

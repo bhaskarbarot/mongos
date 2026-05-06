@@ -15,20 +15,13 @@ Implements the full hybrid NL-to-SQL query flow:
                 Executor              → parallel SQL execution
                 Synthesizer           → Groq/Ollama → final answer
 
-Features:
-  • Query result caching with TTL (avoids re-running identical queries)
-  • Per-session conversation memory (pronoun resolution)
-  • Full latency tracking at every layer
-  • Structured response with metadata (latency, confidence, tables, SQL)
-  • Graceful error handling — never crashes, always returns a response
-  • Schema pre-warming on first query
-
 Public API:
-    run(agent, user_query, memory) -> Dict[str, Any]
+    run(agent, user_query, memory, request_id="") -> Dict[str, Any]
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -52,16 +45,12 @@ from pipeline.utils import (
     is_vague_query,
     mask_ids,
     normalize_text,
-    query_hash,
+    sanitize_user_input,
 )
 
 LOGGER = logging.getLogger("sql_chatbot")
 
-# ── Cache (disabled) ───────────────────────────────────────────────────────────
-_QUERY_CACHE: Dict[str, Dict[str, Any]] = {}
-_CACHE_MAX_SIZE  = 0      # 0 = disabled
-_CACHE_TTL_SEC   = 0
-_SCHEMA_WARMED   = False
+_SCHEMA_WARMED = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -69,14 +58,7 @@ _SCHEMA_WARMED   = False
 # ══════════════════════════════════════════════════════════════════════════════
 
 class ConversationMemory:
-    """Per-session state: resolves pronouns ('that', 'those') via last entity.
-
-    Tracks:
-      • last_entity:  last table/entity referenced
-      • last_query:   last user query text
-      • last_count:   last count result (for "give me those" follow-ups)
-      • history:       recent query history for context
-    """
+    """Per-session state: resolves pronouns ('that', 'those') via last entity."""
 
     def __init__(self, max_history: int = 10) -> None:
         self.last_entity: Optional[str] = None
@@ -91,50 +73,33 @@ class ConversationMemory:
         query: str,
         count: Optional[int] = None,
     ) -> None:
-        """Update memory after a successful query."""
         if entity:
             self.last_entity = entity
         self.last_query = query
         if count is not None:
             self.last_count = count
-
-        self.history.append({
-            "query":  query,
-            "entity": entity,
-            "count":  count,
-            "ts":     time.time(),
-        })
-        # Trim history
+        self.history.append({"query": query, "entity": entity, "count": count, "ts": time.time()})
         if len(self.history) > self._max_history:
             self.history = self.history[-self._max_history:]
 
     def resolve(self, query: str) -> str:
-        """Resolve pronouns in the query using conversation context."""
         if not self.last_entity:
             return query
-
         text = normalize_text(query)
-
-        # Check for pronoun references
         has_pronoun = re.search(
-            r"\b(that|those|them|their|these|it|the same|above|previous)\b",
-            text,
+            r"\b(that|those|them|their|these|it|the same|above|previous)\b", text,
         )
         if has_pronoun:
             resolved = f"{query} (referring to {self.last_entity})"
             LOGGER.debug("Memory resolved: '%s' → '%s'", query, resolved)
             return resolved
-
-        # "Give me the list" / "show names" without entity
         bare_action = re.match(
-            r"^(give me|show|list|get|display)\s+(the\s+)?(names?|list|details?|all)\s*$",
-            text,
+            r"^(give me|show|list|get|display)\s+(the\s+)?(names?|list|details?|all)\s*$", text,
         )
         if bare_action and self.last_entity:
             resolved = f"{query} of {self.last_entity}"
             LOGGER.debug("Memory resolved bare action: '%s' → '%s'", query, resolved)
             return resolved
-
         return query
 
 
@@ -150,11 +115,11 @@ def _build_response(
     started: float,
     layer: str = "unknown",
     sub_results: Optional[List] = None,
-    cached: bool = False,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build standardized pipeline response dict."""
     latency = round((time.perf_counter() - started) * 1000, 2)
-    resp = {
+    resp: Dict[str, Any] = {
         "answer":      format_final_answer(answer, tables_used),
         "latency_ms":  latency,
         "confidence":  round(confidence, 3),
@@ -162,10 +127,10 @@ def _build_response(
         "sql_queries": sql_queries,
         "layer":       layer,
     }
-    if cached:
-        resp["cached"] = True
     if sub_results:
         resp["_sub_results"] = sub_results
+    if metrics is not None:
+        resp["metrics"] = metrics
     return resp
 
 
@@ -174,7 +139,6 @@ def _warm_schema(agent) -> None:
     global _SCHEMA_WARMED
     if _SCHEMA_WARMED:
         return
-
     with Timer("schema_warmup") as t:
         try:
             tables = get_table_names(agent)
@@ -182,31 +146,25 @@ def _warm_schema(agent) -> None:
                 discover_schema_links(agent)
                 build_text2sql_schema(agent)
                 _SCHEMA_WARMED = True
-                LOGGER.info(
-                    "Schema pre-warmed: %d tables, %.0fms",
-                    len(tables), t.elapsed_ms,
-                )
+                LOGGER.info("Schema pre-warmed: %d tables, %.0fms", len(tables), t.elapsed_ms)
         except Exception as exc:
             LOGGER.warning("Schema warmup failed (non-fatal): %s", exc)
 
 
-def _check_cache(q_hash: str) -> Optional[Dict[str, Any]]:
-    return None  # cache disabled
-
-
-def _store_cache(q_hash: str, result: Dict[str, Any]) -> None:
-    return  # cache disabled
-
-
 def _extract_entity_from_result(result: Dict[str, Any]) -> Optional[str]:
-    """Extract the primary entity/table from a pipeline result."""
-    # Check _entity metadata first (set by fast-path)
     entity = result.get("_entity")
     if entity:
         return entity
-    # Fall back to first table
     tables = result.get("tables_used", [])
     return tables[0] if tables else None
+
+
+def _empty_metrics() -> Dict[str, Any]:
+    return {
+        "guard_ms": 0, "classifier_ms": 0, "fastpath_ms": 0,
+        "text2sql_ms": 0, "decomposer_ms": 0, "executor_ms": 0,
+        "synthesizer_ms": 0, "total_ms": 0,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -217,38 +175,26 @@ def run(
     agent,
     user_query: str,
     memory: Optional[ConversationMemory] = None,
+    request_id: str = "",
 ) -> Dict[str, Any]:
-    """Execute the full hybrid NL-to-SQL pipeline for one user query.
-
-    Flow:
-      0. Pronoun resolution (memory)
-      1. Guard checks (greeting / blocked / vague)
-      2. Cache check
-      3. Schema pre-warm (first query only)
-      4. Intent classification (SIMPLE vs COMPLEX)
-      5a. SIMPLE: fast-path → text2sql fallback
-      5b. COMPLEX: decompose → parallel execute → synthesize
-      6. Cache result, update memory, return
-
-    Args:
-        agent:      LangChain AgentExecutor with SQL tools
-        user_query: Raw user input string
-        memory:     Per-session ConversationMemory (optional)
-
-    Returns:
-        Dict with: answer, latency_ms, confidence, tables_used, sql_queries,
-                   layer, cached (optional), _sub_results (optional)
-    """
+    """Execute the full hybrid NL-to-SQL pipeline for one user query."""
     started = time.perf_counter()
+    metrics = _empty_metrics()
 
-    # ── 0. Pronoun resolution ──────────────────────────────────────────────
+    # ── 0. Input sanitization (E10) ───────────────────────────────────────────
+    user_query, was_truncated = sanitize_user_input(user_query)
+    if was_truncated:
+        LOGGER.warning("[RID:%s] Input truncated to 500 chars", request_id)
+
+    # ── 1. Pronoun resolution ──────────────────────────────────────────────────
     original_query = user_query
     if memory:
         user_query = memory.resolve(user_query)
 
-    # ── 1. Guard: Greeting ─────────────────────────────────────────────────
+    # ── 2. Guard: Greeting ─────────────────────────────────────────────────────
     if is_greeting(user_query):
-        LOGGER.info("Guard: greeting detected")
+        LOGGER.info("[RID:%s] Guard: greeting detected", request_id)
+        metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
         return {
             "answer": (
                 "Hello! I can help you query your CRM data. Try asking:\n\n"
@@ -259,31 +205,29 @@ def run(
                 "• **Targets**: \"Target vs achieved this quarter\"\n"
                 "• **Search**: \"Find contact John Smith\""
             ),
-            "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
-            "confidence":  1.0,
-            "tables_used": [],
-            "sql_queries": [],
-            "layer":       "guard",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            "confidence": 1.0, "tables_used": [], "sql_queries": [],
+            "layer": "guard", "metrics": metrics,
         }
 
-    # ── 2. Guard: Blocked query ────────────────────────────────────────────
+    # ── 3. Guard: Blocked query ────────────────────────────────────────────────
     if is_blocked(user_query):
-        LOGGER.warning("Guard: blocked query: %.60s", user_query)
+        LOGGER.warning("[RID:%s] Guard: blocked query: %.60s", request_id, user_query)
+        metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
         return {
             "answer": (
                 "This query contains operations that are not permitted. "
                 "I can only run read-only (SELECT) queries on your CRM data."
             ),
-            "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
-            "confidence":  1.0,
-            "tables_used": [],
-            "sql_queries": [],
-            "layer":       "guard",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            "confidence": 1.0, "tables_used": [], "sql_queries": [],
+            "layer": "guard", "metrics": metrics,
         }
 
-    # ── 3. Guard: Vague query (too short, no intent) ──────────────────────
+    # ── 4. Guard: Vague query ──────────────────────────────────────────────────
     if is_vague_query(user_query):
-        LOGGER.info("Guard: vague query: %.60s", user_query)
+        LOGGER.info("[RID:%s] Guard: vague query: %.60s", request_id, user_query)
+        metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
         return {
             "answer": (
                 "Your query seems a bit vague. Could you be more specific? For example:\n\n"
@@ -291,38 +235,26 @@ def run(
                 "• \"Show **revenue this month**\"\n"
                 "• \"List **pending tasks** for all users\""
             ),
-            "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
-            "confidence":  0.5,
-            "tables_used": [],
-            "sql_queries": [],
-            "layer":       "guard",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            "confidence": 0.5, "tables_used": [], "sql_queries": [],
+            "layer": "guard", "metrics": metrics,
         }
 
-    LOGGER.info("═══ Pipeline START | query: %.80s ═══", user_query)
+    metrics["guard_ms"] = round((time.perf_counter() - started) * 1000)
+    LOGGER.info("[RID:%s] ═══ Pipeline START | query: %.80s ═══", request_id, user_query)
 
-    # ── 4. Cache check ─────────────────────────────────────────────────────
-    q_hash = query_hash(user_query)
-    cached = _check_cache(q_hash)
-    if cached:
-        cached["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
-        if memory:
-            memory.update(
-                entity=_extract_entity_from_result(cached),
-                query=original_query,
-            )
-        return cached
-
-    # ── 5. Schema pre-warm ─────────────────────────────────────────────────
+    # ── 5. Schema pre-warm ─────────────────────────────────────────────────────
     _warm_schema(agent)
 
-    # ── 6. Intent classification ───────────────────────────────────────────
+    # ── 6. Intent classification ───────────────────────────────────────────────
     with Timer("classifier") as cls_timer:
         classification = classify(user_query)
     intent_type   = classification["type"]
     intent_reason = classification["reason"]
+    metrics["classifier_ms"] = round(cls_timer.elapsed_ms)
     LOGGER.info(
-        "═══ Classifier: %s (%.0fms) | %s",
-        intent_type, cls_timer.elapsed_ms, intent_reason,
+        "[RID:%s] ═══ Classifier: %s (%.0fms) | %s",
+        request_id, intent_type, cls_timer.elapsed_ms, intent_reason,
     )
 
     # ══════════════════════════════════════════════════════════════════════
@@ -330,60 +262,61 @@ def run(
     # ══════════════════════════════════════════════════════════════════════
     if intent_type == "SIMPLE":
 
-        # ── Layer 1: Fast Path ─────────────────────────────────────────
+        # ── Layer 1: Fast Path ─────────────────────────────────────────────
         with Timer("fast_path") as fp_timer:
             try:
                 fp_result = fast_path.run(user_query, agent)
             except Exception as exc:
-                LOGGER.warning("Fast-path exception: %s", exc)
+                LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
                 fp_result = None
+        metrics["fastpath_ms"] = round(fp_timer.elapsed_ms)
 
         if fp_result is not None:
             LOGGER.info(
-                "═══ Layer 1 HIT (fast-path) | %.0fms | tables=%s",
-                fp_timer.elapsed_ms, fp_result.get("tables_used"),
+                "[RID:%s] ═══ Layer 1 HIT (fast-path) | %.0fms | tables=%s",
+                request_id, fp_timer.elapsed_ms, fp_result.get("tables_used"),
             )
+            metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+            LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
             result = _build_response(
                 fp_result["answer"],
                 fp_result.get("tables_used", []),
                 fp_result.get("sql_queries", []),
                 fp_result.get("confidence", 0.95),
-                started,
-                layer="fast_path",
+                started, layer="fast_path", metrics=metrics,
             )
-            _store_cache(q_hash, result)
             if memory:
                 memory.update(
                     entity=fp_result.get("_entity") or _extract_entity_from_result(fp_result),
-                    query=original_query,
-                    count=fp_result.get("_count"),
+                    query=original_query, count=fp_result.get("_count"),
                 )
             return result
 
-        LOGGER.info("═══ Fast-path MISS → Text2SQL")
+        LOGGER.info("[RID:%s] ═══ Fast-path MISS → Text2SQL", request_id)
 
-        # ── Layer 2: Text2SQL ──────────────────────────────────────────
+        # ── Layer 2: Text2SQL ──────────────────────────────────────────────
         with Timer("text2sql") as t2s_timer:
             try:
                 t2s_result = text2sql.run(user_query, agent)
             except Exception as exc:
-                LOGGER.warning("Text2SQL exception: %s", exc)
+                LOGGER.warning("[RID:%s] Text2SQL exception: %s", request_id, exc)
                 t2s_result = None
+        metrics["text2sql_ms"] = round(t2s_timer.elapsed_ms)
 
         if t2s_result is not None:
             LOGGER.info(
-                "═══ Text2SQL HIT | %.0fms | tables=%s",
-                t2s_timer.elapsed_ms, t2s_result.get("tables_used"),
+                "[RID:%s] ═══ Text2SQL HIT | %.0fms | tables=%s",
+                request_id, t2s_timer.elapsed_ms, t2s_result.get("tables_used"),
             )
+            metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+            LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
             result = _build_response(
                 t2s_result["answer"],
                 t2s_result.get("tables_used", []),
                 t2s_result.get("sql_queries", []),
                 t2s_result.get("confidence", 0.88),
-                started,
-                layer="text2sql",
+                started, layer="text2sql", metrics=metrics,
             )
-            _store_cache(q_hash, result)
             if memory:
                 memory.update(
                     entity=_extract_entity_from_result(t2s_result),
@@ -391,36 +324,36 @@ def run(
                 )
             return result
 
-        # Both SIMPLE paths failed — fall through to COMPLEX path
-        LOGGER.info("═══ SIMPLE path fully missed → escalating to COMPLEX")
+        LOGGER.info("[RID:%s] ═══ SIMPLE path fully missed → escalating to COMPLEX", request_id)
 
     # ══════════════════════════════════════════════════════════════════════
     # COMPLEX PATH: decompose → parallel execute → synthesize
     # ══════════════════════════════════════════════════════════════════════
-    LOGGER.info("═══ COMPLEX path: Decompose → Parallel → Synthesize")
+    LOGGER.info("[RID:%s] ═══ COMPLEX path: Decompose → Parallel → Synthesize", request_id)
 
     try:
         table_names = get_table_names(agent)
 
-        # ── Step A: Decompose ──────────────────────────────────────────
+        # ── Step A: Decompose ──────────────────────────────────────────────
         with Timer("decompose") as dec_timer:
             sub_queries = decompose(user_query, table_names)
+        metrics["decomposer_ms"] = round(dec_timer.elapsed_ms)
         LOGGER.info(
-            "Decomposed into %d sub-queries (%.0fms): %s",
-            len(sub_queries), dec_timer.elapsed_ms,
+            "[RID:%s] Decomposed into %d sub-queries (%.0fms): %s",
+            request_id, len(sub_queries), dec_timer.elapsed_ms,
             [sq.get("sub_query", "")[:40] for sq in sub_queries],
         )
 
-        # ── Step B: Parallel execution ─────────────────────────────────
+        # ── Step B: Parallel execution ─────────────────────────────────────
         with Timer("parallel_exec") as exec_timer:
-            sub_results = run_parallel(sub_queries, agent)
+            sub_results = run_parallel(sub_queries, agent, request_id=request_id)
+        metrics["executor_ms"] = round(exec_timer.elapsed_ms)
         LOGGER.info(
-            "Parallel execution done (%.0fms): %d results",
-            exec_timer.elapsed_ms, len(sub_results),
+            "[RID:%s] Parallel execution done (%.0fms): %d results",
+            request_id, exec_timer.elapsed_ms, len(sub_results),
         )
 
-        # ── Step C: Build synthesis input ──────────────────────────────
-        # Convert SubQueryResult objects to dicts for synthesizer
+        # ── Step C: Build synthesis input ──────────────────────────────────
         synthesis_input = []
         for sq, sr in zip(sub_queries, sub_results):
             if isinstance(sr, SubQueryResult):
@@ -438,12 +371,13 @@ def run(
                     "data":      {"answer": "Data unavailable.", "error": "unexpected result type"},
                 })
 
-        # ── Step D: Synthesize ─────────────────────────────────────────
+        # ── Step D: Synthesize ─────────────────────────────────────────────
         with Timer("synthesize") as syn_timer:
             final_answer = synthesize(user_query, synthesis_input)
-        LOGGER.info("Synthesis done (%.0fms)", syn_timer.elapsed_ms)
+        metrics["synthesizer_ms"] = round(syn_timer.elapsed_ms)
+        LOGGER.info("[RID:%s] Synthesis done (%.0fms)", request_id, syn_timer.elapsed_ms)
 
-        # ── Aggregate metadata ─────────────────────────────────────────
+        # ── Aggregate metadata ─────────────────────────────────────────────
         all_tables = sorted({
             t
             for item in synthesis_input
@@ -460,52 +394,45 @@ def run(
                 if isinstance(item.get("data"), dict) else []
             )
         ]
-        avg_conf = 0.0
         conf_items = [
             item.get("data", {}).get("confidence", 0.0)
             for item in synthesis_input
             if isinstance(item.get("data"), dict)
         ]
-        if conf_items:
-            avg_conf = sum(conf_items) / len(conf_items)
+        avg_conf = sum(conf_items) / len(conf_items) if conf_items else 0.0
+
+        metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
 
         result = _build_response(
-            final_answer,
-            all_tables,
-            all_sqls,
-            avg_conf,
-            started,
-            layer="complex",
-            sub_results=synthesis_input,
+            final_answer, all_tables, all_sqls, avg_conf, started,
+            layer="complex", sub_results=synthesis_input, metrics=metrics,
         )
 
-        _store_cache(q_hash, result)
         if memory and all_tables:
             memory.update(entity=all_tables[0], query=original_query)
 
-        total_ms = round((time.perf_counter() - started) * 1000, 2)
         LOGGER.info(
-            "═══ Pipeline DONE | total=%.0fms | layer=complex | "
-            "parts=%d | tables=%s ═══",
-            total_ms, len(synthesis_input), all_tables,
+            "[RID:%s] ═══ Pipeline DONE | total=%.0fms | parts=%d | tables=%s ═══",
+            request_id, metrics["total_ms"], len(synthesis_input), all_tables,
         )
-
         return result
 
     except Exception as exc:
-        LOGGER.error("Pipeline COMPLEX path failed: %s", exc, exc_info=True)
-        total_ms = round((time.perf_counter() - started) * 1000, 2)
+        LOGGER.error("[RID:%s] Pipeline COMPLEX path failed: %s", request_id, exc, exc_info=True)
+        metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
         return {
             "answer": (
                 "I encountered an error processing your query. "
-                "Please try rephrasing or breaking it into simpler questions.\n\n"
-                f"_Error: {str(exc)[:100]}_"
+                "Please try rephrasing or breaking it into simpler questions."
             ),
-            "latency_ms":  total_ms,
+            "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
             "confidence":  0.0,
             "tables_used": [],
             "sql_queries": [],
             "layer":       "error",
+            "metrics":     metrics,
         }
 
 
@@ -514,53 +441,16 @@ def run(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def validate_response(answer: str, user_query: str) -> bool:
-    """Validate if the response adequately answers the query.
-
-    Used by text2sql and other layers to decide if a retry is needed.
-
-    Returns:
-        True if the response seems valid, False if it looks empty/failed.
-    """
+    """Return True if the response adequately answers the query."""
     ans_lower = answer.lower()
-
     empty_signals = [
         "no data found", "no records found", "no invoice",
-        "could not find", "unable to complete", "no answer",
-        "data unavailable",
+        "could not find", "unable to complete", "no answer", "data unavailable",
     ]
     if not any(s in ans_lower for s in empty_signals):
         return True
-
-    # Specific entity lookups should not return empty
     if re.search(r"[A-Z]{2,}/\d{4}/\d+", user_query, re.I):
-        return False  # Invoice number lookup returned empty
+        return False
     if re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,}\b", user_query):
-        return False  # Named entity lookup returned empty
-
+        return False
     return True
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CACHE MANAGEMENT
-# ══════════════════════════════════════════════════════════════════════════════
-
-def clear_cache() -> int:
-    """Clear the query cache. Returns number of evicted entries."""
-    global _QUERY_CACHE
-    count = len(_QUERY_CACHE)
-    _QUERY_CACHE = {}
-    LOGGER.info("Query cache cleared: %d entries evicted", count)
-    return count
-
-
-def cache_stats() -> Dict[str, Any]:
-    """Return cache statistics for monitoring."""
-    now = time.time()
-    ages = [now - v.get("_ts", 0) for v in _QUERY_CACHE.values()]
-    return {
-        "size":       len(_QUERY_CACHE),
-        "max_size":   _CACHE_MAX_SIZE,
-        "ttl_sec":    _CACHE_TTL_SEC,
-        "oldest_sec": round(max(ages), 1) if ages else 0,
-        "newest_sec": round(min(ages), 1) if ages else 0,
-    }

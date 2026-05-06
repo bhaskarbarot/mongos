@@ -205,6 +205,7 @@ def run_agent_query(
     agent,
     user_query: str,
     memory: Optional[ConversationMemory] = None,
+    request_id: str = "",
 ) -> Dict[str, Any]:
     """Execute a user query through the full pipeline.
 
@@ -215,9 +216,10 @@ def run_agent_query(
         agent:      AgentExecutor from get_sql_agent()
         user_query: Raw user input string
         memory:     Optional ConversationMemory for session context
+        request_id: Correlation ID for log tracing (optional)
 
     Returns:
         Dict with: answer, latency_ms, confidence, tables_used,
                    sql_queries, layer, cached (optional)
     """
-    return _pipeline.run(agent, user_query, memory)
+    return _pipeline.run(agent, user_query, memory, request_id=request_id)
