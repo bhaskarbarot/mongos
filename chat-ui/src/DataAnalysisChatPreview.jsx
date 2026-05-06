@@ -87,7 +87,7 @@ function StructuredData({data}){
 function QueryPlan({plan}){
   if(!plan||typeof plan!=="object")return null;const items=[];
   if(plan.intent)items.push({l:`Intent: ${plan.intent}`,c:"amber"});
-  if(plan.collection)items.push({l:`Collection: ${plan.collection}`,c:"blue"});
+  if(plan.collection)items.push({l:`Tables: ${plan.collection}`,c:"blue"});
   if(plan.filters&&Object.keys(plan.filters).length)items.push({l:`Filters: ${Object.entries(plan.filters).map(([k,v])=>`${k}=${v}`).join(", ")}`,c:"purple"});
   if(plan.output_format)items.push({l:`Output: ${plan.output_format}`,c:"green"});
   if(!items.length)return null;
@@ -134,7 +134,17 @@ function MessageBubble({msg}){
       {!u&&<div style={{marginTop:3,paddingLeft:3}}>
         <QueryPlan plan={msg.query_plan}/>
         <StructuredData data={msg.data}/>
-        {msg.query_used&&<Collapsible title="Query Used (MongoDB)">{typeof msg.query_used==="object"?Object.entries(msg.query_used).map(([c,s])=><div key={c}><div style={{fontWeight:600,fontSize:".8em",color:"var(--ac)",marginBottom:3}}>Collection: {c}</div><pre style={{background:"var(--sr)",borderRadius:6,padding:8,fontSize:".78em",overflow:"auto",maxHeight:200,margin:0,color:"var(--ts)"}}>{JSON.stringify(s,null,2)}</pre></div>):<pre style={{background:"var(--sr)",borderRadius:6,padding:8,fontSize:".78em",overflow:"auto",color:"var(--ts)"}}>{JSON.stringify(msg.query_used,null,2)}</pre>}</Collapsible>}
+        {msg.query_used&&(
+          <Collapsible title="SQL Query">
+            {Array.isArray(msg.query_used)
+              ? msg.query_used.map((q, idx) => (
+                  <pre key={idx} style={{background:"var(--sr)",borderRadius:6,padding:8,fontSize:".78em",overflow:"auto",maxHeight:200,margin:0,color:"var(--ts)"}}>{q}</pre>
+                ))
+              : (
+                  <pre style={{background:"var(--sr)",borderRadius:6,padding:8,fontSize:".78em",overflow:"auto",maxHeight:200,margin:0,color:"var(--ts)"}}>{msg.query_used}</pre>
+                )}
+          </Collapsible>
+        )}
         {msg.data&&<Collapsible title="Raw JSON"><pre style={{background:"var(--sr)",borderRadius:6,padding:8,fontSize:".78em",overflow:"auto",maxHeight:240,margin:0,color:"var(--ts)"}}>{JSON.stringify(msg.data,null,2)}</pre></Collapsible>}
         {msg.sources_used?.length>0&&<div style={{marginTop:3}}>{msg.sources_used.map((s,i)=><Badge key={i} color="slate">{s}</Badge>)}</div>}
         {(msg.confidence!=null||msg.processing_time_ms!=null)&&<div style={{fontSize:".73em",color:"var(--tm)",marginTop:3,display:"flex",gap:10}}>
