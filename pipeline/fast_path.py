@@ -432,11 +432,30 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     if not table_names:
         return None
 
+    # ── Entity extraction ──────────────────────────────────────────────────────
+    # Capture the full phrase after the count keyword, then try words last-to-first
+    # so "paid invoices" → entity="invoices", "closed won deals" → entity="deals".
+    # The old single-word capture (r"\s+(\w+)") would grab "paid" instead of "invoices".
     entity = ""
+    _STOP = {"with", "who", "have", "has", "are", "is", "a", "an", "the", "of"}
     for kw in ["how many", "number of", "total number of", "count of", "count"]:
-        m = re.search(rf"{re.escape(kw)}\s+(\w+)", text)
+        # Capture everything after the keyword up to a time/stop phrase or end
+        m = re.search(
+            rf"{re.escape(kw)}\s+(.+?)(?:\s*\??\s*$|\s+(?:in\b|for\b|during\b|this\b|last\b|with\b|who\b))",
+            text,
+        )
+        if not m:
+            m = re.search(rf"{re.escape(kw)}\s+(.+?)(\?|$)", text)
         if m:
-            entity = m.group(1)
+            phrase = m.group(1).strip().rstrip("?").strip()
+            words  = [w for w in phrase.split() if w not in _STOP]
+            # Try words from right (noun) to left (adjective) to find entity table
+            for word in reversed(words):
+                if resolve_entity_table(word, table_names, user_query):
+                    entity = word
+                    break
+            if not entity and words:
+                entity = words[-1]
             break
 
     table = resolve_entity_table(entity, table_names, user_query)
@@ -451,13 +470,79 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     if not table:
         return None
 
-    # "details/detail of <entity>" should be handled as grouped summary, not raw list.
     if re.search(r"\bdetails?\b", text):
         return None
 
-    time_cond  = _parse_time_condition(text)
-    where      = f"WHERE {time_cond['condition']}" if time_cond else ""
+    # ── Attribute / status filter detection ────────────────────────────────────
+    # Detects adjectives BEFORE the entity noun and maps them to WHERE clauses.
+    # Examples: "paid invoices"→payment_status='paid', "closed won deals"→stage ILIKE 'Closed Won'
+    fields = get_document_fields(agent, table)
+
+    # Priority-ordered map: (regex, field_keyword, sql_operator, sql_value, human_label)
+    # Multi-word patterns (e.g. "closed won") must appear BEFORE single-word ones.
+    _ATTR_FILTER_MAP = [
+        # Invoice payment statuses
+        (r"\bpaid\b",               "payment_status", "=",       "'paid'",                  "paid"),
+        (r"\bunpaid\b",             "payment_status", "NOT IN",  "('paid','cancelled')",     "unpaid"),
+        (r"\bconfirmed\b",          "payment_status", "ILIKE",   "'confirmed'",              "confirmed"),
+        (r"\bdraft\b",              "payment_status", "ILIKE",   "'draft'",                  "draft"),
+        (r"\bcancell?ed\b",         "payment_status", "ILIKE",   "'cancelled'",              "cancelled"),
+        (r"\bpartial.?payment\b",   "payment_status", "ILIKE",   "'partial_payment'",        "partial payment"),
+        # Deal stages — multi-word checked before single-word
+        (r"\bclosed\s+won\b",       "stage",          "ILIKE",   "'Closed Won'",             "closed won"),
+        (r"\bclosed\s+lost\b",      "stage",          "ILIKE",   "'Closed Lost'",            "closed lost"),
+        (r"\bwon\b",                "stage",          "ILIKE",   "'Closed Won'",             "closed won"),
+        (r"\blost\b",               "stage",          "ILIKE",   "'Closed Lost'",            "closed lost"),
+        # Generic statuses (tasks, contacts, etc.)
+        (r"\bpending\b",            "status",         "=",       "'Pending'",                "pending"),
+        (r"\bcompleted?\b",         "status",         "=",       "'Completed'",              "completed"),
+        (r"\bopen\b",               "status",         "=",       "'Open'",                   "open"),
+        (r"\bhigh.{0,2}priorit",    "priority",       "=",       "'High'",                   "high priority"),
+        (r"\bmedium.{0,2}priorit",  "priority",       "=",       "'Medium'",                 "medium priority"),
+        (r"\blow.{0,2}priorit",     "priority",       "=",       "'Low'",                    "low priority"),
+    ]
+
+    filter_parts: List[str] = []
+    filter_label = ""
+    for pattern, field_kw, op, val, label in _ATTR_FILTER_MAP:
+        if not re.search(pattern, text):
+            continue
+        actual = next(
+            (f for f in fields if f.lower() == field_kw.lower()
+             or field_kw.lower() in f.lower()),
+            None,
+        )
+        if not actual:
+            continue
+        if op == "NOT IN":
+            filter_parts.append(f"document->>'{actual}' NOT IN {val}")
+        else:
+            filter_parts.append(f"document->>'{actual}' {op} {val}")
+        filter_label = label
+        break  # one status/stage filter per count query
+
+    # ── "users with task" — relational filter ──────────────────────────────────
+    if (table.lower() == "users"
+            and re.search(r"\bwith\s+tasks?\b|\bwho\s+have\s+tasks?\b|\bhave\s+tasks?\b", text)
+            and any(t.lower() == "createtasks" for t in table_names)):
+        filter_parts.append(
+            "document->>'_id' IN ("
+            "SELECT DISTINCT document->>'createdBy' FROM \"createtasks\" "
+            "WHERE document->>'createdBy' IS NOT NULL"
+            ")"
+        )
+        filter_label = "with tasks"
+
+    # ── Build WHERE clause ──────────────────────────────────────────────────────
+    time_cond   = _parse_time_condition(text)
+    where_parts = []
+    if time_cond:
+        where_parts.append(time_cond["condition"])
+    where_parts.extend(filter_parts)
+    where      = ("WHERE " + " AND ".join(f"({p})" for p in where_parts)) if where_parts else ""
     time_label = f" for {time_cond['label']}" if time_cond else ""
+
+    entity_label = f"{filter_label} {table}".strip() if filter_label else table
 
     count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
     _res      = run_sql(agent, count_sql)
@@ -466,7 +551,7 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
                 "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql]}
     rows      = _res.rows
     total     = coerce_number(rows[0][0] if rows else 0)
-    count_answer = f"Total **{table}**{time_label}: **{fmt_number(total)}**"
+    count_answer = f"Total **{entity_label}**{time_label}: **{fmt_number(total)}**"
     sql_queries  = [count_sql]
 
     wants_list = any(kw in text for kw in [
@@ -474,14 +559,9 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     ])
     wants_all  = bool(re.search(r"\ball\b", text))
 
-    # Rule:
-    # - explicit count-only phrasing -> count only
-    # - "total" (without explicit count-only phrasing) -> count + list
-    # - "all" -> count + list
     explicit_count_only = bool(re.search(r"\b(count|how many|number of|count of)\b", text)) and not has_total_word
     include_list = (wants_all or (has_total_word and not explicit_count_only) or wants_list) and not explicit_count_only
     if include_list and total > 0:
-        fields    = get_document_fields(agent, table)
         name_expr = REGISTRY.display_name_expr(table, fields)
         list_sql  = (
             f'SELECT {name_expr} AS name FROM "{table}" {where} '
