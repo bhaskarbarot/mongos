@@ -70,6 +70,9 @@ echo ""
 # ── Ensure logs dir exists ────────────────────────────────────────────────────
 mkdir -p "$ROOT/logs"
 
+# Fresh automation log for each launch (keeps one-run visibility)
+: > "$ROOT/logs/automation_log.txt"
+
 # ── Install dependencies (first-run only) ─────────────────────────────────────
 if [ ! -d "$ROOT/automation/node_modules" ]; then
   echo ">>> Installing automation Node.js dependencies…"
@@ -105,6 +108,15 @@ fi
 # ── Step 2: MongoDB → PostgreSQL automation ───────────────────────────────────
 echo ">>> [2/4] Starting MongoDB→PostgreSQL sync automation…"
 
+# Prevent orphan duplicate sync writers across restarts/manual runs.
+OLD_SYNC_PIDS="$(pgrep -f "$ROOT/automation/sync.js" || true)"
+if [ -n "$OLD_SYNC_PIDS" ]; then
+  echo "      Found existing sync process(es): $OLD_SYNC_PIDS — stopping first…"
+  kill $OLD_SYNC_PIDS 2>/dev/null || true
+  sleep 1
+fi
+
+# Redirect all sync output to file only — not to terminal.
 node "$ROOT/automation/sync.js" >> "$ROOT/logs/automation_log.txt" 2>&1 &
 SYNC_PID=$!
 sleep 3

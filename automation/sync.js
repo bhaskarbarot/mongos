@@ -51,6 +51,44 @@ const logger = {
   debug: (msg, extra) => log("DEBUG", msg, extra),
 };
 
+// ── Error flood guard ──────────────────────────────────────────────────────────
+// During DB outages, polling can touch thousands of docs and generate massive
+// repeated ECONNREFUSED lines. We aggregate and print a compact periodic summary.
+const _errorBuckets = Object.create(null);
+const ERROR_FLUSH_MS = 10000;
+
+function _errorKey(collection, err) {
+  const msg = String(err?.message || err || "unknown error");
+  if (msg.includes("ECONNREFUSED")) return `${collection}|ECONNREFUSED`;
+  return `${collection}|${msg.slice(0, 120)}`;
+}
+
+function logSyncErrorOnce(collection, err, context = "sync") {
+  const key = _errorKey(collection, err);
+  const now = Date.now();
+  const bucket = _errorBuckets[key] || {
+    collection,
+    context,
+    firstTs: now,
+    lastTs: now,
+    count: 0,
+    sample: String(err?.message || err || "unknown error"),
+  };
+  bucket.count += 1;
+  bucket.lastTs = now;
+  _errorBuckets[key] = bucket;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, b] of Object.entries(_errorBuckets)) {
+    if (now - b.lastTs >= ERROR_FLUSH_MS) {
+      logger.error(`${b.context} failed | ${b.collection} | ${b.sample} (repeated ${b.count}x)`);
+      delete _errorBuckets[key];
+    }
+  }
+}, 2000).unref();
+
 // ── Modules ───────────────────────────────────────────────────────────────────
 const watchMongoChanges  = require("./mongoWatcher");
 const startMongoPolling  = require("./mongoPoller");
@@ -110,7 +148,7 @@ async function syncUpsert(collection, doc, opType, silent = false) {
     }
   } catch (err) {
     stats.errors++;
-    logger.error(`syncUpsert failed | ${collection} | ${err.message}`);
+    logSyncErrorOnce(collection, err, "syncUpsert");
   }
 }
 
@@ -136,7 +174,7 @@ async function syncDelete(collection, id) {
     logger.info(`${collection} === DELETE done in MongoDB → removed from PostgreSQL | id: ${id}`);
   } catch (err) {
     stats.errors++;
-    logger.error(`syncDelete failed | ${collection} | ${err.message}`);
+    logSyncErrorOnce(collection, err, "syncDelete");
   }
 }
 
@@ -149,6 +187,7 @@ async function startSync() {
   logger.info("Log file     : " + LOG_FILE);
 
   let fallbackStarted = false;
+  let initialSyncCompleted = false;
 
   async function startPollingFallback(error) {
     if (fallbackStarted) return;
@@ -172,7 +211,17 @@ async function startSync() {
           syncPollDone(collection, idsInMongo.length);
         } catch (err) {
           stats.errors++;
-          logger.error(`reconcile failed | ${collection} | ${err.message}`);
+          logSyncErrorOnce(collection, err, "reconcile");
+        }
+      },
+      // Called once per full poll pass.
+      onPassComplete: async ({ collections }) => {
+        if (!initialSyncCompleted) {
+          initialSyncCompleted = true;
+          logger.info("🟢 INITIAL SYNC COMPLETE — polling is now in live watch mode", {
+            collections,
+            poll_interval_ms: Number(process.env.POLL_INTERVAL_MS || 5000),
+          });
         }
       },
     });
@@ -200,6 +249,10 @@ async function startSync() {
       }
     );
     logger.info("Change stream ACTIVE — real-time sync running ✓");
+    if (!initialSyncCompleted) {
+      initialSyncCompleted = true;
+      logger.info("🟢 INITIAL SYNC READY — change stream connected and live updates active");
+    }
   } catch (err) {
     logger.warn("Change stream failed — using polling fallback", { error: err.message });
     await startPollingFallback(err);
