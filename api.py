@@ -339,14 +339,13 @@ async def feedback(req: FeedbackRequest):
 
 @app.post("/cache/clear")
 async def cache_clear():
-    """Clear in-memory pipeline cache."""
-    try:
-        from pipeline.main import _QUERY_CACHE
-        _QUERY_CACHE.clear()
-        cleared = True
-    except Exception:
-        cleared = False
-    return {"status": "ok", "cleared": cleared, "message": "Cache cleared"}
+    """Cache is disabled in this deployment."""
+    return {
+        "status": "ok",
+        "cleared": False,
+        "cache_disabled": True,
+        "message": "Cache is disabled",
+    }
 
 
 @app.post("/transcribe")

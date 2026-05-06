@@ -1,0 +1,81 @@
+INFO:     Started server process [111322]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:56104 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38366 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38366 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39006 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39010 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39012 - "GET /cache/status HTTP/1.1" 200 OK
+2026-05-06 11:45:43,562 | INFO | crm_api | Initialising CRM pipeline (DB + schema discovery)…
+2026-05-06 11:45:43,932 | INFO | sql_chatbot | Starting schema discovery...
+2026-05-06 11:45:47,560 | INFO | sql_chatbot | Schema: discovered 46 tables
+2026-05-06 11:45:47,593 | INFO | sql_chatbot | Schema link: ai_notes.company → companies
+2026-05-06 11:45:47,605 | INFO | sql_chatbot | Schema link: bills.createdBy → users
+2026-05-06 11:45:47,611 | INFO | sql_chatbot | Schema link: campaigns.createdBy → users
+2026-05-06 11:45:47,628 | INFO | sql_chatbot | Schema link: commonnotes.contactId → contacts
+2026-05-06 11:45:47,633 | INFO | sql_chatbot | Schema link: commonnotes.createdBy → users
+2026-05-06 11:45:47,658 | INFO | sql_chatbot | Schema link: commonnotes.invoiceId → invoices
+2026-05-06 11:45:47,673 | INFO | sql_chatbot | Schema link: companies.companyOwner → users
+2026-05-06 11:45:47,676 | INFO | sql_chatbot | Schema link: companies.createdBy → users
+2026-05-06 11:45:47,678 | INFO | sql_chatbot | Schema link: companies.region → regions
+2026-05-06 11:45:47,685 | INFO | sql_chatbot | Schema link: contacts.company → companies
+2026-05-06 11:45:47,690 | INFO | sql_chatbot | Schema link: contacts.contactOwner → users
+2026-05-06 11:45:47,697 | INFO | sql_chatbot | Schema link: contacts.createdBy → users
+2026-05-06 11:45:47,723 | INFO | sql_chatbot | Schema link: createtasks.companyId → companies
+2026-05-06 11:45:47,726 | INFO | sql_chatbot | Schema link: createtasks.createdBy → users
+2026-05-06 11:45:47,730 | INFO | sql_chatbot | Schema link: createtasks.invoiceId → invoices
+2026-05-06 11:45:47,741 | INFO | sql_chatbot | Schema link: deals.company → companies
+2026-05-06 11:45:47,744 | INFO | sql_chatbot | Schema link: deals.contact → contacts
+2026-05-06 11:45:47,747 | INFO | sql_chatbot | Schema link: deals.owner → users
+2026-05-06 11:45:47,751 | INFO | sql_chatbot | Schema link: dealstagesettings.createdBy → users
+2026-05-06 11:45:47,771 | INFO | sql_chatbot | Schema link: invoices.company → companies
+2026-05-06 11:45:47,774 | INFO | sql_chatbot | Schema link: invoices.createdBy → users
+2026-05-06 11:45:47,783 | INFO | sql_chatbot | Schema link: meetings.createdBy → users
+2026-05-06 11:45:47,787 | INFO | sql_chatbot | Schema link: notes.createdBy → users
+2026-05-06 11:45:47,803 | INFO | sql_chatbot | Schema link: outreaches.assignedTo → users
+2026-05-06 11:45:47,806 | INFO | sql_chatbot | Schema link: outreaches.createdBy → users
+2026-05-06 11:45:47,809 | INFO | sql_chatbot | Schema link: outreaches.region → regions
+2026-05-06 11:45:47,848 | INFO | sql_chatbot | Schema link: sales.company → companies
+2026-05-06 11:45:47,852 | INFO | sql_chatbot | Schema link: sales.salesOwner → users
+2026-05-06 11:45:47,870 | INFO | sql_chatbot | Schema link: targets.userId → users
+2026-05-06 11:45:47,883 | INFO | sql_chatbot | Schema link: users.department → departments
+2026-05-06 11:45:47,886 | INFO | sql_chatbot | Schema link: users.regionId → regions
+2026-05-06 11:45:47,891 | INFO | sql_chatbot | Schema link: vendors.createdBy → users
+2026-05-06 11:45:47,891 | INFO | sql_chatbot | Schema discovery: 32 relationships found
+2026-05-06 11:45:47,892 | INFO | sql_chatbot | Schema cache warmed: 46 tables
+2026-05-06 11:45:47,893 | INFO | sql_chatbot | ╔══════════════════════════════════════════════╗
+2026-05-06 11:45:47,893 | INFO | sql_chatbot | ║  SQL Chatbot Agent Ready                     ║
+2026-05-06 11:45:47,893 | INFO | sql_chatbot | ╠══════════════════════════════════════════════╣
+2026-05-06 11:45:47,893 | INFO | sql_chatbot | ║  Tables       : 46 discovered                ║
+2026-05-06 11:45:47,893 | INFO | sql_chatbot | ║  FK Links     : 32 relationships             ║
+2026-05-06 11:45:47,893 | INFO | sql_chatbot | ║  Primary LLM  : debopam/Text-to-SQL__Qwen2.5-Coder-3B-FineTuned:latest ║
+2026-05-06 11:45:47,894 | INFO | sql_chatbot | ║  Fallback LLM : a-kore/Arctic-Text2SQL-R1-7B:latest ║
+2026-05-06 11:45:47,894 | INFO | sql_chatbot | ║  Reasoning    : llama-3.1-8b-instant         ║
+2026-05-06 11:45:47,894 | INFO | sql_chatbot | ║  Groq API     : connected                    ║
+2026-05-06 11:45:47,894 | INFO | sql_chatbot | ║  Startup      : 4085ms                       ║
+2026-05-06 11:45:47,894 | INFO | sql_chatbot | ╚══════════════════════════════════════════════╝
+2026-05-06 11:45:47,894 | INFO | crm_api | Pipeline ready ✓
+INFO:     127.0.0.1:39022 - "GET /sources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39036 - "GET /feedback/learnings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39040 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52398 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52410 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54690 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54702 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57112 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57122 - "GET /cache/status HTTP/1.1" 200 OK
+2026-05-06 11:46:43,343 | INFO | crm_api | POST /chat | query: hi
+2026-05-06 11:46:43,343 | INFO | sql_chatbot | Guard: greeting detected
+INFO:     127.0.0.1:38234 - "POST /chat HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38248 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38258 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46174 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46178 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47032 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47034 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47044 - "GET /cache/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47048 - "POST /cache/clear HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59334 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59340 - "GET /cache/status HTTP/1.1" 200 OK
