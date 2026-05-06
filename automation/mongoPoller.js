@@ -28,7 +28,7 @@ async function getCollections(db) {
     .filter((name) => name && !name.startsWith("system."));
 }
 
-async function startMongoPolling({ onUpsert, onDelete }) {
+async function startMongoPolling({ onUpsert, onDelete, onPassComplete }) {
   const uri = getEnv("MONGO_URI", "MONGODB_URI");
   const dbName = getEnv("MONGO_DB", "MONGODB_DB");
   const intervalMs = Number(process.env.POLL_INTERVAL_MS || 5000);
@@ -71,6 +71,10 @@ async function startMongoPolling({ onUpsert, onDelete }) {
         if (typeof onDelete === "function") {
           await onDelete(collectionName, Array.from(currentIds));
         }
+      }
+
+      if (typeof onPassComplete === "function") {
+        await onPassComplete({ collections: collections.length });
       }
     } catch (error) {
       console.error("Polling pass failed:", error);
