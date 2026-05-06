@@ -1,2 +1,0 @@
-cd /home/elsner/Documents/mongos
-streamlit run app.py 2>&1 | tee run.log
