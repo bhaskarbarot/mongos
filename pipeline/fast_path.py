@@ -343,6 +343,11 @@ def _classify_route(text: str) -> str:
     if re.search(r"\bpending\s+invoice|invoice.{0,20}(pending|unpaid|outstanding)\b", t):
         return "pending_invoices"
 
+    # ── Active customers ────────────────────────────────────────────────────────
+    if (re.search(r"\bactive\b", t)
+            and re.search(r"\b(customers?|companies?|company|clients?|accounts?|contacts?)\b", t)):
+        return "active_customers"
+
     # ── User + Task relational query ────────────────────────────────────────────
     # Detected BEFORE general fallback so relational JOIN intent is handled directly
     # rather than being mis-routed to _fp_tasks (which has no user JOIN).
@@ -846,14 +851,15 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
         (["contract", "under review"],                  "Contract Under Review"),
         (["analysis", "to be quoted"],                  "Analysis - To be Quoted"),
     ]
-    matched_stage   = None
-    wants_overdue   = "overdue" in text or "stuck" in text
+    matched_stage = None
+    wants_overdue = "overdue" in text or "stuck" in text
+    wants_open    = bool(re.search(r"\bopen\b", text))  # "open deals", "which deals are open"
     for patterns, stage in STAGE_MAP:
         if any(p in text for p in patterns):
             matched_stage = stage
             break
 
-    if not matched_stage and not wants_overdue:
+    if not matched_stage and not wants_overdue and not wants_open:
         return None
 
     table_names = get_table_names(agent)
@@ -861,19 +867,38 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
     if not table:
         return None
 
-    fields       = get_document_fields(agent, table)
-    stage_field  = next((f for f in fields if f.lower() == "stage"), None) or \
-                   next((f for f in fields if "stage" in f.lower()), "stage")
-    name_field   = next((f for f in fields if f.lower() == "name"), "name")
-    close_field  = next((f for f in fields if "close" in f.lower()), None)
-    amount_field = next((f for f in fields if f.lower() in ["grand_total", "grand_total_in_usd"]), None)
+    fields        = get_document_fields(agent, table)
+    stage_field   = next((f for f in fields if f.lower() == "stage"), None) or \
+                    next((f for f in fields if "stage" in f.lower()), "stage")
+    name_field    = next((f for f in fields if f.lower() == "name"), "name")
+    close_field   = next((f for f in fields if "close" in f.lower()), None)
+    amount_field  = next((f for f in fields if f.lower() in ["grand_total", "grand_total_in_usd"]), None)
     deleted_field = next((f for f in fields if f.lower() == "deleted"), None)
+    # Fields used by open-deal detection (preferred over stage NOT IN approach)
+    won_field     = next((f for f in fields if "wonAt" in f or "won_at" in f.lower()), None)
+    lost_field    = next((f for f in fields if "lostAt" in f or "lost_at" in f.lower()), None)
 
     where_parts = []
     if deleted_field:
         where_parts.append(f"COALESCE(document->>'{deleted_field}', 'false') != 'true'")
+
     if matched_stage:
         where_parts.append(f"document->>'{stage_field}' ILIKE '{matched_stage}'")
+    elif wants_open:
+        # Open deals = not won AND not lost.
+        # Prefer dealWonAt/dealLostAt IS NULL (most accurate);
+        # fall back to stage NOT IN ('Closed Won','Closed Lost').
+        if won_field and lost_field:
+            where_parts.append(f"document->>'{won_field}' IS NULL")
+            where_parts.append(f"document->>'{lost_field}' IS NULL")
+        elif won_field:
+            where_parts.append(f"document->>'{won_field}' IS NULL")
+        elif lost_field:
+            where_parts.append(f"document->>'{lost_field}' IS NULL")
+        else:
+            where_parts.append(
+                f"document->>'{stage_field}' NOT IN ('Closed Won', 'Closed Lost')"
+            )
     elif wants_overdue and close_field:
         where_parts.append(f"NULLIF(document->>'{close_field}', '')::timestamptz < NOW()")
         where_parts.append(
@@ -889,26 +914,32 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
     elif time_cond:
         where_parts.append(time_cond["condition"])
 
-    where          = "WHERE " + " AND ".join(f"({p})" for p in where_parts) if where_parts else ""
-    select_parts   = [f"document->>'{name_field}' AS name", f"document->>'{stage_field}' AS stage"]
+    where        = "WHERE " + " AND ".join(f"({p})" for p in where_parts) if where_parts else ""
+    select_parts = [f"document->>'{name_field}' AS name", f"document->>'{stage_field}' AS stage"]
     if amount_field:
         select_parts.append(f"NULLIF(document->>'{amount_field}','')::numeric AS amount")
     if close_field:
         select_parts.append(f"document->>'{close_field}' AS close_date")
 
+    # Count first so the answer header is accurate
+    count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
+    _cnt = run_sql(agent, count_sql)
+    total_count = coerce_number(_cnt.rows[0][0] if _cnt.rows else 0) if not _cnt.error else 0
+
     sql  = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY updated_at DESC LIMIT 50".strip()
     _res = run_sql(agent, sql)
-    label = matched_stage or ("overdue" if wants_overdue else "filtered")
+
+    label = matched_stage or ("open" if wants_open else "overdue" if wants_overdue else "filtered")
     if _res.error:
         return {"answer": "Unable to retrieve data at this time. Please try again.",
-                "tables_used": [table], "confidence": 0.0, "sql_queries": [sql]}
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql, sql]}
     rows = _res.rows
     if not rows:
         return {
             "answer":      f"No **{label}** deals found.",
             "tables_used": [table],
             "confidence":  0.9,
-            "sql_queries": [sql],
+            "sql_queries": [count_sql, sql],
         }
 
     headers = ["Name", "Stage"] + (["Amount"] if amount_field else []) + (["Close Date"] if close_field else [])
@@ -919,11 +950,12 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
     if len(rows) > 20:
         lines.append(f"_…and {len(rows)-20} more_")
 
+    summary = f"**Total {label} deals: {fmt_number(total_count)}**\n\n" if wants_open else ""
     return {
-        "answer":      f"**{len(rows)} {label} deals:**\n\n" + "\n".join(lines),
+        "answer":      summary + f"**{label.title()} Deals (showing {min(len(rows), 20)}):**\n\n" + "\n".join(lines),
         "tables_used": [table],
         "confidence":  0.97,
-        "sql_queries": [sql],
+        "sql_queries": [count_sql, sql],
     }
 
 
@@ -2438,6 +2470,121 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
     }
 
 
+def _fp_active_customers(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'active customers', 'how many active customers', 'give me active customers'.
+
+    Active = companies WHERE lifecycleStage NOT IN ('Inactive Customer', 'Dead Customer')
+             AND deleted != 'true'
+    Verified against DB: total(144) - Inactive Customer(29) - Dead Customer(3) = active.
+    """
+    text = normalize_text(user_query)
+
+    # Must have "active" AND a customer/company synonym
+    if not re.search(r"\bactive\b", text):
+        return None
+    if not re.search(r"\b(customers?|companies?|company|clients?|accounts?|contacts?)\b", text):
+        return None
+
+    table_names = get_table_names(agent)
+    table = next((t for t in table_names if t.lower() == "companies"), None)
+    if not table:
+        return None
+
+    fields = get_document_fields(agent, table)
+
+    # Find lifecycle and deleted fields
+    lifecycle_field = next(
+        (f for f in fields if f.lower().replace("_", "") in ["lifecyclestage", "lifecycle"]),
+        None,
+    )
+    deleted_field = next((f for f in fields if f.lower() == "deleted"), None)
+    name_field    = next((f for f in fields if f.lower() in ["companyname", "name"]), "companyName")
+    email_field   = next((f for f in fields if f.lower() == "email"), None)
+    status_field  = next((f for f in fields if f.lower() in ["leadstatus", "leadStatus"]), None)
+
+    if not lifecycle_field:
+        return None  # can't determine active without lifecycle
+
+    # WHERE: exclude Inactive Customer and Dead Customer, exclude deleted
+    where_parts = [
+        f"COALESCE(document->>'{lifecycle_field}', '') "
+        f"NOT IN ('Inactive Customer', 'Dead Customer')",
+    ]
+    if deleted_field:
+        where_parts.append(f"COALESCE(document->>'{deleted_field}', 'false') != 'true'")
+
+    where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
+
+    # Count
+    count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
+    _cnt = run_sql(agent, count_sql)
+    if _cnt.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql]}
+    total = coerce_number(_cnt.rows[0][0] if _cnt.rows else 0)
+
+    # Count-only intent
+    wants_count_only = bool(
+        re.search(r"\bhow many\b|\bcount\b|\bnumber of\b|\btotal\b", text)
+    ) and not re.search(r"\bgive\b|\bshow\b|\blist\b|\ball\b|\bdisplay\b|\bfetch\b", text)
+
+    if wants_count_only:
+        return {
+            "answer":      f"Total **active customers**: **{fmt_number(total)}**",
+            "tables_used": [table],
+            "confidence":  0.98,
+            "sql_queries": [count_sql],
+            "_entity":     table,
+            "_count":      int(total),
+        }
+
+    # List view — build select
+    select_parts = [f"document->>'{name_field}' AS name"]
+    if email_field:
+        select_parts.append(f"document->>'{email_field}' AS email")
+    if status_field:
+        select_parts.append(f"document->>'{status_field}' AS lead_status")
+    select_parts.append(f"document->>'{lifecycle_field}' AS lifecycle_stage")
+
+    list_sql = (
+        f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} "
+        f"ORDER BY updated_at DESC LIMIT 100"
+    ).strip()
+    _rows = run_sql(agent, list_sql)
+    if _rows.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql, list_sql]}
+    rows = _rows.rows
+
+    if not rows:
+        return {
+            "answer":      "No active customers found.",
+            "tables_used": [table],
+            "confidence":  0.9,
+            "sql_queries": [count_sql, list_sql],
+        }
+
+    headers = [p.split(" AS ")[-1].replace("_", " ").title() for p in select_parts]
+    lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in rows[:50]:
+        vals = ["—" if v is None else str(v) for v in row]
+        lines.append("| " + " | ".join(vals) + " |")
+    if len(rows) > 50:
+        lines.append(f"_…and {len(rows)-50} more_")
+
+    return {
+        "answer":      (
+            f"**Active Customers — {fmt_number(total)} total "
+            f"(excluding Inactive & Dead):**\n\n" + "\n".join(lines)
+        ),
+        "tables_used": [table],
+        "confidence":  0.97,
+        "sql_queries": [count_sql, list_sql],
+        "_entity":     table,
+        "_count":      int(total),
+    }
+
+
 _SPECIALIZED: Dict[str, Any] = {
     "search":                _fp_search,
     "quarterly":             _fp_quarterly,
@@ -2450,19 +2597,20 @@ _SPECIALIZED: Dict[str, Any] = {
     "overdue_aging":         _fp_overdue_aging,
     "pipeline_summary":      _fp_pipeline_summary,
     "pending_invoices":      _fp_pending_invoices,
-    # New handlers (ISSUE 1 + ISSUE 2)
     "user_task_map":         _fp_user_task_map,
     "invoice_status_filter": _fp_invoice_status,
+    "active_customers":      _fp_active_customers,
 }
 
 # General handlers tried in priority order when no specialized route matched
 _GENERAL = [
-    _fp_sales,           # before revenue — catches "sales orders" explicitly
+    _fp_sales,            # before revenue — catches "sales orders" explicitly
     _fp_revenue,
     _fp_top_customers,
     _fp_deals_filter,
-    _fp_user_task_map,   # before _fp_tasks — catches user+task JOIN queries
-    _fp_invoice_status,  # before _fp_list_records — catches status-filtered invoice queries
+    _fp_active_customers, # before generic list — catches "active customers" explicitly
+    _fp_user_task_map,    # before _fp_tasks — catches user+task JOIN queries
+    _fp_invoice_status,   # before _fp_list_records — catches status-filtered invoice queries
     _fp_tasks,
     _fp_count,
     _fp_group_by,
