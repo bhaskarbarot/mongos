@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import calendar
 import logging
+import random
 import re
 import time as _time
 from typing import Any, Dict, List, Optional, Tuple
@@ -2219,7 +2220,19 @@ def _fp_user_task_map(agent, user_query: str) -> Optional[Dict]:
     if not (has_user and has_task):
         return None
 
-    # Require a relational/listing intent (not just a count)
+    # Do NOT fire for count-only sub-queries from the executor.
+    # e.g. "count pending tasks grouped by user" → let _fp_count handle it
+    # so the synthesizer gets a count/number, not a 73-row JOIN table.
+    count_only = bool(re.search(
+        r"^(count|how many|number of|total number)\b"
+        r"|\bcount\b.{0,30}\bgrouped?\b"
+        r"|\bgroup(ed)?\s+by\b",
+        text,
+    )) and not re.search(r"\blist\b|\bshow\b|\ball\b|\bgive me\b|\bdisplay\b", text)
+    if count_only:
+        return None
+
+    # Require a relational/listing intent (not just a bare mention)
     relational = bool(re.search(
         r"\bby\b|\bper\b|\bwith\b|\bassigned\b|\bstatus\b|\bpending\b|\bcompleted?\b|\bopen\b|\bgrouped\b|\beach\b|\ball\b|\btheir\b|\band\b",
         text,
@@ -2461,7 +2474,21 @@ _GENERAL = [
 # PUBLIC ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run(query: str, agent) -> Optional[Dict[str, Any]]:
+def _natural_delay() -> None:
+    """Add a human-feeling delay before every fast-path response.
+
+    Total wait = 5s base + random 1–5s extra → 6–10s per response.
+    This prevents responses from looking instantaneous/hardcoded to end users.
+    Each query gets a different total time so answers never arrive at the
+    same interval.
+    """
+    extra = random.randint(1, 5)
+    total = 5 + extra
+    LOGGER.debug("FastPath natural delay: %ds (base=5 + extra=%d)", total, extra)
+    _time.sleep(total)
+
+
+def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]]:
     """
     Main entry point for the fast-path engine.
 
@@ -2469,12 +2496,13 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
     2. If no specialized match, try general handlers in priority order.
     3. Return None if nothing matched → caller escalates to classifier.
 
-    Target latency: <300ms for cached schema, <2s on first run.
-    Never raises — exceptions in individual handlers are caught and logged.
-
     Args:
-        query: Raw user query string
-        agent: DB agent with run_sql capability
+        query:       Raw user query string
+        agent:       DB agent with run_sql capability
+        apply_delay: If True, apply _natural_delay() before returning result.
+                     Set True ONLY from main.py's top-level call.
+                     Always False inside executor sub-queries — complex queries
+                     must not be artificially delayed.
 
     Returns:
         Result dict with keys: answer, tables_used, confidence, sql_queries
@@ -2489,6 +2517,8 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
             result = _SPECIALIZED[route](agent, query)
             if result is not None:
                 LOGGER.info("FastPath HIT (specialized=%s)", route)
+                if apply_delay:
+                    _natural_delay()
                 return result
         except Exception as exc:
             LOGGER.warning("FastPath specialized %s failed: %s", route, exc)
@@ -2499,6 +2529,8 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
             result = fp(agent, query)
             if result is not None:
                 LOGGER.info("FastPath HIT (%s)", fp.__name__)
+                if apply_delay:
+                    _natural_delay()
                 return result
         except Exception as exc:
             LOGGER.warning("FastPath %s failed: %s", fp.__name__, exc)

@@ -59,7 +59,10 @@ def _build_synthesis_prompt(
       4. Request KPIs and insights where appropriate
     """
 
-    # Format sub-results as structured data blocks
+    # Format sub-results as structured data blocks.
+    # Each answer is capped at 600 chars to prevent the combined prompt from
+    # exceeding Groq / Gemini token limits on large table results.
+    _MAX_ANSWER_CHARS = 600
     data_blocks = []
     for i, item in enumerate(sub_results, 1):
         sq     = item.get("sub_query", "Unknown")
@@ -70,6 +73,10 @@ def _build_synthesis_prompt(
         conf   = data.get("confidence", 0.0)
         source = data.get("source", "unknown")
         error  = data.get("error")
+
+        # Truncate large answers — keep first N chars then note truncation
+        if len(answer) > _MAX_ANSWER_CHARS:
+            answer = answer[:_MAX_ANSWER_CHARS] + f"\n…[truncated, {len(answer)} chars total]"
 
         block = (
             f"--- SUB-QUERY {i} ---\n"

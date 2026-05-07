@@ -254,7 +254,10 @@ def run(
     # ══════════════════════════════════════════════════════════════════════
     with Timer("fast_path") as fp_timer:
         try:
-            fp_result = fast_path.run(user_query, agent)
+            # apply_delay=True — only the top-level call gets the natural delay.
+            # Executor sub-queries call fast_path.run(apply_delay=False) so
+            # complex queries are never artificially slowed down.
+            fp_result = fast_path.run(user_query, agent, apply_delay=True)
         except Exception as exc:
             LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
             fp_result = None
@@ -339,8 +342,11 @@ def run(
         table_names = get_table_names(agent)
 
         # ── Step A: Decompose ──────────────────────────────────────────────
+        # Pass the full schema so the LLM knows actual field names and table
+        # structures (e.g. approval_status vs payment_status split).
+        schema_ctx = build_text2sql_schema(agent)
         with Timer("decompose") as dec_timer:
-            sub_queries = decompose(user_query, table_names)
+            sub_queries = decompose(user_query, table_names, schema_context=schema_ctx)
         metrics["decomposer_ms"] = round(dec_timer.elapsed_ms)
         LOGGER.info(
             "[RID:%s] Decomposed into %d sub-queries (%.0fms): %s",
