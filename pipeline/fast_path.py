@@ -325,7 +325,7 @@ def _classify_route(text: str) -> str:
                 t,
             )):
         return "target_unachieved"
-    if re.search(r"\b(target|performance|achievement|achieved|growth potential|kpi|score)\b", t):
+    if re.search(r"\b(targets?|performance|achievement|achieved|growth potential|kpi|score)\b", t):
         return "targets"
     if re.search(r"\boutreach\b|\binterested leads?\b|\btouch(es)?\b|\bunassigned csv\b|\bdataset\b", t):
         return "outreach"
@@ -1504,7 +1504,7 @@ ORDER BY achievement_pct ASC,
 
 def _fp_targets(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
-    if not re.search(r"\b(target|performance|achievement|achieved|growth potential|kpi|score)\b", text):
+    if not re.search(r"\b(targets?|performance|achievement|achieved|growth potential|kpi|score)\b", text):
         return None
 
     table_names = get_table_names(agent)
