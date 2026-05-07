@@ -317,6 +317,14 @@ def _classify_route(text: str) -> str:
         and re.search(r"\b(invoice|billing|tax|payment|amount|total)\b", t)
     ):
         return "company_invoice"
+    # Unachieved targets must be checked BEFORE the general targets route
+    if (re.search(r"\b(target|targets)\b", t)
+            and re.search(
+                r"\bnot\s+achiev|\bhaven.?t\s+achiev|\bmissed\s+target"
+                r"|\bbelow\s+target|\bunder\s+target|\bunachiev|\bnot\s+meet|\bnot\s+met\b",
+                t,
+            )):
+        return "target_unachieved"
     if re.search(r"\b(target|performance|achievement|achieved|growth potential|kpi|score)\b", t):
         return "targets"
     if re.search(r"\boutreach\b|\binterested leads?\b|\btouch(es)?\b|\bunassigned csv\b|\bdataset\b", t):
@@ -1387,6 +1395,113 @@ GROUP BY 1 ORDER BY 2 DESC LIMIT {n}""".strip()
     }
 
 
+def _fp_target_unachieved(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'who have not achieved targets' — users where achieved < target.
+
+    Shows: user name, team, period (month/year), target, achieved, gap, % achieved.
+    Ordered worst performers first.
+    """
+    text = normalize_text(user_query)
+
+    # Must mention targets AND "not achieved" / "below" / "missed" / "unachieved"
+    if not re.search(r"\b(target|targets)\b", text):
+        return None
+    if not re.search(
+        r"\bnot\s+achiev|\bhaven.?t\s+achiev|\bmissed\s+target|\bbelow\s+target"
+        r"|\bunder\s+target|\bunachiev|\bnot\s+meet|\bnot\s+met\b",
+        text,
+    ):
+        return None
+
+    table_names = get_table_names(agent)
+    if "targets" not in table_names:
+        return None
+
+    # Time period filter
+    year_m        = re.search(r"\b(20\d{2})\b", text)
+    month_y       = _extract_month_year(text)
+    period_filter = ""
+    period_label  = "all time"
+
+    if month_y:
+        month, year = month_y
+        period_filter = (
+            f"AND NULLIF(t.document->>'month','')::int = {month}"
+            f" AND NULLIF(t.document->>'year','')::int = {year}"
+        )
+        period_label = f"{calendar.month_name[month]} {year}"
+    elif year_m:
+        period_filter = f"AND NULLIF(t.document->>'year','')::int = {year_m.group(1)}"
+        period_label  = year_m.group(1)
+
+    sales_exists = "sales" in table_names
+    achieved_sub = (
+        """COALESCE((SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+        FROM "sales" s
+        WHERE s.document->>'salesOwner' = t.document->>'userId'
+          AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
+              = NULLIF(t.document->>'month','')::numeric
+          AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
+              = NULLIF(t.document->>'year','')::numeric
+          AND COALESCE(s.document->>'deleted','false') != 'true'), 0)"""
+        if sales_exists else "0"
+    )
+
+    # Filter: achieved < target AND target > 0
+    sql = f"""SELECT
+  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
+  t.document->>'teamName' AS team,
+  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
+  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  {achieved_sub} AS achieved_usd,
+  CASE
+    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
+    THEN ROUND({achieved_sub} / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    ELSE 0
+  END AS achievement_pct,
+  ROUND(NULLIF(t.document->>'targetInUSD','')::numeric - {achieved_sub}, 2) AS gap_usd
+FROM "targets" t
+LEFT JOIN "users" u ON u.document->>'_id' = t.document->>'userId'
+WHERE NULLIF(t.document->>'targetInUSD','')::numeric > 0
+  AND {achieved_sub} < NULLIF(t.document->>'targetInUSD','')::numeric
+  {period_filter}
+ORDER BY achievement_pct ASC,
+         NULLIF(t.document->>'year','')::int DESC,
+         NULLIF(t.document->>'month','')::int DESC""".strip()
+
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": ["targets", "users"], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
+
+    if not rows:
+        return {
+            "answer":      f"All users have met their targets for {period_label}. 🎉",
+            "tables_used": ["targets", "users"],
+            "confidence":  0.9,
+            "sql_queries": [sql],
+        }
+
+    lines = [
+        "| User | Team | Period | Target (USD) | Achieved (USD) | Achievement % | Gap (USD) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for r in rows:
+        vals = ["—" if v is None else str(v) for v in r]
+        lines.append("| " + " | ".join(vals) + " |")
+
+    return {
+        "answer":      (
+            f"**Users who have NOT achieved their targets — {period_label} "
+            f"({len(rows)} records, worst first):**\n\n" + "\n".join(lines)
+        ),
+        "tables_used": ["targets", "users"] + (["sales"] if sales_exists else []),
+        "confidence":  0.97,
+        "sql_queries": [sql],
+    }
+
+
 def _fp_targets(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
     if not re.search(r"\b(target|performance|achievement|achieved|growth potential|kpi|score)\b", text):
@@ -1413,11 +1528,16 @@ def _fp_targets(agent, user_query: str) -> Optional[Dict]:
         period_label  = year_m.group(1)
 
     user_filter = ""
-    user_m = re.search(r"(?:for|by|of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", user_query, re.I)
+    # Accept single names ("kartik") and full names ("kartik trivedi")
+    user_m = re.search(r"(?:for|by|of)\s+([a-zA-Z][a-zA-Z]*(?:\s+[a-zA-Z][a-zA-Z]*)?)", user_query, re.I)
     if user_m:
-        uname   = sanitize_sql_value(user_m.group(1).strip())
-        _GENERIC = {"all users", "all user", "every user", "each user", "this user", "the user"}
-        if uname.lower() not in _GENERIC:
+        uname = sanitize_sql_value(user_m.group(1).strip())
+        _GENERIC = {
+            "all", "users", "user", "every", "each", "this", "the",
+            "all users", "all user", "every user", "each user", "this user", "the user",
+            "me", "us", "them", "year", "month", "quarter", "time",
+        }
+        if len(uname) >= 3 and uname.lower() not in _GENERIC:
             # SAFE: uname sanitized via sanitize_sql_value()
             user_filter = f"AND u.document->>'name' ILIKE '%{uname}%'"
 
@@ -2591,6 +2711,7 @@ _SPECIALIZED: Dict[str, Any] = {
     "no_activity":           _fp_no_activity,
     "dept_users":            _fp_dept_users,
     "overdue_tasks":         _fp_overdue_tasks,
+    "target_unachieved":     _fp_target_unachieved,
     "targets":               _fp_targets,
     "lookup_list":           _fp_lookup_list,
     "system_config":         _fp_system_config,
