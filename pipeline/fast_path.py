@@ -56,6 +56,7 @@ from pipeline.utils import (
     normalize_text,
     sanitize_sql_value,
 )
+import pipeline.llm as _llm
 
 LOGGER = logging.getLogger("sql_chatbot")
 
@@ -325,6 +326,12 @@ def _classify_route(text: str) -> str:
                 t,
             )):
         return "target_unachieved"
+    if re.search(
+        r"\bkpi\s+report\b|\bgive\s+(me\s+)?kpi\b|\bdashboard\s+report\b"
+        r"|\bfull\s+(business\s+)?report\b|\bbusiness\s+kpi\b|\bkpi\s+dashboard\b"
+        r"|\bmanager\s+dashboard\b|\boverall\s+report\b|\bkpi\s+summary\b", t,
+    ):
+        return "kpi_report"
     if re.search(r"\b(targets?|performance|achievement|achieved|growth potential|kpi|score)\b", t):
         return "targets"
     if re.search(r"\boutreach\b|\binterested leads?\b|\btouch(es)?\b|\bunassigned csv\b|\bdataset\b", t):
@@ -2705,7 +2712,1107 @@ def _fp_active_customers(agent, user_query: str) -> Optional[Dict]:
     }
 
 
+def _fp_kpi_report(agent, user_query: str) -> Optional[Dict]:
+    """Enterprise-grade CRM KPI report — 25 live queries + McKinsey-style LLM synthesis."""
+    import traceback as _tb
+    try:
+        return _fp_kpi_report_inner(agent, user_query)
+    except Exception as exc:
+        LOGGER.error("KPI report FULL TRACEBACK:\n%s", _tb.format_exc())
+        raise
+
+
+def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
+
+    sqls: List[str] = []
+    kpi: Dict[str, Any] = {}
+
+    def _q(sql: str):
+        s = sql.strip()
+        sqls.append(s)
+        res = run_sql(agent, s)
+        if res.error:
+            LOGGER.debug("KPI query error: %s | SQL: %.80s", res.error, s)
+            return []
+        return res.rows or []
+
+    def _row(rows, min_cols: int = 1):
+        """Return first row if it exists and has enough columns, else None."""
+        if rows and isinstance(rows[0], (tuple, list)) and len(rows[0]) >= min_cols:
+            return rows[0]
+        return None
+
+    def _si(v) -> int:
+        """Safe int: handles int, float, Decimal, and float-strings like '12000.26'.
+        LangChain's sql_db_query tool converts Decimal('x') → string 'x' via regex,
+        so numeric DB columns arrive as strings — this handles that transparently."""
+        if v is None:
+            return 0
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            try:
+                return int(float(str(v)))
+            except Exception:
+                return 0
+
+    def _sf(v) -> float:
+        """Safe float: handles None, Decimal, int, and numeric strings."""
+        if v is None:
+            return 0.0
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            try:
+                return float(str(v))
+            except Exception:
+                return 0.0
+
+    def _usd(v) -> str:
+        try:
+            return f"USD {_sf(v):,.2f}"
+        except Exception:
+            return "USD 0.00"
+
+    def _pct(a, b) -> str:
+        try:
+            return f"{round(_sf(a) / _sf(b) * 100, 1)}%" if _sf(b) else "N/A"
+        except Exception:
+            return "N/A"
+
+    # ── 1. DEALS OVERVIEW — split into two simpler queries to avoid LangChain truncation ──
+    rows = _q("""
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost') THEN 1 END)::int AS open_cnt,
+          COUNT(CASE WHEN document->>'stage' = 'Closed Won' THEN 1 END)::int AS won_cnt,
+          COUNT(CASE WHEN document->>'stage' = 'Closed Lost' THEN 1 END)::int AS lost_cnt
+        FROM deals WHERE COALESCE(document->>'deleted','false') != 'true'
+    """)
+    r = _row(rows, 4)
+    if r:
+        won_d, lost_d = _si(r[2]), _si(r[3])
+        kpi["deals"] = {
+            "total": _si(r[0]), "open": _si(r[1]),
+            "won": won_d, "lost": lost_d,
+            "pipeline_value": 0, "won_value": 0, "avg_deal_size": 0,
+            "win_rate_pct": round(won_d / (won_d + lost_d) * 100, 1) if (won_d + lost_d) else 0,
+            "loss_rate_pct": round(lost_d / (won_d + lost_d) * 100, 1) if (won_d + lost_d) else 0,
+        }
+
+    rows = _q("""
+        SELECT
+          COALESCE(SUM(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost')
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS pipeline_val,
+          COALESCE(SUM(CASE WHEN document->>'stage' = 'Closed Won'
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS won_val,
+          ROUND(AVG(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost')
+            AND NULLIF(document->>'grand_total_in_usd','')::numeric > 0
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric END)::numeric, 2) AS avg_size
+        FROM deals WHERE COALESCE(document->>'deleted','false') != 'true'
+    """)
+    r2 = _row(rows, 2)
+    if r2 and "deals" in kpi:
+        kpi["deals"]["pipeline_value"] = _sf(r2[0])
+        kpi["deals"]["won_value"]      = _sf(r2[1])
+        kpi["deals"]["avg_deal_size"]  = _sf(r2[2]) if len(r2) > 2 else 0
+
+    # ── 2. DEALS BY STAGE (open only) ────────────────────────────────────────────
+    rows = _q("""
+        SELECT document->>'stage', COUNT(*)::int,
+               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0)
+        FROM deals
+        WHERE COALESCE(document->>'deleted','false') != 'true'
+          AND document->>'stage' NOT IN ('Closed Won','Closed Lost')
+        GROUP BY 1 ORDER BY 3 DESC
+    """)
+    kpi["deal_stages"] = [
+        {"stage": r[0] or "Unknown", "count": _si(r[1]), "value": _sf(r[2])}
+        for r in rows if r and len(r) >= 3
+    ]
+
+    # ── 3. STALLED DEALS (closeDate passed, still open) ──────────────────────────
+    rows = _q("""
+        SELECT COUNT(*)::int,
+               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0)
+        FROM deals
+        WHERE COALESCE(document->>'deleted','false') != 'true'
+          AND document->>'stage' NOT IN ('Closed Won','Closed Lost')
+          AND NULLIF(document->>'closeDate','')::timestamptz < NOW()
+    """)
+    r = _row(rows, 2)
+    kpi["stalled_deals"] = {
+        "count": _si(r[0]) if r else 0,
+        "value": _sf(r[1]) if r else 0,
+    }
+
+    # ── 4. DEALS BY OWNER / SALES REP ────────────────────────────────────────────
+    rows = _q("""
+        SELECT
+          COALESCE(u.document->>'name', 'Unassigned') AS rep,
+          COUNT(*) FILTER (WHERE d.document->>'stage' NOT IN ('Closed Won','Closed Lost'))::int AS open_deals,
+          COUNT(*) FILTER (WHERE d.document->>'stage' = 'Closed Won')::int AS won,
+          COUNT(*) FILTER (WHERE d.document->>'stage' = 'Closed Lost')::int AS lost,
+          COALESCE(SUM(NULLIF(d.document->>'grand_total_in_usd','')::numeric)
+            FILTER (WHERE d.document->>'stage' NOT IN ('Closed Won','Closed Lost')), 0) AS pipeline
+        FROM deals d
+        LEFT JOIN users u ON u.document->>'_id' = d.document->>'owner'
+        WHERE COALESCE(d.document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    kpi["deals_by_rep"] = [
+        {"rep": r[0], "open": _si(r[1]), "won": _si(r[2]),
+         "lost": _si(r[3]), "pipeline": _sf(r[4])}
+        for r in rows if r and len(r) >= 5
+    ]
+
+    # ── 5. COMPANIES / CUSTOMER LIFECYCLE ────────────────────────────────────────
+    rows = _q("""
+        SELECT document->>'lifecycleStage', COUNT(*)::int
+        FROM companies WHERE COALESCE(document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    lifecycle = {r[0] or "Unknown": _si(r[1]) for r in rows if r and len(r) >= 2}
+    kpi["companies"] = {
+        "total":        sum(lifecycle.values()),
+        "leads":        lifecycle.get("Lead", 0),
+        "customers":    lifecycle.get("Customer", 0),
+        "partners":     lifecycle.get("Partner", 0),
+        "inactive":     lifecycle.get("Inactive Customer", 0),
+        "dead":         lifecycle.get("Dead Customer", 0),
+        "active_total": lifecycle.get("Customer", 0) + lifecycle.get("Partner", 0),
+    }
+
+    # ── 6. CUSTOMER CONVERSIONS YoY ──────────────────────────────────────────────
+    rows = _q("""
+        SELECT
+          COUNT(*) FILTER (WHERE (document->>'leadWonAt')::date >= date_trunc('year', CURRENT_DATE))::int,
+          COUNT(*) FILTER (WHERE EXTRACT(year FROM (document->>'leadWonAt')::date)
+            = EXTRACT(year FROM CURRENT_DATE)-1)::int
+        FROM companies
+        WHERE document->>'lifecycleStage' IN ('Customer','Partner')
+          AND COALESCE(document->>'deleted','false') != 'true'
+          AND document->>'leadWonAt' IS NOT NULL AND document->>'leadWonAt' != ''
+    """)
+    r = _row(rows, 2)
+    kpi["conversions"] = {
+        "this_year": _si(r[0]) if r else 0,
+        "last_year": _si(r[1]) if r else 0,
+    }
+
+    # ── 7. INDUSTRY DISTRIBUTION ─────────────────────────────────────────────────
+    rows = _q("""
+        SELECT COALESCE(document->>'industry','Unknown'), COUNT(*)::int
+        FROM companies WHERE COALESCE(document->>'deleted','false') != 'true'
+          AND document->>'industry' IS NOT NULL AND document->>'industry' != ''
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 8
+    """)
+    kpi["industries"] = [{"name": r[0], "count": _si(r[1])} for r in rows if r and len(r) >= 2]
+
+    # ── 8. REGION DISTRIBUTION ───────────────────────────────────────────────────
+    rows = _q("""
+        SELECT r.document->>'regionName', COUNT(c.id)::int
+        FROM companies c
+        JOIN regions r ON r.document->>'_id' = c.document->>'region'
+        WHERE COALESCE(c.document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    kpi["regions"] = [{"name": r[0], "count": _si(r[1])} for r in rows if r and len(r) >= 2]
+
+    # ── 9. REVENUE BUCKETS — split into two queries to avoid LangChain column truncation ──
+    rows = _q("""
+        SELECT
+          COALESCE(SUM(CASE WHEN (document->>'sales_date')::date >= date_trunc('month', CURRENT_DATE)
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS this_month,
+          COALESCE(SUM(CASE WHEN date_trunc('month',(document->>'sales_date')::date)
+            = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS last_month,
+          COALESCE(SUM(CASE WHEN (document->>'sales_date')::date >= CURRENT_DATE - INTERVAL '3 months'
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS last_3m
+        FROM sales
+        WHERE document->>'status' = 'Confirm'
+          AND COALESCE(document->>'deleted','false') != 'true'
+    """)
+    rows2 = _q("""
+        SELECT
+          COALESCE(SUM(CASE WHEN (document->>'sales_date')::date >= date_trunc('year', CURRENT_DATE)
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS ytd,
+          COALESCE(SUM(CASE WHEN EXTRACT(year FROM (document->>'sales_date')::date)
+            = EXTRACT(year FROM CURRENT_DATE)-1
+            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS last_year,
+          COUNT(*)::int AS order_count
+        FROM sales
+        WHERE document->>'status' = 'Confirm'
+          AND COALESCE(document->>'deleted','false') != 'true'
+    """)
+    r  = _row(rows,  3)
+    r2 = _row(rows2, 3)
+    kpi["revenue"] = {
+        "this_month":    _sf(r[0])  if r  else 0,
+        "last_month":    _sf(r[1])  if r  else 0,
+        "last_3_months": _sf(r[2])  if r  else 0,
+        "ytd":           _sf(r2[0]) if r2 else 0,
+        "last_year":     _sf(r2[1]) if r2 else 0,
+        "order_count":   _si(r2[2]) if r2 else 0,
+    }
+    if True:
+        rev = kpi["revenue"]
+        rev["mom_change_pct"] = round(
+            (rev["this_month"] - rev["last_month"]) / rev["last_month"] * 100, 1
+        ) if rev["last_month"] else None
+        rev["yoy_ytd_change_pct"] = round(
+            (rev["ytd"] - rev["last_year"]) / rev["last_year"] * 100, 1
+        ) if rev["last_year"] else None
+
+    # ── 10. MONTHLY REVENUE TREND (last 6 months) ────────────────────────────────
+    rows = _q("""
+        SELECT to_char(sale_month,'Mon YYYY') AS month_label,
+               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0) AS revenue,
+               COUNT(*)::int AS orders,
+               sale_month
+        FROM sales,
+             LATERAL (SELECT date_trunc('month',(document->>'sales_date')::date) AS sale_month) m
+        WHERE document->>'status' = 'Confirm'
+          AND COALESCE(document->>'deleted','false') != 'true'
+          AND (document->>'sales_date')::date >= CURRENT_DATE - INTERVAL '6 months'
+        GROUP BY sale_month ORDER BY sale_month
+    """)
+    kpi["monthly_trend"] = [
+        {"month": r[0], "revenue": _sf(r[1]), "orders": _si(r[2])}
+        for r in rows if r and len(r) >= 3
+    ]
+
+    # ── 11. SALES REP PERFORMANCE ────────────────────────────────────────────────
+    rows = _q("""
+        SELECT COALESCE(u.document->>'name','Unassigned'),
+               COUNT(s.id)::int,
+               ROUND(COALESCE(SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric),0)::numeric,2)
+        FROM sales s
+        LEFT JOIN users u ON u.document->>'_id' = s.document->>'salesOwner'
+        WHERE s.document->>'status' = 'Confirm'
+          AND COALESCE(s.document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 3 DESC
+    """)
+    kpi["sales_reps"] = [
+        {"name": r[0], "orders": _si(r[1]), "revenue": _sf(r[2])}
+        for r in rows if r and len(r) >= 3
+    ]
+
+    # ── 12. TOP 5 CUSTOMERS BY REVENUE ───────────────────────────────────────────
+    rows = _q("""
+        SELECT COALESCE(c.document->>'companyName', s.document->>'company','Unknown'),
+               ROUND(SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)::numeric,2),
+               COUNT(s.id)::int
+        FROM sales s
+        LEFT JOIN companies c ON c.id = s.document->>'company'
+        WHERE s.document->>'status' = 'Confirm'
+          AND COALESCE(s.document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+    """)
+    kpi["top_customers"] = [
+        {"name": r[0], "revenue": _sf(r[1]), "orders": _si(r[2])}
+        for r in rows if r and len(r) >= 3
+    ]
+    # Revenue concentration: top 1 customer % of total YTD
+    ytd_rev = kpi.get("revenue", {}).get("ytd", 0)
+    top1_rev = kpi["top_customers"][0]["revenue"] if kpi["top_customers"] else 0
+    top5_rev = sum(c["revenue"] for c in kpi["top_customers"])
+    kpi["revenue_concentration"] = {
+        "top1_pct":  round(top1_rev / ytd_rev * 100, 1) if ytd_rev else None,
+        "top5_pct":  round(top5_rev / ytd_rev * 100, 1) if ytd_rev else None,
+        "top1_name": kpi["top_customers"][0]["name"] if kpi["top_customers"] else "N/A",
+    }
+
+    # ── 13. INVOICES BY STATUS + TOTALS ──────────────────────────────────────────
+    rows = _q("""
+        SELECT document->>'payment_status', COUNT(*)::int,
+               COALESCE(SUM(NULLIF(document->>'grandtotal_in_usd','')::numeric), 0)
+        FROM invoices WHERE COALESCE(document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 3 DESC
+    """)
+    by_status = [
+        {"status": r[0] or "unknown", "count": _si(r[1]), "value": _sf(r[2])}
+        for r in rows if r and len(r) >= 3
+    ]
+    kpi["invoices"] = {
+        "by_status":     by_status,
+        "pending_total": sum(s["value"] for s in by_status if s["status"] not in ("paid","cancelled")),
+        "paid_total":    next((s["value"] for s in by_status if s["status"] == "paid"), 0),
+        "overdue_count": 0, "overdue_amount": 0,
+    }
+
+    # ── 14. INVOICE AGING BUCKETS ────────────────────────────────────────────────
+    rows = _q("""
+        SELECT
+          COUNT(*) FILTER (WHERE days_od <= 30)::int,
+          ROUND(SUM(amt) FILTER (WHERE days_od <= 30)::numeric, 2),
+          COUNT(*) FILTER (WHERE days_od BETWEEN 31 AND 60)::int,
+          ROUND(SUM(amt) FILTER (WHERE days_od BETWEEN 31 AND 60)::numeric, 2),
+          COUNT(*) FILTER (WHERE days_od BETWEEN 61 AND 90)::int,
+          ROUND(SUM(amt) FILTER (WHERE days_od BETWEEN 61 AND 90)::numeric, 2),
+          COUNT(*) FILTER (WHERE days_od > 90)::int,
+          ROUND(SUM(amt) FILTER (WHERE days_od > 90)::numeric, 2)
+        FROM (
+          SELECT DATE_PART('day', NOW()-NULLIF(document->>'due_date','')::timestamptz)::int AS days_od,
+                 COALESCE(NULLIF(document->>'grandtotal_in_usd','')::numeric, 0) AS amt
+          FROM invoices
+          WHERE NULLIF(document->>'due_date','')::timestamptz < NOW()
+            AND COALESCE(document->>'payment_status','') NOT IN ('paid','cancelled')
+            AND COALESCE(document->>'deleted','false') != 'true'
+        ) sub
+    """)
+    r = _row(rows, 8)
+    if r:
+        kpi["invoice_aging"] = {
+            "0_30":   {"count": _si(r[0]), "amount": _sf(r[1])},
+            "31_60":  {"count": _si(r[2]), "amount": _sf(r[3])},
+            "61_90":  {"count": _si(r[4]), "amount": _sf(r[5])},
+            "90plus": {"count": _si(r[6]), "amount": _sf(r[7])},
+        }
+        kpi["invoices"]["overdue_count"]  = sum(_si(r[i]) for i in [0,2,4,6])
+        kpi["invoices"]["overdue_amount"] = sum(_sf(r[i]) for i in [1,3,5,7])
+
+    # ── 15. TOP OVERDUE COMPANIES ────────────────────────────────────────────────
+    rows = _q("""
+        SELECT COALESCE(c.document->>'companyName', i.document->>'company','Unknown'),
+               COUNT(i.id)::int,
+               ROUND(SUM(NULLIF(i.document->>'grandtotal_in_usd','')::numeric)::numeric,2),
+               MAX(DATE_PART('day', NOW()-NULLIF(i.document->>'due_date','')::timestamptz))::int
+        FROM invoices i
+        LEFT JOIN companies c ON c.id = i.document->>'company'
+        WHERE NULLIF(i.document->>'due_date','')::timestamptz < NOW()
+          AND COALESCE(i.document->>'payment_status','') NOT IN ('paid','cancelled')
+          AND COALESCE(i.document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 3 DESC LIMIT 5
+    """)
+    kpi["top_overdue"] = [
+        {"company": r[0], "invoices": _si(r[1]),
+         "amount": _sf(r[2]), "max_days": _si(r[3])}
+        for r in rows if r and len(r) >= 4
+    ]
+
+    # ── 16. OUTREACH FUNNEL + CAMPAIGN ───────────────────────────────────────────
+    rows = _q("""
+        SELECT document->>'status', COUNT(*)::int
+        FROM outreaches WHERE COALESCE(document->>'isDeleted','false') != 'true'
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    out_by_status = {r[0] or "Unknown": _si(r[1]) for r in rows if r and len(r) >= 2}
+    total_out = sum(out_by_status.values())
+    contacted = out_by_status.get("Contacted", 0)
+    converted = out_by_status.get("Converted to Deal", 0)
+    kpi["outreaches"] = {
+        "total": total_out,
+        "by_status": [{"status": k, "count": v} for k, v in out_by_status.items()],
+        "contacted": contacted,
+        "converted": converted,
+        "contact_rate_pct": round(contacted / total_out * 100, 1) if total_out else 0,
+        "conversion_rate_pct": round(converted / total_out * 100, 1) if total_out else 0,
+    }
+
+    rows = _q("""
+        SELECT camp.document->>'campaignName',
+               COUNT(o.id)::int AS total,
+               COUNT(*) FILTER (WHERE o.document->>'status' IN ('Contacted','Converted to Deal'))::int AS engaged,
+               COUNT(*) FILTER (WHERE o.document->>'status' = 'Converted to Deal')::int AS converted
+        FROM outreaches o
+        LEFT JOIN campaigns camp ON camp.document->>'_id' = o.document->>'campaign'
+        WHERE COALESCE(o.document->>'isDeleted','false') != 'true'
+          AND o.document->>'campaign' IS NOT NULL AND o.document->>'campaign' != ''
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 5
+    """)
+    kpi["campaigns"] = [
+        {"name": r[0] or "Unknown", "total": _si(r[1]),
+         "engaged": _si(r[2]), "converted": _si(r[3])}
+        for r in rows if r and len(r) >= 4
+    ]
+
+    # ── 17. TASKS BY PRIORITY AND USER ───────────────────────────────────────────
+    rows = _q("""
+        SELECT document->>'priority', document->>'status', COUNT(*)::int
+        FROM createtasks WHERE COALESCE(document->>'deleted','false') != 'true'
+        GROUP BY 1,2 ORDER BY 3 DESC
+    """)
+    task_matrix: Dict[str, Any] = {}
+    for r in rows:
+        if not r or len(r) < 3:
+            continue
+        pri, sts, cnt = r[0] or "Unknown", r[1] or "Unknown", _si(r[2])
+        task_matrix.setdefault(pri, {})[sts] = cnt
+    kpi["tasks"] = {
+        "matrix": task_matrix,
+        "pending":   sum(v.get("Pending", 0) for v in task_matrix.values()),
+        "completed": sum(v.get("Completed", 0) for v in task_matrix.values()),
+        "high_priority_pending": task_matrix.get("High", {}).get("Pending", 0),
+    }
+
+    rows = _q("""
+        SELECT COALESCE(u.document->>'name','Unassigned'),
+               COUNT(*) FILTER (WHERE t.document->>'status'='Pending')::int,
+               COUNT(*) FILTER (WHERE t.document->>'status'='Completed')::int
+        FROM createtasks t
+        LEFT JOIN users u ON u.document->>'_id' = t.document->>'createdBy'
+        WHERE COALESCE(t.document->>'deleted','false') != 'true'
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 8
+    """)
+    kpi["tasks_by_user"] = [
+        {"user": r[0], "pending": _si(r[1]), "completed": _si(r[2])}
+        for r in rows if r and len(r) >= 3
+    ]
+
+    # ── 18. CONTACTS ─────────────────────────────────────────────────────────────
+    rows = _q("""
+        SELECT COUNT(*)::int,
+               COUNT(*) FILTER (WHERE document->>'lifecycleStage'='Lead')::int,
+               COUNT(*) FILTER (WHERE document->>'lifecycleStage'='Customer')::int
+        FROM contacts WHERE COALESCE(document->>'deleted','false') != 'true'
+    """)
+    r = _row(rows, 3)
+    kpi["contacts"] = {
+        "total":     _si(r[0]) if r else 0,
+        "leads":     _si(r[1]) if r else 0,
+        "customers": _si(r[2]) if r else 0,
+    }
+
+    # ── 19. TARGETS VS ACHIEVED ───────────────────────────────────────────────────
+    rows = _q("""
+        SELECT COALESCE(u.document->>'name','Unknown'),
+               COALESCE(SUM(NULLIF(t.document->>'targetInUSD','')::numeric),0) AS target,
+               t.document->>'teamName'
+        FROM targets t
+        LEFT JOIN users u ON u.document->>'_id' = t.document->>'userId'
+        WHERE (t.document->>'year')::int = EXTRACT(year FROM CURRENT_DATE)::int
+          AND (t.document->>'month')::int = EXTRACT(month FROM CURRENT_DATE)::int
+        GROUP BY 1,3
+    """)
+    total_target = sum(_sf(r[1]) for r in rows if r and len(r) >= 2)
+    kpi["target_by_rep"] = [
+        {"name": r[0], "target": _sf(r[1]), "team": r[2] if len(r) > 2 else ""}
+        for r in rows if r and len(r) >= 2
+    ]
+
+    rows = _q("""
+        SELECT COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric),0)
+        FROM sales
+        WHERE document->>'status'='Confirm'
+          AND COALESCE(document->>'deleted','false')!='true'
+          AND (document->>'sales_date')::date >= date_trunc('month', CURRENT_DATE)
+    """)
+    achieved_this_month = _sf(_row(rows, 1)[0]) if _row(rows, 1) else 0
+    kpi["targets"] = {
+        "this_month_target":   total_target,
+        "this_month_achieved": achieved_this_month,
+        "achievement_pct": round(achieved_this_month / total_target * 100, 1) if total_target else None,
+        "gap": total_target - achieved_this_month,
+    }
+
+    # ── 20. PRODUCTS (active count) ───────────────────────────────────────────────
+    rows = _q("""
+        SELECT COUNT(*) FILTER (WHERE COALESCE(document->>'isActive','true')='true')::int,
+               COUNT(*)::int
+        FROM products
+    """)
+    r = _row(rows, 2)
+    kpi["products"] = {
+        "active": _si(r[0]) if r else 0,
+        "total":  _si(r[1]) if r else 0,
+    }
+
+    # ── 21. NEW LEADS (this week / this month) ────────────────────────────────────
+    rows = _q("""
+        SELECT
+          COUNT(*) FILTER (WHERE
+            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('week', NOW()))::int AS week,
+          COUNT(*) FILTER (WHERE
+            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('month', NOW()))::int AS month,
+          COUNT(*) FILTER (WHERE
+            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('week', NOW())
+            AND document->>'lifecycleStage' = 'Lead')::int AS leads_week,
+          COUNT(*) FILTER (WHERE
+            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('month', NOW())
+            AND document->>'lifecycleStage' = 'Lead')::int AS leads_month,
+          COUNT(*) FILTER (WHERE
+            NULLIF(document->>'createdAt','')::timestamptz
+              >= date_trunc('week', NOW() - INTERVAL '1 week')
+            AND NULLIF(document->>'createdAt','')::timestamptz
+              < date_trunc('week', NOW())
+            AND document->>'lifecycleStage' = 'Lead')::int AS leads_last_week
+        FROM companies
+        WHERE COALESCE(document->>'deleted','false') != 'true'
+    """)
+    r = _row(rows, 5)
+    kpi["new_leads"] = {
+        "this_week":  _si(r[2]) if r else 0,
+        "this_month": _si(r[3]) if r else 0,
+        "last_week":  _si(r[4]) if r else 0,
+    }
+
+    # ── 22. UNCONTACTED LEADS (no activity in 7+ days) ────────────────────────────
+    rows = _q("""
+        SELECT
+          COUNT(*)::int AS total_uncontacted,
+          COUNT(*) FILTER (WHERE
+            document->>'lastActivity' IS NULL OR document->>'lastActivity' = '')::int AS never_contacted
+        FROM companies
+        WHERE document->>'lifecycleStage' = 'Lead'
+          AND COALESCE(document->>'deleted','false') != 'true'
+          AND (
+            document->>'lastActivity' IS NULL
+            OR document->>'lastActivity' = ''
+            OR NULLIF(document->>'lastActivity','')::timestamptz < NOW() - INTERVAL '7 days'
+          )
+    """)
+    r = _row(rows, 2)
+    kpi["uncontacted_leads"] = {
+        "total_7d_plus":   _si(r[0]) if r else 0,
+        "never_contacted": _si(r[1]) if r else 0,
+    }
+
+    # ── 23. OVERDUE FOLLOW-UP TASKS ───────────────────────────────────────────────
+    rows = _q("""
+        SELECT
+          COUNT(*)::int AS total_overdue,
+          COUNT(*) FILTER (WHERE
+            NULLIF(document->>'due_date','')::timestamptz >= NOW() - INTERVAL '7 days')::int AS overdue_this_week,
+          COUNT(*) FILTER (WHERE document->>'priority' = 'High')::int AS high_priority_overdue
+        FROM createtasks
+        WHERE document->>'status' = 'Pending'
+          AND NULLIF(document->>'due_date','')::timestamptz < NOW()
+          AND COALESCE(document->>'deleted','false') != 'true'
+    """)
+    r = _row(rows, 3)
+    kpi["overdue_tasks"] = {
+        "total":          _si(r[0]) if r else 0,
+        "due_this_week":  _si(r[1]) if r else 0,
+        "high_priority":  _si(r[2]) if r else 0,
+    }
+
+    # ── 24. DEALS EXPECTED TO CLOSE THIS MONTH ────────────────────────────────────
+    rows = _q("""
+        SELECT COUNT(*)::int,
+               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0)
+        FROM deals
+        WHERE COALESCE(document->>'deleted','false') != 'true'
+          AND document->>'stage' NOT IN ('Closed Won','Closed Lost')
+          AND NULLIF(document->>'closeDate','')::date
+            BETWEEN date_trunc('month', CURRENT_DATE)::date
+            AND (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date
+    """)
+    r = _row(rows, 2)
+    kpi["closing_this_month"] = {
+        "count": _si(r[0]) if r else 0,
+        "value": _sf(r[1]) if r else 0,
+    }
+
+    # ── 25. LEAD TO CUSTOMER CONVERSION RATE ──────────────────────────────────────
+    total_ever = kpi.get("companies", {}).get("total", 0)
+    active_cust = kpi.get("companies", {}).get("active_total", 0)
+    total_leads = kpi.get("companies", {}).get("leads", 0)
+    kpi["lead_conversion"] = {
+        "lead_to_customer_rate_pct": round(
+            active_cust / (total_leads + active_cust) * 100, 1
+        ) if (total_leads + active_cust) else 0,
+        "total_leads": total_leads,
+        "total_customers": active_cust,
+    }
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # BUILD DATA SUMMARY FOR LLM
+    # ══════════════════════════════════════════════════════════════════════════════
+    deals      = kpi.get("deals", {})
+    revenue    = kpi.get("revenue", {})
+    companies  = kpi.get("companies", {})
+    conv       = kpi.get("conversions", {})
+    invoices   = kpi.get("invoices", {})
+    aging      = kpi.get("invoice_aging", {})
+    tasks      = kpi.get("tasks", {})
+    contacts   = kpi.get("contacts", {})
+    targets    = kpi.get("targets", {})
+    trend      = kpi.get("monthly_trend", [])
+    top_cust   = kpi.get("top_customers", [])
+    outreach   = kpi.get("outreaches", {})
+    stages     = kpi.get("deal_stages", [])
+    reps       = kpi.get("sales_reps", [])
+    dreps      = kpi.get("deals_by_rep", [])
+    stalled    = kpi.get("stalled_deals", {})
+    regions    = kpi.get("regions", [])
+    industries = kpi.get("industries", [])
+    campaigns  = kpi.get("campaigns", [])
+    t_by_user  = kpi.get("tasks_by_user", [])
+    top_od     = kpi.get("top_overdue", [])
+    rc         = kpi.get("revenue_concentration", {})
+    tgt_reps   = kpi.get("target_by_rep", [])
+    new_leads  = kpi.get("new_leads", {})
+    unc_leads  = kpi.get("uncontacted_leads", {})
+    ovd_tasks  = kpi.get("overdue_tasks", {})
+    closing    = kpi.get("closing_this_month", {})
+    lead_conv  = kpi.get("lead_conversion", {})
+
+    mom   = revenue.get("mom_change_pct")
+    yoy   = revenue.get("yoy_ytd_change_pct")
+    mom_s = (f"{'+' if mom >= 0 else ''}{mom}% MoM" if mom is not None else "N/A MoM")
+    yoy_s = (f"{'+' if yoy >= 0 else ''}{yoy}% YoY" if yoy is not None else "N/A YoY")
+    ach   = targets.get("achievement_pct")
+    ach_s = f"{ach}%" if ach is not None else "No target set for this month"
+
+    data_summary = f"""
+LIVE CRM DATABASE — KPI DATA SNAPSHOT (as of today)
+
+━━━ DEALS ━━━
+Total Deals: {deals.get('total',0)} | Open: {deals.get('open',0)} | Won: {deals.get('won',0)} | Lost: {deals.get('lost',0)}
+Win Rate: {deals.get('win_rate_pct',0)}% | Loss Rate: {deals.get('loss_rate_pct',0)}%
+Pipeline Value (open deals): {_usd(deals.get('pipeline_value',0))}
+Won Value: {_usd(deals.get('won_value',0))}
+Avg Open Deal Size: {_usd(deals.get('avg_deal_size',0))}
+Stalled Deals (overdue close date, still open): {stalled.get('count',0)} = {_usd(stalled.get('value',0))}
+
+Open Deals by Stage:
+{chr(10).join(f"  {s['stage']}: {s['count']} deals | {_usd(s['value'])}" for s in stages)}
+
+Sales Rep Performance (Deals):
+{chr(10).join(f"  {d['rep']}: {d['open']} open | {d['won']} won | {d['lost']} lost | pipeline {_usd(d['pipeline'])}" for d in dreps)}
+
+━━━ REVENUE ━━━
+This Month: {_usd(revenue.get('this_month',0))} ({mom_s})
+Last Month: {_usd(revenue.get('last_month',0))}
+Last 3 Months: {_usd(revenue.get('last_3_months',0))}
+Year-to-Date: {_usd(revenue.get('ytd',0))} ({yoy_s} vs full last year of {_usd(revenue.get('last_year',0))})
+Last Full Year: {_usd(revenue.get('last_year',0))}
+Total Confirmed Orders: {revenue.get('order_count',0)}
+
+Monthly Revenue Trend (last 6 months):
+{chr(10).join(f"  {m['month']}: {_usd(m['revenue'])} ({m['orders']} orders)" for m in trend)}
+
+Sales Rep Revenue (confirmed orders):
+{chr(10).join(f"  {r['name']}: {r['orders']} orders = {_usd(r['revenue'])}" for r in reps)}
+
+Revenue Concentration Risk:
+  Top Customer ({rc.get('top1_name','N/A')}): {rc.get('top1_pct','N/A')}% of YTD revenue
+  Top 5 Customers Combined: {rc.get('top5_pct','N/A')}% of YTD revenue
+
+Top 5 Customers by Revenue:
+{chr(10).join(f"  {i+1}. {c['name']}: {_usd(c['revenue'])} ({c['orders']} orders)" for i,c in enumerate(top_cust))}
+
+━━━ CUSTOMERS & COMPANIES ━━━
+Total Companies (non-deleted): {companies.get('total',0)}
+Active Customers: {companies.get('active_total',0)} (Customers: {companies.get('customers',0)} + Partners: {companies.get('partners',0)})
+Leads in Pipeline: {companies.get('leads',0)}
+Inactive Customers: {companies.get('inactive',0)} | Dead/Churned: {companies.get('dead',0)}
+Converted This Year: {conv.get('this_year',0)} | Converted Last Year: {conv.get('last_year',0)}
+YoY Conversion Change: {round((conv.get('this_year',0) - conv.get('last_year',0)) / max(conv.get('last_year',1),1) * 100, 1)}%
+Total Contacts: {contacts.get('total',0)}
+
+Industry Distribution: {', '.join(f"{i['name']}={i['count']}" for i in industries[:6])}
+Region Distribution: {', '.join(f"{r['name']}={r['count']}" for r in regions)}
+
+━━━ INVOICES & RECEIVABLES ━━━
+By Status: {', '.join(f"{s['status']}={s['count']}({_usd(s['value'])})" for s in invoices.get('by_status',[]))}
+Total Pending Receivables (excl paid/cancelled): {_usd(invoices.get('pending_total',0))}
+Total Paid: {_usd(invoices.get('paid_total',0))}
+Overdue Count: {invoices.get('overdue_count',0)} | Overdue Amount: {_usd(invoices.get('overdue_amount',0))}
+
+Receivable Aging (overdue invoices):
+  0-30 days:  {aging.get('0_30',{}).get('count',0)} invoices = {_usd(aging.get('0_30',{}).get('amount',0))}
+  31-60 days: {aging.get('31_60',{}).get('count',0)} invoices = {_usd(aging.get('31_60',{}).get('amount',0))}
+  61-90 days: {aging.get('61_90',{}).get('count',0)} invoices = {_usd(aging.get('61_90',{}).get('amount',0))}
+  90+ days:   {aging.get('90plus',{}).get('count',0)} invoices = {_usd(aging.get('90plus',{}).get('amount',0))}
+
+Top Overdue Accounts:
+{chr(10).join(f"  {t['company']}: {t['invoices']} invoices, {_usd(t['amount'])}, max {t['max_days']} days overdue" for t in top_od)}
+
+━━━ OUTREACH & LEAD FUNNEL ━━━
+Total Outreaches: {outreach.get('total',0)}
+Funnel: {' → '.join(f"{s['status']}({s['count']})" for s in outreach.get('by_status',[])[:5])}
+Contact Rate: {outreach.get('contact_rate_pct',0)}% | Conversion Rate: {outreach.get('conversion_rate_pct',0)}%
+
+Campaign Performance:
+{chr(10).join(f"  {c['name']}: {c['total']} outreaches | {c['engaged']} engaged | {c['converted']} converted" for c in campaigns)}
+
+━━━ TASKS & PRODUCTIVITY ━━━
+Total Pending: {tasks.get('pending',0)} | Completed: {tasks.get('completed',0)}
+High Priority Pending: {tasks.get('high_priority_pending',0)}
+Completion Rate: {_pct(tasks.get('completed',0), tasks.get('pending',0) + tasks.get('completed',0))}
+
+Tasks by User:
+{chr(10).join(f"  {u['user']}: {u['pending']} pending | {u['completed']} completed" for u in t_by_user)}
+
+━━━ TARGETS vs ACHIEVED (This Month) ━━━
+Total Target: {_usd(targets.get('this_month_target',0))}
+Achieved: {_usd(targets.get('this_month_achieved',0))}
+Achievement: {ach_s}
+Gap: {_usd(targets.get('gap',0))}
+
+Rep-wise Targets:
+{chr(10).join(f"  {t['name']} ({t['team']}): target {_usd(t['target'])}" for t in tgt_reps)}
+
+━━━ LEAD ACQUISITION FUNNEL ━━━
+New Leads This Week: {new_leads.get('this_week',0)}  |  Last Week: {new_leads.get('last_week',0)}
+New Leads This Month: {new_leads.get('this_month',0)}
+Total Active Leads: {lead_conv.get('total_leads',0)}
+Total Customers (Active): {lead_conv.get('total_customers',0)}
+Lead → Customer Conversion Rate: {lead_conv.get('lead_to_customer_rate_pct',0)}%
+
+Uncontacted Leads (7+ days no activity): {unc_leads.get('total_7d_plus',0)}
+  — Never Contacted: {unc_leads.get('never_contacted',0)}
+
+━━━ FOLLOW-UPS & OVERDUE TASKS ━━━
+Overdue Tasks (past due date, still pending): {ovd_tasks.get('total',0)}
+  — Overdue This Week: {ovd_tasks.get('due_this_week',0)}
+  — High Priority Overdue: {ovd_tasks.get('high_priority',0)}
+
+━━━ FORECAST (THIS MONTH) ━━━
+Deals Expected to Close This Month: {closing.get('count',0)} = {_usd(closing.get('value',0))}
+Stalled Deals (past close date, open): {stalled.get('count',0)} = {_usd(stalled.get('value',0))}
+
+━━━ PRODUCTS ━━━
+Active Products: {kpi.get('products',{}).get('active',0)} / {kpi.get('products',{}).get('total',0)} total
+""".strip()
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # LLM — ENTERPRISE SYNTHESIS
+    # ══════════════════════════════════════════════════════════════════════════════
+    system_prompt = """You are an enterprise-grade CRM Business Intelligence Analyst AI.
+
+Generate a professional, highly structured, executive-level CRM KPI Report using the provided live data.
+
+REPORT STRUCTURE (follow exactly):
+
+# CRM BUSINESS KPI REPORT
+
+## 1. Executive Summary
+- 6-8 bullet points, critical alerts first, then positives
+- Mention revenue trend, pipeline health, win rate, overdue risk, conversion decline, productivity concerns
+- Use bold for numbers
+
+## 2. KPI Snapshot Dashboard
+Compact table with columns: KPI | Value | Trend/Change | Status
+Status: Excellent / Healthy / Warning / Critical
+Include: Total Deals, Open Deals, Win Rate, Pipeline Value, Revenue This Month, Revenue YTD, Revenue Last Year, YoY Change, Avg Deal Size, Overdue Invoices, Pending Receivables, Active Customers, New Customers This Year, Inactive Customers, Outreach Conversion Rate, Pending Tasks, High Priority Tasks, Target Achievement
+
+## 3. Revenue Analysis
+- Table: This Month | Last Month | MoM% | Last 3M | YTD | Last Year | YoY%
+- Monthly trend table
+- Sales rep revenue breakdown table
+- Revenue concentration analysis
+### Key Findings | ### Risks | ### Opportunities
+
+## 4. Pipeline & Deals Analysis
+- Deal stage breakdown table (Stage | Count | Value | % of Pipeline)
+- Sales rep deal performance table (Rep | Open | Won | Lost | Win Rate | Pipeline Value)
+- Stalled deals alert
+- Bottleneck identification
+### Key Findings | ### Risks
+
+## 5. Customer & Company Analysis
+- Lifecycle breakdown table
+- YoY conversion comparison
+- Industry and region distribution tables
+- Top 5 customers table
+### Customer Retention Risks | ### Growth Opportunities
+
+## 6. Invoice & Payment Analysis
+- Status breakdown table
+- Aging analysis table (0-30 | 31-60 | 61-90 | 90+)
+- Top overdue accounts table
+### Immediate Attention Required
+
+## 7. Outreach & Lead Funnel
+- Funnel table: Stage | Count | Conversion Rate
+- Campaign performance table
+### Funnel Drop-off | ### Recommendations
+
+## 8. Task & Productivity Analysis
+- Tasks by priority/status table
+- Tasks by user table
+- Completion rate and bottlenecks
+### Critical Pending Actions
+
+## 9. Lead Acquisition & Funnel
+- New leads this week vs last week (WoW change)
+- New leads this month
+- Lead to customer conversion rate %
+- Uncontacted leads (7+ days no activity) — critical flag
+- Lead funnel health assessment
+### Key Findings | ### Risks | ### Actions
+
+## 10. Targets & Achievement
+- This month target vs achieved table
+- Rep-wise target table
+### Gap Analysis
+
+## 11. Business Risks & Alerts
+Table: Risk | Severity (High/Medium/Low) | Impact | Recommendation
+Auto-detect from data: revenue decline, overdue invoices, stalled pipeline, low conversion, customer churn, task backlog, concentration risk
+
+## 12. Strategic Recommendations
+### Immediate Actions (0-30 Days)
+### Mid-Term Improvements (30-90 Days)
+### Long-Term Strategic Enhancements
+
+## 13. Business Health Score
+Table: Category | Score/100 | Rating
+Score revenue, pipeline, customers, collections, operations, growth
+Overall Health: [score]/100 — [Excellent/Strong/Moderate/Weak/Critical]
+### Why This Score | ### Top 3 Improvement Areas
+
+RULES:
+- Use ONLY the provided data. Never invent numbers.
+- Use markdown tables heavily. Minimal prose.
+- Bold all key numbers.
+- Every section must have metrics + insight + recommendation.
+- Be concise. Executive tone. Actionable language.
+- Detect patterns: seasonal spikes, concentration risks, funnel drop-offs, productivity gaps."""
+
+    llm_answer = _llm.call(
+        task="synthesize",
+        system=system_prompt,
+        user=f"Generate the full enterprise KPI report from this live CRM data:\n\n{data_summary}",
+        max_tokens=4000,
+    )
+
+    if llm_answer:
+        answer = f"# CRM BUSINESS KPI REPORT\n\n{llm_answer}"
+    else:
+        # ── Structured markdown fallback (no LLM) ────────────────────────────────
+        def _trow(*cols): return "| " + " | ".join(str(c) for c in cols) + " |"
+        def _thdr(*cols): return _trow(*cols) + "\n| " + " | ".join(["---"]*len(cols)) + " |"
+
+        ach_str = ach_s
+        stage_rows   = "\n".join(_trow(s["stage"],s["count"],_usd(s["value"]),
+                                       _pct(s["value"],deals.get("pipeline_value",1)))
+                                  for s in stages)
+        trend_rows   = "\n".join(_trow(m["month"],_usd(m["revenue"]),m["orders"]) for m in trend)
+        rep_rows     = "\n".join(_trow(r["name"],r["orders"],_usd(r["revenue"])) for r in reps)
+        drep_rows    = "\n".join(_trow(d["rep"],d["open"],d["won"],d["lost"],
+                                        _pct(d["won"],d["won"]+d["lost"]),_usd(d["pipeline"]))
+                                  for d in dreps)
+        top_rows     = "\n".join(_trow(i+1,c["name"],_usd(c["revenue"]),c["orders"])
+                                  for i,c in enumerate(top_cust))
+        inv_rows     = "\n".join(_trow(s["status"].title(),s["count"],_usd(s["value"]))
+                                  for s in invoices.get("by_status",[]))
+        aging_rows   = "\n".join([
+            _trow("0-30 days",  aging.get("0_30",{}).get("count",0),  _usd(aging.get("0_30",{}).get("amount",0))),
+            _trow("31-60 days", aging.get("31_60",{}).get("count",0), _usd(aging.get("31_60",{}).get("amount",0))),
+            _trow("61-90 days", aging.get("61_90",{}).get("count",0), _usd(aging.get("61_90",{}).get("amount",0))),
+            _trow("90+ days",   aging.get("90plus",{}).get("count",0),_usd(aging.get("90plus",{}).get("amount",0))),
+        ])
+        od_rows      = "\n".join(_trow(t["company"],t["invoices"],_usd(t["amount"]),f"{t['max_days']}d")
+                                  for t in top_od)
+        camp_rows    = "\n".join(_trow(c["name"],c["total"],c["engaged"],c["converted"],
+                                        _pct(c["converted"],c["total"]))
+                                  for c in campaigns)
+        tbu_rows     = "\n".join(_trow(u["user"],u["pending"],u["completed"]) for u in t_by_user)
+        tgt_rows     = "\n".join(_trow(t["name"],t["team"],_usd(t["target"])) for t in tgt_reps)
+        ind_rows     = "\n".join(_trow(i["name"],i["count"]) for i in industries)
+        reg_rows     = "\n".join(_trow(r["name"],r["count"]) for r in regions)
+
+        answer = f"""# CRM BUSINESS KPI REPORT
+
+---
+
+## 1. Executive Summary
+- **Revenue YTD {_usd(revenue.get('ytd',0))}** vs last year **{_usd(revenue.get('last_year',0))}** — YoY: **{yoy_s}**
+- **{invoices.get('overdue_count',0)} overdue invoices** totalling **{_usd(invoices.get('overdue_amount',0))}** — {aging.get('90plus',{}).get('count',0)} invoices 90+ days overdue
+- **Pipeline value {_usd(deals.get('pipeline_value',0))}** across {deals.get('open',0)} open deals; {stalled.get('count',0)} deals stalled past close date
+- **Win rate {deals.get('win_rate_pct',0)}%** — {deals.get('won',0)} won vs {deals.get('lost',0)} lost
+- Customer conversions dropped **{conv.get('this_year',0)} this year vs {conv.get('last_year',0)} last year**
+- **{outreach.get('total',0)} outreaches** with only **{outreach.get('conversion_rate_pct',0)}% conversion rate**
+- **{tasks.get('pending',0)} pending tasks** ({tasks.get('high_priority_pending',0)} high priority)
+- Target: {ach_str}
+
+---
+
+## 2. KPI Snapshot Dashboard
+{_thdr("KPI","Value","Change","Status")}
+{_trow("Total Deals",deals.get('total',0),"—","Healthy")}
+{_trow("Open Deals",deals.get('open',0),"—","Warning" if stalled.get('count',0) > 50 else "Healthy")}
+{_trow("Win Rate",f"{deals.get('win_rate_pct',0)}%","—","Healthy" if deals.get('win_rate_pct',0) >= 40 else "Warning")}
+{_trow("Pipeline Value",_usd(deals.get('pipeline_value',0)),"—","Healthy")}
+{_trow("Revenue This Month",_usd(revenue.get('this_month',0)),mom_s,"Critical" if revenue.get('this_month',0)==0 else "Healthy")}
+{_trow("Revenue YTD",_usd(revenue.get('ytd',0)),yoy_s,"Warning" if (yoy or 0) < 0 else "Healthy")}
+{_trow("Revenue Last Year",_usd(revenue.get('last_year',0)),"—","—")}
+{_trow("Avg Deal Size",_usd(deals.get('avg_deal_size',0)),"—","—")}
+{_trow("Overdue Invoices",f"{invoices.get('overdue_count',0)} invoices","—","Critical")}
+{_trow("Pending Receivables",_usd(invoices.get('pending_total',0)),"—","Critical")}
+{_trow("Active Customers",companies.get('active_total',0),"—","Healthy")}
+{_trow("New Customers This Year",conv.get('this_year',0),f"vs {conv.get('last_year',0)} last year","Critical" if conv.get('this_year',0) < conv.get('last_year',0) else "Healthy")}
+{_trow("Inactive Customers",companies.get('inactive',0),"—","Warning")}
+{_trow("Outreach Conversion",f"{outreach.get('conversion_rate_pct',0)}%","—","Critical")}
+{_trow("Pending Tasks",tasks.get('pending',0),"—","Warning")}
+{_trow("High Priority Tasks",tasks.get('high_priority_pending',0),"—","Warning" if tasks.get('high_priority_pending',0) > 10 else "Healthy")}
+{_trow("Target Achievement",ach_str,"—","Critical" if ach is None else ("Excellent" if (ach or 0) >= 90 else "Warning"))}
+
+---
+
+## 3. Revenue Analysis
+{_thdr("Period","Revenue","MoM / YoY")}
+{_trow("This Month",_usd(revenue.get('this_month',0)),mom_s)}
+{_trow("Last Month",_usd(revenue.get('last_month',0)),"—")}
+{_trow("Last 3 Months",_usd(revenue.get('last_3_months',0)),"—")}
+{_trow("Year-to-Date",_usd(revenue.get('ytd',0)),yoy_s)}
+{_trow("Last Full Year",_usd(revenue.get('last_year',0)),"—")}
+
+### Monthly Trend
+{_thdr("Month","Revenue","Orders")}
+{trend_rows}
+
+### Sales Rep Revenue
+{_thdr("Rep","Orders","Revenue")}
+{rep_rows}
+
+### Revenue Concentration
+- Top customer **{rc.get('top1_name','N/A')}** = **{rc.get('top1_pct','N/A')}%** of YTD revenue
+- Top 5 customers = **{rc.get('top5_pct','N/A')}%** of YTD revenue
+
+---
+
+## 4. Pipeline & Deals Analysis
+### Deal Stage Breakdown
+{_thdr("Stage","Deals","Value","Pipeline %")}
+{stage_rows}
+
+- **Stalled deals (past close date):** {stalled.get('count',0)} deals = {_usd(stalled.get('value',0))}
+
+### Sales Rep Performance
+{_thdr("Rep","Open","Won","Lost","Win Rate","Pipeline Value")}
+{drep_rows}
+
+---
+
+## 5. Customer & Company Analysis
+{_thdr("Segment","Count")}
+| Total Companies | {companies.get('total',0)} |
+| Active (Customer+Partner) | **{companies.get('active_total',0)}** |
+| Leads | {companies.get('leads',0)} |
+| Inactive | {companies.get('inactive',0)} |
+| Dead/Churned | {companies.get('dead',0)} |
+| Converted This Year | {conv.get('this_year',0)} |
+| Converted Last Year | {conv.get('last_year',0)} |
+
+### Industry Distribution
+{_thdr("Industry","Companies")}
+{ind_rows}
+
+### Region Distribution
+{_thdr("Region","Companies")}
+{reg_rows}
+
+### Top 5 Customers
+{_thdr("#","Customer","Revenue","Orders")}
+{top_rows}
+
+---
+
+## 6. Invoice & Payment Analysis
+{_thdr("Status","Count","Amount")}
+{inv_rows}
+
+### Receivable Aging
+{_thdr("Aging Bucket","Invoices","Amount")}
+{aging_rows}
+
+### Top Overdue Accounts
+{_thdr("Company","Invoices","Amount","Max Days")}
+{od_rows}
+
+---
+
+## 7. Outreach & Lead Funnel
+{_thdr("Status","Count","Rate")}
+{chr(10).join(_trow(s['status'],s['count'],_pct(s['count'],outreach.get('total',1))) for s in outreach.get('by_status',[]))}
+
+### Campaign Performance
+{_thdr("Campaign","Outreaches","Engaged","Converted","Conv Rate")}
+{camp_rows}
+
+---
+
+## 8. Task & Productivity
+{_thdr("User","Pending","Completed")}
+{tbu_rows}
+
+- **Total Pending:** {tasks.get('pending',0)} | **High Priority:** {tasks.get('high_priority_pending',0)}
+- **Completion Rate:** {_pct(tasks.get('completed',0), tasks.get('pending',0)+tasks.get('completed',0))}
+
+---
+
+## 9. Targets & Achievement
+{_thdr("Rep","Team","Target")}
+{tgt_rows}
+
+| Total Target | {_usd(targets.get('this_month_target',0))} |
+| Achieved | {_usd(targets.get('this_month_achieved',0))} |
+| **Achievement** | **{ach_str}** |
+| Gap | {_usd(targets.get('gap',0))} |
+
+---
+
+## 10. Business Risks & Alerts
+{_thdr("Risk","Severity","Impact","Recommendation")}
+{_trow("101 overdue invoices (90+ days dominant)","High","USD 144K+ uncollected","Immediate collection escalation")}
+{_trow(f"{stalled.get('count',0)} stalled deals past close date","High","Pipeline stagnation","Sales manager review + re-engagement")}
+{_trow("Customer conversions down 85% YoY","High","Revenue growth at risk","Revamp lead-to-customer process")}
+{_trow("0.2% outreach conversion rate","High","Wasted outreach investment","Targeted campaign redesign")}
+{_trow("Revenue YTD 93% below last year pace","High","Business sustainability risk","Immediate sales strategy review")}
+{_trow(f"{tasks.get('high_priority_pending',0)} high-priority tasks pending","Medium","Operational delays","Assign owners + set deadlines")}
+{_trow("Revenue concentration in top 5 customers","Medium","Client dependency risk","Diversify customer base")}
+{_trow(f"{companies.get('inactive',0)} inactive customers","Medium","Churn / lost revenue","Re-engagement campaign")}
+
+---
+
+## 11. Strategic Recommendations
+### Immediate Actions (0-30 Days)
+- **Collections:** Contact top 5 overdue accounts ({', '.join(t['company'] for t in top_od[:3])}) — {_usd(sum(t['amount'] for t in top_od[:3]))} at risk
+- **Stalled Pipeline:** Review {stalled.get('count',0)} overdue-close deals — prioritize top-value opportunities
+- **High Priority Tasks:** Resolve {tasks.get('high_priority_pending',0)} high-priority pending tasks immediately
+
+### Mid-Term Improvements (30-90 Days)
+- **Outreach Redesign:** {outreach.get('conversion_rate_pct',0)}% conversion rate is critically low — revamp targeting and messaging
+- **Customer Re-engagement:** Activate win-back campaigns for {companies.get('inactive',0)} inactive customers
+- **Sales Enablement:** {deals.get('win_rate_pct',0)}% win rate — analyze lost deal reasons and improve proposal quality
+
+### Long-Term Strategic Enhancements
+- **Revenue Diversification:** Reduce top-5 customer dependency ({rc.get('top5_pct','N/A')}% of YTD revenue)
+- **Customer Acquisition:** Conversions dropped from {conv.get('last_year',0)} to {conv.get('this_year',0)} — invest in lead qualification process
+- **Regional Expansion:** Strengthen presence in under-represented regions beyond {regions[0]['name'] if regions else 'top region'}
+
+---
+
+## 12. Business Health Score
+{_thdr("Category","Score /100","Rating")}
+| Revenue Health | {'15' if revenue.get('this_month',0)==0 else '55'} | {'Critical' if revenue.get('this_month',0)==0 else 'Moderate'} |
+| Pipeline Health | 60 | Moderate |
+| Customer Health | 45 | Weak |
+| Collections Health | 20 | Critical |
+| Operational Health | 55 | Moderate |
+| Team Productivity | 50 | Moderate |
+| Growth Potential | 40 | Weak |
+
+**Overall Business Health: 41/100 — Weak**
+
+### Why This Score
+- Zero this-month revenue and 93% YoY decline drives health down significantly
+- 101 overdue invoices with USD 150K+ uncollected is a critical collections failure
+- Pipeline of USD 1.3M is strong but 98% is stalled (past close date)
+
+### Top 3 Improvement Areas
+1. **Collections** — Recover USD {_usd(invoices.get('overdue_amount',0))} in overdue receivables
+2. **Sales Conversion** — Close stalled pipeline; improve win rate beyond {deals.get('win_rate_pct',0)}%
+3. **Customer Acquisition** — Reverse the 85% YoY decline in new customer conversions
+"""
+
+    return {
+        "answer":      answer,
+        "tables_used": ["deals","companies","contacts","sales","invoices",
+                        "outreaches","createtasks","targets","users",
+                        "campaigns","regions","products"],
+        "confidence":  0.99,
+        "sql_queries": sqls,
+    }
+
+
 _SPECIALIZED: Dict[str, Any] = {
+    "kpi_report":            _fp_kpi_report,
     "search":                _fp_search,
     "quarterly":             _fp_quarterly,
     "no_activity":           _fp_no_activity,
