@@ -375,9 +375,17 @@ def sanitize_user_input(query: str) -> tuple[str, bool]:
 def is_vague_query(text: str) -> bool:
     """Check if query is too vague to produce meaningful results."""
     t = normalize_text(text)
-    if len(t.split()) <= 2 and not re.search(r"\b(count|list|show|get|total)\b", t):
-        return True
-    return False
+    if len(t.split()) > 2:
+        return False
+    # Allow: count/list/show/get/total keywords
+    if re.search(r"\b(count|list|show|get|total|give|fetch|display|find|search)\b", t):
+        return False
+    # Allow: known entity + status combinations e.g. "pending invoices", "paid deals"
+    _ENTITY_WORDS = r"\b(invoice|deal|contact|company|task|user|sale|order|lead|target|region|product)\b"
+    _STATUS_WORDS  = r"\b(paid|unpaid|pending|approved|rejected|completed|open|closed|won|lost|draft|cancelled|overdue)\b"
+    if re.search(_ENTITY_WORDS, t) or re.search(_STATUS_WORDS, t):
+        return False
+    return True
 
 
 # ── Timing helper ──────────────────────────────────────────────────────────────

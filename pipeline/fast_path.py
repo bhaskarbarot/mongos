@@ -58,6 +58,29 @@ from pipeline.utils import (
 
 LOGGER = logging.getLogger("sql_chatbot")
 
+# ── Status synonym table — shared by all handlers ────────────────────────────
+# Maps user-typed words to the canonical stored value.
+# None means "unpaid" logic (NOT IN paid/cancelled).
+_STATUS_SYNONYMS: Dict[str, Optional[str]] = {
+    "paid":          "paid",
+    "unpaid":        None,
+    "confirmed":     "confirmed",
+    "draft":         "draft",
+    "cancelled":     "cancelled",
+    "canceled":      "cancelled",
+    "approved":      "approved",
+    "rejected":      "rejected",
+    "submitted":     "submitted",
+    "declined":      "declined",
+    "partial":       "partial_payment",
+    "pending":       "Pending",
+    "completed":     "Completed",
+    "done":          "Completed",
+    "open":          "Open",
+    "won":           "Closed Won",
+    "lost":          "Closed Lost",
+}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TIME PARSING
@@ -265,7 +288,9 @@ def _classify_route(text: str) -> str:
         return "search"
     if re.search(r"[A-Z]{2,}/\d{4}/\d+", text):
         return "invoice_lookup"
-    if re.search(r"\bquarter(ly)?\b|Q[1-4]\b", t, re.I):
+    # Quarterly check: skip when the primary intent is target/achievement (time modifier only)
+    if (re.search(r"\bquarter(ly)?\b|Q[1-4]\b", t, re.I)
+            and not re.search(r"\btarget\b|\bachieved\b|\bachievement\b|\bperformance\b|\bkpi\b", t)):
         return "quarterly"
     if re.search(
         r"\bno (business|invoice|deal|activity|order|revenue)\b"
@@ -275,13 +300,13 @@ def _classify_route(text: str) -> str:
     ):
         return "no_activity"
     if re.search(
-        r"\bdepartment.{0,20}(user|member|employee|name)\b"
-        r"|\b(user|member|employee).{0,20}department\b", t,
+        r"\bdepartment.{0,20}(users?|members?|employees?|names?)\b"
+        r"|\b(users?|members?|employees?).{0,20}department\b", t,
     ):
         return "dept_users"
     if re.search(
-        r"\b(not|haven.t|missed|overdue).{0,20}(deadline|task|due)\b"
-        r"|\btask.{0,20}overdue\b|\boverdue.{0,20}task\b", t,
+        r"\b(not|haven.t|missed|overdue).{0,20}(deadline|tasks?|due)\b"
+        r"|\btasks?.{0,20}overdue\b|\boverdue.{0,20}tasks?\b", t,
     ):
         return "overdue_tasks"
     if re.search(r"\b(who|which user|which person).{0,30}created\b|\bcreated by whom\b", t):
@@ -316,6 +341,30 @@ def _classify_route(text: str) -> str:
         return "pipeline_summary"
     if re.search(r"\bpending\s+invoice|invoice.{0,20}(pending|unpaid|outstanding)\b", t):
         return "pending_invoices"
+
+    # ── User + Task relational query ────────────────────────────────────────────
+    # Detected BEFORE general fallback so relational JOIN intent is handled directly
+    # rather than being mis-routed to _fp_tasks (which has no user JOIN).
+    # COUNT-only queries ("how many users with task") stay in "general" so _fp_count handles them.
+    if (re.search(r"\busers?\b|\bemployees?\b|\bmembers?\b|\bstaff\b|\bpeople\b|\bperson\b", t)
+            and re.search(r"\btasks?\b|\btodo\b|\bfollow.?up\b|\bassignment\b", t)
+            and re.search(r"\bby\b|\bper\b|\bstatus\b|\bpending\b|\bcompleted?\b|\bopen\b|\btheir\b|\ball\b|\beach\b|\bgrouped\b", t)
+            and not re.search(r"\bhow many\b|\bcount\b|\bnumber of\b|\btotal number\b", t)):
+        return "user_task_map"
+
+    # ── Invoice by explicit status/stage value ──────────────────────────────────
+    # Detected BEFORE general fallback so "rejected invoices" / "invoices by stage of approved"
+    # don't get stripped of their filter by the generic _fp_list_records handler.
+    if (re.search(r"\binvoices?\b|\bbills?\b|\bbilling\b", t)
+            and re.search(
+                r"\b(approved|rejected|submitted|declined|accepted)\b"
+                r"|\bby\s+(?:stage|status)\s+of\b"
+                r"|\bwhich\s+are\b"
+                r"|\b(?:stage|status)\s+(?:is|=|:)\s*\w+",
+                t,
+            )):
+        return "invoice_status_filter"
+
     if re.search(
         r"\bget\b.{0,40}\bfor\s+(this\s+)?(company|account|contact|deal)\b"
         r"|\bget\b.{0,25}\bfor\s+[A-Z]", text, re.I,
@@ -481,9 +530,13 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     # Priority-ordered map: (regex, field_keyword, sql_operator, sql_value, human_label)
     # Multi-word patterns (e.g. "closed won") must appear BEFORE single-word ones.
     _ATTR_FILTER_MAP = [
-        # Invoice payment statuses
-        (r"\bpaid\b",               "payment_status", "=",       "'paid'",                  "paid"),
-        (r"\bunpaid\b",             "payment_status", "NOT IN",  "('paid','cancelled')",     "unpaid"),
+        # Invoice payment / approval statuses — multi-word or specific first
+        (r"\bpaid\b",               "payment_status", "=",       "'paid'",                   "paid"),
+        (r"\bunpaid\b",             "payment_status", "NOT IN",  "('paid','cancelled')",      "unpaid"),
+        (r"\bapproved\b",           "payment_status", "ILIKE",   "'approved'",               "approved"),
+        (r"\brejected\b",           "payment_status", "ILIKE",   "'rejected'",               "rejected"),
+        (r"\bsubmitted\b",          "payment_status", "ILIKE",   "'submitted'",              "submitted"),
+        (r"\bdeclined\b",           "payment_status", "ILIKE",   "'declined'",               "declined"),
         (r"\bconfirmed\b",          "payment_status", "ILIKE",   "'confirmed'",              "confirmed"),
         (r"\bdraft\b",              "payment_status", "ILIKE",   "'draft'",                  "draft"),
         (r"\bcancell?ed\b",         "payment_status", "ILIKE",   "'cancelled'",              "cancelled"),
@@ -501,6 +554,27 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
         (r"\bmedium.{0,2}priorit",  "priority",       "=",       "'Medium'",                 "medium priority"),
         (r"\blow.{0,2}priorit",     "priority",       "=",       "'Low'",                    "low priority"),
     ]
+
+    # Also try "by stage of X" / "with status X" explicit-value extraction
+    # e.g. "how many invoices by stage of approved" → approved
+    _stage_of_m = re.search(
+        r"\bby\s+(?:stage|status)\s+of\s+(\w+)|\b(?:stage|status)\s+(?:is|=|:)\s*(\w+)",
+        text, re.I,
+    )
+    if _stage_of_m and not filter_parts:
+        _stage_val = (_stage_of_m.group(1) or _stage_of_m.group(2) or "").lower()
+        if _stage_val:
+            # Try to find best matching field
+            for _fkw in ["payment_status", "paymentStatus", "stage", "status"]:
+                _actual = next(
+                    (f for f in fields if f.lower().replace("_","") == _fkw.lower().replace("_","")
+                     or _fkw.lower().replace("_","") in f.lower().replace("_","")),
+                    None,
+                )
+                if _actual:
+                    filter_parts.append(f"LOWER(document->>'{_actual}') = '{_stage_val}'")
+                    filter_label = _stage_val
+                    break
 
     filter_parts: List[str] = []
     filter_label = ""
@@ -991,9 +1065,13 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
     #    Checks for status words BEFORE the table noun — no "is/=" needed
     if not any("payment_status" in ff or "status" in ff for ff in field_filters):
         _STATUS_ADJECTIVES = {
-            # invoice payment_status values
+            # invoice payment_status / approval values
             r"\bpaid\b":                  ("payment_status", "paid"),
             r"\bunpaid\b":                ("payment_status", None),      # NOT IN paid/cancelled
+            r"\bapproved\b":              ("payment_status", "approved"),
+            r"\brejected\b":              ("payment_status", "rejected"),
+            r"\bsubmitted\b":             ("payment_status", "submitted"),
+            r"\bdeclined\b":              ("payment_status", "declined"),
             r"\bconfirmed\b":             ("payment_status", "confirmed"),
             r"\bdraft\b":                 ("payment_status", "draft"),
             r"\bcancell?ed\b":            ("payment_status", "cancelled"),
@@ -1003,6 +1081,27 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
             r"\bcompleted?\b":            ("status", "Completed"),
             r"\bopen\b":                  ("status", "Open"),
         }
+
+        # Also handle "by stage of X" / "which are X" explicit-value extraction
+        _by_stage = re.search(
+            r"\bby\s+(?:stage|status)\s+of\s+(\w+)"
+            r"|\bwhich\s+are\s+(\w+)"
+            r"|\bstage\s+(?:is|=|:)\s*(\w+)"
+            r"|\bstatus\s+(?:is|=|:)\s*(\w+)",
+            text, re.I,
+        )
+        if _by_stage and not any("payment_status" in ff or "status" in ff for ff in field_filters):
+            _sv = next((g for g in _by_stage.groups() if g), None)
+            if _sv:
+                for _fkw in ["payment_status", "paymentStatus", "stage", "status"]:
+                    _actual = next(
+                        (f for f in fields if f.lower().replace("_","") == _fkw.lower().replace("_","")
+                         or _fkw.lower().replace("_","") in f.lower().replace("_","")),
+                        None,
+                    )
+                    if _actual:
+                        field_filters.append(f"LOWER(document->>'{_actual}') = '{_sv.lower()}'")
+                        break
         for pattern, (field_kw, val) in _STATUS_ADJECTIVES.items():
             if re.search(pattern, text):
                 # Find the actual field name in this table
@@ -1942,6 +2041,284 @@ LIMIT 50""".strip()
     }
 
 
+def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'rejected invoices', 'approved invoices', 'invoices by stage of X'.
+
+    Detects any explicit status/stage value from the query, maps it to the
+    correct DB field (payment_status / stage / status), and returns a filtered
+    invoice list with count.
+    """
+    text = normalize_text(user_query)
+
+    # Must mention invoices or billing
+    if not re.search(r"\binvoices?\b|\bbills?\b|\bbilling\b", text):
+        return None
+
+    # ── Extract status value ───────────────────────────────────────────────────
+    status_raw = None
+
+    # Pattern 1: "by stage/status of X"
+    m = re.search(r"\bby\s+(?:stage|status)\s+of\s+(\w+)", text, re.I)
+    if m:
+        status_raw = m.group(1)
+
+    # Pattern 2: "which are X" / "that are X"
+    if not status_raw:
+        m = re.search(r"\b(?:which|that)\s+are\s+(\w+)", text, re.I)
+        if m:
+            status_raw = m.group(1)
+
+    # Pattern 3: "status is X" / "stage is X"
+    if not status_raw:
+        m = re.search(r"\b(?:stage|status|payment\s*status)\s+(?:is|=|:)\s*['\"]?(\w+)['\"]?", text, re.I)
+        if m:
+            status_raw = m.group(1)
+
+    # Pattern 4: adjective directly before "invoice(s)" or standalone status word
+    if not status_raw:
+        m = re.search(
+            r"\b(approved|rejected|submitted|declined|accepted)\b", text, re.I,
+        )
+        if m:
+            status_raw = m.group(1)
+
+    if not status_raw:
+        return None
+
+    # Normalize via synonym table
+    canonical = _STATUS_SYNONYMS.get(status_raw.lower(), status_raw.lower())
+
+    table_names = get_table_names(agent)
+    inv_table   = next((t for t in table_names if t.lower() == "invoices"), None)
+    if not inv_table:
+        return None
+
+    fields = get_document_fields(agent, inv_table)
+
+    # ── Find the correct status field — try multiple, pick the one with data ───
+    # Some schemas split: payment_status=paid/draft/cancelled, approval_status=approved/rejected/pending
+    _FIELD_PRIORITY = [
+        "payment_status", "paymentStatus",
+        "approval_status", "approvalStatus",
+        "status", "stage",
+    ]
+    fl_norm = {f.lower().replace("_", ""): f for f in fields}
+
+    # Hint: prefer approval_status for approval-domain values
+    _APPROVAL_VALUES = {"approved", "rejected", "submitted", "declined", "pending"}
+    if canonical and canonical.lower() in _APPROVAL_VALUES:
+        _FIELD_PRIORITY = [
+            "approval_status", "approvalStatus",
+            "payment_status", "paymentStatus",
+            "status", "stage",
+        ]
+
+    # Try each candidate field; use first that has any matching rows
+    status_field = None
+    where_clause = None
+    display_label = status_raw.title() if canonical else "Unpaid"
+
+    for pf in _FIELD_PRIORITY:
+        key = pf.lower().replace("_", "")
+        if key not in fl_norm:
+            continue
+        candidate_field = fl_norm[key]
+        if canonical is None:
+            candidate_where = f"COALESCE(document->>'{candidate_field}','') NOT IN ('paid','cancelled')"
+        else:
+            candidate_where = f"LOWER(document->>'{candidate_field}') = '{canonical.lower()}'"
+
+        # Quick existence check — only cost is one COUNT query per field candidate
+        _probe = run_sql(agent, f'SELECT COUNT(*)::int FROM "{inv_table}" WHERE ({candidate_where})')
+        if _probe.ok() and _probe.rows and coerce_number(_probe.rows[0][0]) > 0:
+            status_field = candidate_field
+            where_clause = candidate_where
+            break
+
+    # Fall back to first available field even if 0 rows (correct empty response)
+    if not status_field:
+        for pf in _FIELD_PRIORITY:
+            key = pf.lower().replace("_", "")
+            if key in fl_norm:
+                status_field = fl_norm[key]
+                if canonical is None:
+                    where_clause = f"COALESCE(document->>'{status_field}','') NOT IN ('paid','cancelled')"
+                else:
+                    where_clause = f"LOWER(document->>'{status_field}') = '{canonical.lower()}'"
+                break
+    if not status_field:
+        return None
+
+    # ── Count ──────────────────────────────────────────────────────────────────
+    count_sql = f'SELECT COUNT(*)::int FROM "{inv_table}" WHERE ({where_clause})'.strip()
+    _cnt = run_sql(agent, count_sql)
+    if _cnt.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [inv_table], "confidence": 0.0, "sql_queries": [count_sql]}
+    count = coerce_number(_cnt.rows[0][0] if _cnt.rows else 0)
+
+    # ── Build SELECT ───────────────────────────────────────────────────────────
+    num_field    = next((f for f in fields if "invoice_number" in f.lower() or "invoiceno" in f.lower().replace("_","")), None)
+    amount_field = next((f for f in fields if f.lower() in ["grand_total", "grand_total_in_usd", "total", "amount"]), None)
+    date_field   = next((f for f in fields if "invoice_date" in f.lower() or "invoicedate" in f.lower().replace("_","")), None)
+
+    select_parts = []
+    if num_field:
+        select_parts.append(f"document->>'{num_field}' AS invoice_number")
+    select_parts.append(f"document->>'{status_field}' AS status")
+    if amount_field:
+        select_parts.append(f"NULLIF(document->>'{amount_field}','')::numeric AS amount")
+    if date_field:
+        select_parts.append(f"document->>'{date_field}' AS date")
+
+    list_sql = (
+        f'SELECT {", ".join(select_parts)} FROM "{inv_table}" '
+        f'WHERE ({where_clause}) ORDER BY updated_at DESC LIMIT 50'
+    ).strip()
+    _rows = run_sql(agent, list_sql)
+    if _rows.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [inv_table], "confidence": 0.0, "sql_queries": [count_sql, list_sql]}
+    rows = _rows.rows
+
+    if not rows:
+        return {
+            "answer":      f"No **{display_label}** invoices found.",
+            "tables_used": [inv_table],
+            "confidence":  0.9,
+            "sql_queries": [count_sql, list_sql],
+        }
+
+    headers = [p.split(" AS ")[-1].replace("_", " ").title() for p in select_parts]
+    lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in rows[:30]:
+        vals = ["—" if v is None else str(v) for v in row]
+        lines.append("| " + " | ".join(vals) + " |")
+    if len(rows) > 30:
+        lines.append(f"_…and {len(rows)-30} more_")
+
+    return {
+        "answer":      f"**{display_label} Invoices — {fmt_number(count)} total:**\n\n" + "\n".join(lines),
+        "tables_used": [inv_table],
+        "confidence":  0.96,
+        "sql_queries": [count_sql, list_sql],
+    }
+
+
+def _fp_user_task_map(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'all users with their tasks and status' — builds a JOIN query.
+
+    Triggered when the query mentions BOTH users AND tasks with a relational
+    intent (by / per / with / status / assigned).  Generates a single LEFT JOIN
+    SQL instead of two unrelated sub-queries.
+    """
+    text = normalize_text(user_query)
+
+    has_user = bool(re.search(r"\busers?\b|\bemployees?\b|\bmembers?\b|\bstaff\b|\bpeople\b|\bperson\b", text))
+    has_task = bool(re.search(r"\btasks?\b|\btodo\b|\bfollow.?up\b|\bassignment\b", text))
+    if not (has_user and has_task):
+        return None
+
+    # Require a relational/listing intent (not just a count)
+    relational = bool(re.search(
+        r"\bby\b|\bper\b|\bwith\b|\bassigned\b|\bstatus\b|\bpending\b|\bcompleted?\b|\bopen\b|\bgrouped\b|\beach\b|\ball\b|\btheir\b|\band\b",
+        text,
+    ))
+    if not relational:
+        return None
+
+    table_names = get_table_names(agent)
+    user_table  = next((t for t in table_names if t.lower() == "users"), None)
+    task_table  = next((t for t in table_names if t.lower() in ["createtasks", "tasks"]), None)
+    if not user_table or not task_table:
+        return None
+
+    task_fields    = get_document_fields(agent, task_table)
+    user_fields    = get_document_fields(agent, user_table)
+
+    task_name_fld  = next((f for f in task_fields if f.lower() in ["task", "title", "name", "subject"]), "task")
+    status_fld     = next((f for f in task_fields if "status" in f.lower()), "status")
+    priority_fld   = next((f for f in task_fields if "priority" in f.lower()), None)
+    due_fld        = next((f for f in task_fields if "due_date" in f.lower() or f.lower() == "due"), None)
+    user_name_fld  = REGISTRY.get(user_table, "name", user_fields) or "name"
+
+    # JOIN field: tasks link to users via createdBy / assignedTo / userId
+    join_fld = next(
+        (f for f in task_fields
+         if f.lower().replace("_", "") in ["createdby", "assignedto", "userid", "ownerid"]),
+        "createdBy",
+    )
+
+    # ── Status filter ──────────────────────────────────────────────────────────
+    status_filter = ""
+    status_label  = ""
+    # "pending or completed" must be checked before individual keywords
+    if re.search(r"pending.{0,20}or.{0,20}completed?|completed?.{0,20}or.{0,20}pending", text, re.I):
+        status_filter = f"AND LOWER(t.document->>'{status_fld}') IN ('pending', 'completed')"
+        status_label  = "Pending or Completed"
+    elif re.search(r"\bpending\b", text):
+        status_filter = f"AND LOWER(t.document->>'{status_fld}') = 'pending'"
+        status_label  = "Pending"
+    elif re.search(r"\bcompleted?\b|\bdone\b", text):
+        status_filter = f"AND LOWER(t.document->>'{status_fld}') = 'completed'"
+        status_label  = "Completed"
+    elif re.search(r"\bopen\b", text):
+        status_filter = f"AND LOWER(t.document->>'{status_fld}') = 'open'"
+        status_label  = "Open"
+
+    # ── Build SELECT columns ───────────────────────────────────────────────────
+    cols = [
+        f"COALESCE(u.document->>'{user_name_fld}', 'Unassigned') AS user_name",
+        f"COALESCE(t.document->>'{task_name_fld}', 'Untitled') AS task",
+        f"COALESCE(t.document->>'{status_fld}', '—') AS status",
+    ]
+    if priority_fld:
+        cols.append(f"COALESCE(t.document->>'{priority_fld}', '—') AS priority")
+    if due_fld:
+        cols.append(f"t.document->>'{due_fld}' AS due_date")
+
+    sql = f"""SELECT {', '.join(cols)}
+FROM "{task_table}" t
+LEFT JOIN "{user_table}" u
+  ON u.document->>'_id' = t.document->>'{join_fld}'
+WHERE t.document->>'{join_fld}' IS NOT NULL
+  {status_filter}
+ORDER BY u.document->>'{user_name_fld}' ASC NULLS LAST,
+         t.document->>'{task_name_fld}'
+LIMIT 200""".strip()
+
+    _res = run_sql(agent, sql)
+    if _res.error:
+        return {"answer": "Unable to retrieve data at this time. Please try again.",
+                "tables_used": [user_table, task_table], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _res.rows
+
+    if not rows:
+        lbl = f" with status **{status_label}**" if status_label else ""
+        return {
+            "answer":      f"No tasks{lbl} found assigned to users.",
+            "tables_used": [user_table, task_table],
+            "confidence":  0.9,
+            "sql_queries": [sql],
+        }
+
+    headers = [c.split(" AS ")[-1].replace("_", " ").title() for c in cols]
+    lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in rows[:50]:
+        vals = ["—" if v is None else str(v) for v in row]
+        lines.append("| " + " | ".join(vals) + " |")
+    if len(rows) > 50:
+        lines.append(f"_…and {len(rows)-50} more rows_")
+
+    lbl = f" (status: {status_label})" if status_label else ""
+    return {
+        "answer":      f"**Users with Tasks{lbl} — {len(rows)} records:**\n\n" + "\n".join(lines),
+        "tables_used": [user_table, task_table],
+        "confidence":  0.97,
+        "sql_queries": [sql],
+    }
+
+
 def _fp_system_config(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
     if not re.search(r"\bsmtp\b|\bfile upload\b|\bupload limit\b|\bsystem config\b", text):
@@ -2049,25 +2426,30 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
 
 
 _SPECIALIZED: Dict[str, Any] = {
-    "search":           _fp_search,
-    "quarterly":        _fp_quarterly,
-    "no_activity":      _fp_no_activity,
-    "dept_users":       _fp_dept_users,
-    "overdue_tasks":    _fp_overdue_tasks,
-    "targets":          _fp_targets,
-    "lookup_list":      _fp_lookup_list,
-    "system_config":    _fp_system_config,
-    "overdue_aging":    _fp_overdue_aging,
-    "pipeline_summary": _fp_pipeline_summary,
-    "pending_invoices": _fp_pending_invoices,
+    "search":                _fp_search,
+    "quarterly":             _fp_quarterly,
+    "no_activity":           _fp_no_activity,
+    "dept_users":            _fp_dept_users,
+    "overdue_tasks":         _fp_overdue_tasks,
+    "targets":               _fp_targets,
+    "lookup_list":           _fp_lookup_list,
+    "system_config":         _fp_system_config,
+    "overdue_aging":         _fp_overdue_aging,
+    "pipeline_summary":      _fp_pipeline_summary,
+    "pending_invoices":      _fp_pending_invoices,
+    # New handlers (ISSUE 1 + ISSUE 2)
+    "user_task_map":         _fp_user_task_map,
+    "invoice_status_filter": _fp_invoice_status,
 }
 
 # General handlers tried in priority order when no specialized route matched
 _GENERAL = [
-    _fp_sales,          # before revenue — catches "sales orders" explicitly
+    _fp_sales,           # before revenue — catches "sales orders" explicitly
     _fp_revenue,
     _fp_top_customers,
     _fp_deals_filter,
+    _fp_user_task_map,   # before _fp_tasks — catches user+task JOIN queries
+    _fp_invoice_status,  # before _fp_list_records — catches status-filtered invoice queries
     _fp_tasks,
     _fp_count,
     _fp_group_by,

@@ -246,6 +246,43 @@ def run(
     # ── 5. Schema pre-warm ─────────────────────────────────────────────────────
     _warm_schema(agent)
 
+    # ══════════════════════════════════════════════════════════════════════
+    # LAYER 1: Fast Path — tried FIRST for ALL queries, before classification.
+    # Handles ~70-80% of queries via direct SQL pattern matching (<300ms).
+    # If it returns a result, we're done — no LLM needed.
+    # Only queries fast_path returns None for continue to the classifier.
+    # ══════════════════════════════════════════════════════════════════════
+    with Timer("fast_path") as fp_timer:
+        try:
+            fp_result = fast_path.run(user_query, agent)
+        except Exception as exc:
+            LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
+            fp_result = None
+    metrics["fastpath_ms"] = round(fp_timer.elapsed_ms)
+
+    if fp_result is not None:
+        LOGGER.info(
+            "[RID:%s] ═══ Layer 1 HIT (fast-path) | %.0fms | tables=%s",
+            request_id, fp_timer.elapsed_ms, fp_result.get("tables_used"),
+        )
+        metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
+        result = _build_response(
+            fp_result["answer"],
+            fp_result.get("tables_used", []),
+            fp_result.get("sql_queries", []),
+            fp_result.get("confidence", 0.95),
+            started, layer="fast_path", metrics=metrics,
+        )
+        if memory:
+            memory.update(
+                entity=fp_result.get("_entity") or _extract_entity_from_result(fp_result),
+                query=original_query, count=fp_result.get("_count"),
+            )
+        return result
+
+    LOGGER.info("[RID:%s] ═══ Fast-path MISS → Classifier", request_id)
+
     # ── 6. Intent classification ───────────────────────────────────────────────
     with Timer("classifier") as cls_timer:
         classification = classify(user_query)
@@ -258,43 +295,10 @@ def run(
     )
 
     # ══════════════════════════════════════════════════════════════════════
-    # SIMPLE PATH: fast_path → text2sql
+    # LAYER 2: Text2SQL — for SIMPLE queries that fast_path missed
     # ══════════════════════════════════════════════════════════════════════
     if intent_type == "SIMPLE":
 
-        # ── Layer 1: Fast Path ─────────────────────────────────────────────
-        with Timer("fast_path") as fp_timer:
-            try:
-                fp_result = fast_path.run(user_query, agent)
-            except Exception as exc:
-                LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
-                fp_result = None
-        metrics["fastpath_ms"] = round(fp_timer.elapsed_ms)
-
-        if fp_result is not None:
-            LOGGER.info(
-                "[RID:%s] ═══ Layer 1 HIT (fast-path) | %.0fms | tables=%s",
-                request_id, fp_timer.elapsed_ms, fp_result.get("tables_used"),
-            )
-            metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
-            LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
-            result = _build_response(
-                fp_result["answer"],
-                fp_result.get("tables_used", []),
-                fp_result.get("sql_queries", []),
-                fp_result.get("confidence", 0.95),
-                started, layer="fast_path", metrics=metrics,
-            )
-            if memory:
-                memory.update(
-                    entity=fp_result.get("_entity") or _extract_entity_from_result(fp_result),
-                    query=original_query, count=fp_result.get("_count"),
-                )
-            return result
-
-        LOGGER.info("[RID:%s] ═══ Fast-path MISS → Text2SQL", request_id)
-
-        # ── Layer 2: Text2SQL ──────────────────────────────────────────────
         with Timer("text2sql") as t2s_timer:
             try:
                 t2s_result = text2sql.run(user_query, agent)
@@ -324,7 +328,7 @@ def run(
                 )
             return result
 
-        LOGGER.info("[RID:%s] ═══ SIMPLE path fully missed → escalating to COMPLEX", request_id)
+        LOGGER.info("[RID:%s] ═══ SIMPLE path missed → escalating to COMPLEX", request_id)
 
     # ══════════════════════════════════════════════════════════════════════
     # COMPLEX PATH: decompose → parallel execute → synthesize
