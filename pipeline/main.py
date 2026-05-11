@@ -4,19 +4,26 @@ Implements the full hybrid NL-to-SQL query flow:
 
     User Query
         ↓
-    [Guard]     Greeting / Blocked / Vague checks
+    [Guard]        Greeting / Blocked / Vague checks
         ↓
-    [Layer 1]   Fast Path Engine       → ~70-80% queries, <300ms, NO LLM
+    [Layer 1]      Fast Path Engine    → regex rules, <50ms, NO LLM
         ↓ (miss)
-    [Layer 2]   Intent Classifier      → SIMPLE | COMPLEX
+    [Layer 1.5]    Intent Router       → LLM brain (~400ms, local Ollama)
+                   Understands ANY phrasing → SQL template → execute
+        ↓ (miss or low confidence)
+    [Layer 2]      Intent Classifier   → SIMPLE | COMPLEX
         ↓
-    [SIMPLE]    Text2SQL               → Ollama models → execute → return
-    [COMPLEX]   Decomposer            → Groq/Ollama → sub-queries
-                Executor              → parallel SQL execution
-                Synthesizer           → Groq/Ollama → final answer
+    [SIMPLE]       Text2SQL            → Ollama fine-tuned → execute
+    [COMPLEX]      Decomposer          → Groq/Ollama → sub-queries
+                   Executor            → parallel SQL execution
+                   Synthesizer         → Groq/Ollama → final answer
+
+    All SIMPLE-path results (fast_path, intent_router, text2sql) are wrapped
+    by narrate_response() which adds an executive summary paragraph.
 
 Public API:
     run(agent, user_query, memory, request_id="") -> Dict[str, Any]
+    ConversationMemory                             ← legacy alias for ChatMemory
 """
 
 from __future__ import annotations
@@ -28,15 +35,17 @@ import time
 from typing import Any, Dict, List, Optional
 
 from pipeline import fast_path, text2sql
+from pipeline.chat_memory import ChatMemory
 from pipeline.classifier import classify
 from pipeline.decomposer import decompose
 from pipeline.executor import run_parallel, SubQueryResult
+from pipeline.intent_router import run as intent_router_run
 from pipeline.schema import (
     discover_schema_links,
     get_table_names,
     build_text2sql_schema,
 )
-from pipeline.synthesizer import synthesize
+from pipeline.synthesizer import narrate_response, synthesize
 from pipeline.utils import (
     Timer,
     format_final_answer,
@@ -52,55 +61,12 @@ LOGGER = logging.getLogger("sql_chatbot")
 
 _SCHEMA_WARMED = False
 
+# Legacy alias so any code that imported ConversationMemory from here still works
+ConversationMemory = ChatMemory
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CONVERSATION MEMORY
-# ══════════════════════════════════════════════════════════════════════════════
 
-class ConversationMemory:
-    """Per-session state: resolves pronouns ('that', 'those') via last entity."""
-
-    def __init__(self, max_history: int = 10) -> None:
-        self.last_entity: Optional[str] = None
-        self.last_query:  str           = ""
-        self.last_count:  Optional[int] = None
-        self.history:     List[Dict]    = []
-        self._max_history = max_history
-
-    def update(
-        self,
-        entity: Optional[str],
-        query: str,
-        count: Optional[int] = None,
-    ) -> None:
-        if entity:
-            self.last_entity = entity
-        self.last_query = query
-        if count is not None:
-            self.last_count = count
-        self.history.append({"query": query, "entity": entity, "count": count, "ts": time.time()})
-        if len(self.history) > self._max_history:
-            self.history = self.history[-self._max_history:]
-
-    def resolve(self, query: str) -> str:
-        if not self.last_entity:
-            return query
-        text = normalize_text(query)
-        has_pronoun = re.search(
-            r"\b(that|those|them|their|these|it|the same|above|previous)\b", text,
-        )
-        if has_pronoun:
-            resolved = f"{query} (referring to {self.last_entity})"
-            LOGGER.debug("Memory resolved: '%s' → '%s'", query, resolved)
-            return resolved
-        bare_action = re.match(
-            r"^(give me|show|list|get|display)\s+(the\s+)?(names?|list|details?|all)\s*$", text,
-        )
-        if bare_action and self.last_entity:
-            resolved = f"{query} of {self.last_entity}"
-            LOGGER.debug("Memory resolved bare action: '%s' → '%s'", query, resolved)
-            return resolved
-        return query
+# ConversationMemory is now ChatMemory (imported above).
+# The class definition has moved to pipeline/chat_memory.py.
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -161,10 +127,19 @@ def _extract_entity_from_result(result: Dict[str, Any]) -> Optional[str]:
 
 def _empty_metrics() -> Dict[str, Any]:
     return {
-        "guard_ms": 0, "classifier_ms": 0, "fastpath_ms": 0,
-        "text2sql_ms": 0, "decomposer_ms": 0, "executor_ms": 0,
-        "synthesizer_ms": 0, "total_ms": 0,
+        "guard_ms": 0, "intent_router_ms": 0, "classifier_ms": 0,
+        "fastpath_ms": 0, "text2sql_ms": 0, "decomposer_ms": 0,
+        "executor_ms": 0, "synthesizer_ms": 0, "narrate_ms": 0, "total_ms": 0,
     }
+
+
+def _narrate(query: str, raw: Dict[str, Any]) -> str:
+    """Wrap a SIMPLE-path result with an executive summary paragraph."""
+    return narrate_response(
+        query,
+        raw.get("answer", ""),
+        raw.get("tables_used", []),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -174,26 +149,26 @@ def _empty_metrics() -> Dict[str, Any]:
 def run(
     agent,
     user_query: str,
-    memory: Optional[ConversationMemory] = None,
+    memory: Optional[ChatMemory] = None,
     request_id: str = "",
 ) -> Dict[str, Any]:
     """Execute the full hybrid NL-to-SQL pipeline for one user query."""
     started = time.perf_counter()
     metrics = _empty_metrics()
 
-    # ── 0. Input sanitization (E10) ───────────────────────────────────────────
+    # ── 0. Input sanitization ─────────────────────────────────────────────────
     user_query, was_truncated = sanitize_user_input(user_query)
     if was_truncated:
         LOGGER.warning("[RID:%s] Input truncated to 500 chars", request_id)
 
-    # ── 1. Pronoun resolution ──────────────────────────────────────────────────
+    # ── 1. Memory: pronoun / bare-action resolution ───────────────────────────
     original_query = user_query
     if memory:
         user_query = memory.resolve(user_query)
 
     # ── 2. Guard: Greeting ─────────────────────────────────────────────────────
     if is_greeting(user_query):
-        LOGGER.info("[RID:%s] Guard: greeting detected", request_id)
+        LOGGER.info("[RID:%s] Guard: greeting", request_id)
         metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
         return {
             "answer": (
@@ -212,7 +187,7 @@ def run(
 
     # ── 3. Guard: Blocked query ────────────────────────────────────────────────
     if is_blocked(user_query):
-        LOGGER.warning("[RID:%s] Guard: blocked query: %.60s", request_id, user_query)
+        LOGGER.warning("[RID:%s] Guard: blocked: %.60s", request_id, user_query)
         metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
         return {
             "answer": (
@@ -226,7 +201,7 @@ def run(
 
     # ── 4. Guard: Vague query ──────────────────────────────────────────────────
     if is_vague_query(user_query):
-        LOGGER.info("[RID:%s] Guard: vague query: %.60s", request_id, user_query)
+        LOGGER.info("[RID:%s] Guard: vague: %.60s", request_id, user_query)
         metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
         return {
             "answer": (
@@ -246,17 +221,14 @@ def run(
     # ── 5. Schema pre-warm ─────────────────────────────────────────────────────
     _warm_schema(agent)
 
+    # Build memory context once — used by intent_router
+    mem_context = memory.get_context(user_query) if memory else ""
+
     # ══════════════════════════════════════════════════════════════════════
-    # LAYER 1: Fast Path — tried FIRST for ALL queries, before classification.
-    # Handles ~70-80% of queries via direct SQL pattern matching (<300ms).
-    # If it returns a result, we're done — no LLM needed.
-    # Only queries fast_path returns None for continue to the classifier.
+    # LAYER 1: Fast Path — pure regex, <50ms, NO LLM
     # ══════════════════════════════════════════════════════════════════════
     with Timer("fast_path") as fp_timer:
         try:
-            # apply_delay=True — only the top-level call gets the natural delay.
-            # Executor sub-queries call fast_path.run(apply_delay=False) so
-            # complex queries are never artificially slowed down.
             fp_result = fast_path.run(user_query, agent, apply_delay=True)
         except Exception as exc:
             LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
@@ -268,23 +240,58 @@ def run(
             "[RID:%s] ═══ Layer 1 HIT (fast-path) | %.0fms | tables=%s",
             request_id, fp_timer.elapsed_ms, fp_result.get("tables_used"),
         )
-        metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+        with Timer("narrate") as nar_timer:
+            narrated = _narrate(original_query, fp_result)
+        metrics["narrate_ms"]  = round(nar_timer.elapsed_ms)
+        metrics["total_ms"]    = round((time.perf_counter() - started) * 1000)
         LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
         result = _build_response(
-            fp_result["answer"],
+            narrated,
             fp_result.get("tables_used", []),
             fp_result.get("sql_queries", []),
             fp_result.get("confidence", 0.95),
             started, layer="fast_path", metrics=metrics,
         )
         if memory:
-            memory.update(
-                entity=fp_result.get("_entity") or _extract_entity_from_result(fp_result),
-                query=original_query, count=fp_result.get("_count"),
-            )
+            memory.update(original_query, fp_result)
         return result
 
-    LOGGER.info("[RID:%s] ═══ Fast-path MISS → Classifier", request_id)
+    LOGGER.info("[RID:%s] ═══ Layer 1 MISS → Intent Router", request_id)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # LAYER 1.5: Intent Router — LLM brain, understands ANY phrasing
+    # "tell me all deals" = "show deals" = "give me deals" → same SQL
+    # ══════════════════════════════════════════════════════════════════════
+    with Timer("intent_router") as ir_timer:
+        try:
+            ir_result = intent_router_run(user_query, agent, memory_context=mem_context)
+        except Exception as exc:
+            LOGGER.warning("[RID:%s] Intent router exception: %s", request_id, exc)
+            ir_result = None
+    metrics["intent_router_ms"] = round(ir_timer.elapsed_ms)
+
+    if ir_result is not None:
+        LOGGER.info(
+            "[RID:%s] ═══ Layer 1.5 HIT (intent-router) | %.0fms | tables=%s",
+            request_id, ir_timer.elapsed_ms, ir_result.get("tables_used"),
+        )
+        with Timer("narrate") as nar_timer:
+            narrated = _narrate(original_query, ir_result)
+        metrics["narrate_ms"]  = round(nar_timer.elapsed_ms)
+        metrics["total_ms"]    = round((time.perf_counter() - started) * 1000)
+        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
+        result = _build_response(
+            narrated,
+            ir_result.get("tables_used", []),
+            ir_result.get("sql_queries", []),
+            ir_result.get("confidence", 0.88),
+            started, layer="intent_router", metrics=metrics,
+        )
+        if memory:
+            memory.update(original_query, ir_result)
+        return result
+
+    LOGGER.info("[RID:%s] ═══ Intent Router MISS → Classifier", request_id)
 
     # ── 6. Intent classification ───────────────────────────────────────────────
     with Timer("classifier") as cls_timer:
@@ -298,7 +305,7 @@ def run(
     )
 
     # ══════════════════════════════════════════════════════════════════════
-    # LAYER 2: Text2SQL — for SIMPLE queries that fast_path missed
+    # LAYER 2: Text2SQL — SIMPLE queries that both fast_path and intent_router missed
     # ══════════════════════════════════════════════════════════════════════
     if intent_type == "SIMPLE":
 
@@ -315,20 +322,20 @@ def run(
                 "[RID:%s] ═══ Text2SQL HIT | %.0fms | tables=%s",
                 request_id, t2s_timer.elapsed_ms, t2s_result.get("tables_used"),
             )
-            metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+            with Timer("narrate") as nar_timer:
+                narrated = _narrate(original_query, t2s_result)
+            metrics["narrate_ms"]  = round(nar_timer.elapsed_ms)
+            metrics["total_ms"]    = round((time.perf_counter() - started) * 1000)
             LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
             result = _build_response(
-                t2s_result["answer"],
+                narrated,
                 t2s_result.get("tables_used", []),
                 t2s_result.get("sql_queries", []),
                 t2s_result.get("confidence", 0.88),
                 started, layer="text2sql", metrics=metrics,
             )
             if memory:
-                memory.update(
-                    entity=_extract_entity_from_result(t2s_result),
-                    query=original_query,
-                )
+                memory.update(original_query, t2s_result)
             return result
 
         LOGGER.info("[RID:%s] ═══ SIMPLE path missed → escalating to COMPLEX", request_id)
@@ -420,7 +427,7 @@ def run(
         )
 
         if memory and all_tables:
-            memory.update(entity=all_tables[0], query=original_query)
+            memory.update(original_query, result)
 
         LOGGER.info(
             "[RID:%s] ═══ Pipeline DONE | total=%.0fms | parts=%d | tables=%s ═══",

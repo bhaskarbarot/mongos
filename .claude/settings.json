@@ -24,5 +24,10 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(psql -h localhost -p 5432 -U postgres -d mongos_sync -c \"SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;\")"
+    ]
   }
 }

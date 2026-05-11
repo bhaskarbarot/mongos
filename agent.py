@@ -49,9 +49,10 @@ from pipeline.schema import (
     build_text2sql_schema,
 )
 import pipeline.main as _pipeline
+from pipeline.chat_memory import ChatMemory
 
-# ── Re-export for backward compatibility (app.py imports from here) ────────────
-ConversationMemory = _pipeline.ConversationMemory
+# Re-export for app.py — ChatMemory is the full 3-layer memory system
+ConversationMemory = ChatMemory
 
 LOGGER = logging.getLogger("sql_chatbot")
 

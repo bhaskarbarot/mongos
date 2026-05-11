@@ -374,6 +374,83 @@ def _post_process(answer: str, sub_results: List[Dict]) -> str:
 # PUBLIC API
 # ══════════════════════════════════════════════════════════════════════════════
 
+def narrate_response(
+    original_query: str,
+    raw_answer: str,
+    tables_used: List[str],
+) -> str:
+    """
+    Wrap a raw fast-path / text2sql / intent-router answer with an executive summary.
+
+    Called for ALL SIMPLE-path results so every response includes a plain-English
+    explanation, not just a table or a bare number.
+
+    Uses the classify chain (Groq 8b → Gemini → Ollama 1.5b) — fast (~300ms).
+    On any failure the raw_answer is returned unchanged, so this is never blocking.
+
+    Args:
+        original_query: User's original question
+        raw_answer:     The data answer (table / count / sum string)
+        tables_used:    DB tables that were queried
+
+    Returns:
+        Executive summary paragraph + original data, or raw_answer on failure.
+    """
+    # Don't narrate error / no-data / already-summarised responses
+    skip_signals = [
+        "no data found", "no records", "data unavailable", "timed out",
+        "unable to", "encountered an error", "no ", "executive summary",
+    ]
+    ans_lower = raw_answer.lower().strip()
+    if len(ans_lower) < 15 or any(ans_lower.startswith(s) for s in skip_signals):
+        return raw_answer
+    if ans_lower.startswith("executive summary"):
+        return raw_answer
+
+    table_hint = (
+        " (tables: " + ", ".join(tables_used) + ")" if tables_used else ""
+    )
+
+    system = (
+        "You are a senior CRM business analyst. Given a user query and the raw data result, "
+        "write ONE executive summary paragraph (2-4 sentences) that:\n"
+        "1. States the key finding in plain business language\n"
+        "2. Highlights the most important number or pattern using **bold**\n"
+        "3. Gives a brief business insight when it is obvious from the data\n\n"
+        "STRICT RULES:\n"
+        "- Start directly — no 'Here is', 'Based on', or 'The data shows' preamble\n"
+        "- Bold all key numbers: **42 deals**, **$58,296.40**, **15%**\n"
+        "- Maximum 70 words\n"
+        "- Only use the data provided — NEVER invent facts or numbers\n"
+        "- End with the exact marker: <<<END_SUMMARY>>>"
+    )
+    user = (
+        'Query: "' + original_query + '"' + table_hint + "\n"
+        "Data:\n" + raw_answer[:600] + "\n\n"
+        "Write the executive summary paragraph, then output <<<END_SUMMARY>>>:"
+    )
+
+    raw = llm_call("classify", system, user, max_tokens=180)
+    if not raw:
+        return raw_answer
+
+    if "<<<END_SUMMARY>>>" in raw:
+        summary = raw.split("<<<END_SUMMARY>>>")[0].strip()
+    else:
+        summary = raw.strip()
+
+    if not summary or len(summary) < 20:
+        return raw_answer
+
+    # Post-process: strip accidental preambles the model sometimes adds
+    summary = re.sub(
+        r"^(here is|based on|the data (shows|indicates)|according to)[^.]*\.\s*",
+        "", summary, flags=re.I,
+    )
+
+    return "## Executive Summary\n\n" + summary + "\n\n---\n\n" + raw_answer
+
+
 def synthesize(
     original_query: str,
     sub_results: List[Dict],

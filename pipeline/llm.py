@@ -52,7 +52,7 @@ _OR_HEADERS = {
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20) -> Optional[str]:
-    """Call Groq API. Returns text or None on any failure."""
+    """Call Groq API. On 429 rate-limit, waits and retries once before returning None."""
     if not settings.groq_api_key:
         return None
     payload = {
@@ -64,7 +64,8 @@ def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20
         "temperature": 0.1,
         "max_tokens":  max_tokens,
     }
-    try:
+
+    def _do_request() -> Optional[str]:
         req = urllib.request.Request(
             "https://api.groq.com/openai/v1/chat/completions",
             data=json.dumps(payload).encode(),
@@ -76,7 +77,29 @@ def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20
             text = data["choices"][0]["message"]["content"].strip()
             LOGGER.debug("Groq [%s] OK — %d chars", model, len(text))
             return text
+
+    try:
+        return _do_request()
     except urllib.error.HTTPError as e:
+        if e.code == 429:
+            # Parse retry-after from Groq headers (usually 5-60s).
+            # Cap at 15s — if it's longer, fall through to Gemini instead.
+            retry_after = int(e.headers.get("retry-after") or e.headers.get("x-ratelimit-reset-requests") or 8)
+            retry_after = min(retry_after, 15)
+            LOGGER.warning(
+                "Groq [%s] 429 rate-limit — waiting %ds then retrying once",
+                model, retry_after,
+            )
+            time.sleep(retry_after)
+            try:
+                return _do_request()
+            except urllib.error.HTTPError as e2:
+                body2 = e2.read().decode()[:200]
+                LOGGER.warning("Groq [%s] retry HTTP %d: %s", model, e2.code, body2)
+                return None
+            except Exception as exc2:
+                LOGGER.warning("Groq [%s] retry error: %s", model, exc2)
+                return None
         body = e.read().decode()[:200]
         LOGGER.warning("Groq [%s] HTTP %d: %s", model, e.code, body)
         return None

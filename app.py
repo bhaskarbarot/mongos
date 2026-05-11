@@ -81,9 +81,20 @@ def main() -> None:
         with st.spinner("Thinking..."):
             result = run_agent_query(agent, prompt, memory=memory)
         st.markdown(result["answer"])
+
+        layer = result.get("layer", "")
+        layer_badge = {
+            "fast_path":     "⚡ fast-path",
+            "intent_router": "🧠 intent-router",
+            "text2sql":      "🔧 text2sql",
+            "complex":       "🔀 complex",
+            "guard":         "🛡 guard",
+        }.get(layer, layer)
+
         st.caption(
             f"Latency: {result['latency_ms']} ms | "
             f"Confidence: {result['confidence']:.2f} | "
+            f"Layer: {layer_badge} | "
             f"Tables: {', '.join(result['tables_used']) if result['tables_used'] else 'None'}"
         )
         if result.get("_sub_results"):
@@ -97,6 +108,14 @@ def main() -> None:
             with st.expander("Executed SQL"):
                 for q in result["sql_queries"]:
                     st.code(q, language="sql")
+
+        # Show session memory summary when it exists
+        if memory.summary:
+            with st.expander("Session Memory", expanded=False):
+                st.caption(memory.summary)
+                wm = memory.working_memory
+                if wm.get("last_entity"):
+                    st.caption(f"Last entity: `{wm['last_entity']}`")
 
     st.session_state.messages.append({
         "role": "assistant",

@@ -33,10 +33,18 @@ from __future__ import annotations
 
 import calendar
 import logging
+import os
 import random
 import re
 import time as _time
 from typing import Any, Dict, List, Optional, Tuple
+
+# ── Configurable natural delay (read once at import time from env) ─────────────
+# Set FASTPATH_DELAY_ENABLED=false to turn off entirely (e.g. during dev/testing).
+# FASTPATH_DELAY_MIN / MAX control the random range in seconds.
+_DELAY_ENABLED: bool = os.getenv("FASTPATH_DELAY_ENABLED", "true").lower() == "true"
+_DELAY_MIN:     int  = int(os.getenv("FASTPATH_DELAY_MIN", "5"))
+_DELAY_MAX:     int  = int(os.getenv("FASTPATH_DELAY_MAX", "10"))
 
 from pipeline.schema import (
     REGISTRY,
@@ -3851,17 +3859,24 @@ _GENERAL = [
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _natural_delay() -> None:
-    """Add a human-feeling delay before every fast-path response.
-
-    Total wait = 5s base + random 1–5s extra → 6–10s per response.
-    This prevents responses from looking instantaneous/hardcoded to end users.
-    Each query gets a different total time so answers never arrive at the
-    same interval.
     """
-    extra = random.randint(1, 5)
-    total = 5 + extra
-    LOGGER.debug("FastPath natural delay: %ds (base=5 + extra=%d)", total, extra)
-    _time.sleep(total)
+    Add a human-feeling delay before returning a fast-path response.
+
+    Controlled by three .env keys:
+        FASTPATH_DELAY_ENABLED=true   # set false to disable (dev/testing)
+        FASTPATH_DELAY_MIN=5          # minimum wait in seconds
+        FASTPATH_DELAY_MAX=10         # maximum wait in seconds
+
+    The delay randomises within [MIN, MAX] so consecutive answers never arrive
+    at the exact same interval — this prevents the UI from looking hardcoded.
+    """
+    if not _DELAY_ENABLED:
+        return
+    lo  = max(1, _DELAY_MIN)
+    hi  = max(lo, _DELAY_MAX)
+    wait = random.randint(lo, hi)
+    LOGGER.debug("FastPath natural delay: %ds (min=%d max=%d)", wait, lo, hi)
+    _time.sleep(wait)
 
 
 def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]]:
@@ -3875,10 +3890,10 @@ def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]
     Args:
         query:       Raw user query string
         agent:       DB agent with run_sql capability
-        apply_delay: If True, apply _natural_delay() before returning result.
-                     Set True ONLY from main.py's top-level call.
-                     Always False inside executor sub-queries — complex queries
-                     must not be artificially delayed.
+        apply_delay: If True and FASTPATH_DELAY_ENABLED=true, applies _natural_delay().
+                     Always True from main.py top-level call.
+                     Always False inside executor sub-queries so complex queries
+                     are never artificially slowed down.
 
     Returns:
         Result dict with keys: answer, tables_used, confidence, sql_queries
