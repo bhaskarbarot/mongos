@@ -48,9 +48,11 @@ from pipeline.schema import (
 from pipeline.synthesizer import narrate_response, synthesize
 from pipeline.utils import (
     Timer,
+    _IDENTITY_ANSWER,
     format_final_answer,
     is_blocked,
     is_greeting,
+    is_identity_question,
     is_vague_query,
     mask_ids,
     normalize_text,
@@ -166,7 +168,18 @@ def run(
     if memory:
         user_query = memory.resolve(user_query)
 
-    # ── 2. Guard: Greeting ─────────────────────────────────────────────────────
+    # ── 2. Guard: Identity question ("who are you") ───────────────────────────
+    if is_identity_question(user_query):
+        LOGGER.info("[RID:%s] Guard: identity question", request_id)
+        metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+        return {
+            "answer":     _IDENTITY_ANSWER,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            "confidence": 1.0, "tables_used": [], "sql_queries": [],
+            "layer": "guard", "metrics": metrics,
+        }
+
+    # ── 3. Guard: Greeting ─────────────────────────────────────────────────────
     if is_greeting(user_query):
         LOGGER.info("[RID:%s] Guard: greeting", request_id)
         metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)

@@ -49,6 +49,30 @@ GREETING_PATTERNS = [
     re.compile(r"^\s*(thanks?|thank you|thx)\b[!.\s]*$",                          re.IGNORECASE),
 ]
 
+# Identity questions — answered with a canned chatbot description
+IDENTITY_PATTERNS = [
+    re.compile(r"^\s*(who|what)\s+(are\s+you|is\s+this|am\s+i\s+talking\s+to)\b", re.IGNORECASE),
+    re.compile(r"^\s*who\s+you\s+are\b",                                            re.IGNORECASE),
+    re.compile(r"^\s*(introduce\s+your\s*self|tell\s+me\s+about\s+your\s*self)\b",  re.IGNORECASE),
+]
+
+_IDENTITY_ANSWER = (
+    "I am the **CRM AI Assistant** — your intelligent business data analyst.\n\n"
+    "I can answer questions about your live CRM data, including:\n\n"
+    "• **Deals** — pipeline, stages, won/lost analysis\n"
+    "• **Revenue** — invoices, payments, overdue aging\n"
+    "• **Contacts & Companies** — search, lookup, activity\n"
+    "• **Tasks** — pending, overdue, assigned to users\n"
+    "• **Targets** — vs achieved per user / period\n"
+    "• **Reports** — KPI summaries, trends, executive overviews\n\n"
+    "Just ask in plain English — I understand natural language!"
+)
+
+
+def is_identity_question(text: str) -> bool:
+    """Check if the user is asking who/what the chatbot is."""
+    return any(p.search(text.strip()) for p in IDENTITY_PATTERNS)
+
 _REVENUE_FIELD_KEYWORDS = [
     "total", "amount", "price", "revenue", "cost", "value",
     "fee", "tax", "subtotal", "grand", "usd", "billing", "payment",

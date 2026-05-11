@@ -1081,27 +1081,86 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
 
     table_names = get_table_names(agent)
     table: Optional[str] = None
+
+    # Find the FIRST table name mentioned in the query (left-to-right).
+    # This prevents "deals with categories" from resolving to the 'categories'
+    # table just because it comes earlier alphabetically.
+    best_pos = len(text) + 1
     for t in table_names:
         tl = t.lower()
-        if re.search(rf"\b{re.escape(tl)}\b", text) or (
-            tl.endswith("s") and re.search(rf"\b{re.escape(tl[:-1])}\b", text)
-        ):
+        m = re.search(rf"\b{re.escape(tl)}\b", text)
+        if not m and tl.endswith("s"):
+            m = re.search(rf"\b{re.escape(tl[:-1])}\b", text)
+        if m and m.start() < best_pos:
+            best_pos = m.start()
             table = t
-            break
     if not table:
         return None
 
     fields       = get_document_fields(agent, table)
     name_expr    = REGISTRY.display_name_expr(table, fields)
+
+    # ── "deals with categories/stages/types" → group-by breakdown ─────────────
+    # Detect "with <groupby>" pattern: "deals with stages", "deals with categories"
+    _GROUPBY_KEYWORDS = {
+        r"\b(categor\w+)\b":  ("stage",    "category"),   # categories → stage field
+        r"\b(stage\w*)\b":    ("stage",    "stage"),
+        r"\b(type\w*)\b":     ("stage",    "type"),
+        r"\b(status\w*)\b":   ("status",   "status"),
+        r"\b(owner\w*)\b":    ("owner",    "owner"),
+        r"\b(region\w*)\b":   ("region",   "region"),
+        r"\b(source\w*)\b":   ("source",   "source"),
+        r"\b(priorit\w+)\b":  ("priority", "priority"),
+        r"\b(currenc\w+)\b":  ("currency", "currency"),
+    }
+    _groupby_field: Optional[str] = None
+    _groupby_alias: str           = ""
+    _with_groupby = re.search(r"\bwith\s+(\w+)", text)
+    if _with_groupby:
+        kw = _with_groupby.group(1).lower()
+        for pattern, (role, alias) in _GROUPBY_KEYWORDS.items():
+            if re.match(pattern, kw):
+                f = REGISTRY.get(table, role, fields)
+                if f:
+                    _groupby_field = f
+                    _groupby_alias = alias
+                break
+
+    if _groupby_field:
+        # Return a grouped count breakdown instead of individual rows
+        group_expr = f"document->>'{_groupby_field}'"
+        grp_sql = (
+            f"SELECT COALESCE({group_expr}, 'Unknown') AS {_groupby_alias}, "
+            f"COUNT(*)::int AS count "
+            f'FROM "{table}" '
+            f"WHERE COALESCE(document->>'deleted','false') != 'true' "
+            f"GROUP BY 1 ORDER BY count DESC"
+        )
+        _g_res = run_sql(agent, grp_sql)
+        if not _g_res.error and _g_res.rows:
+            total = sum(r[1] for r in _g_res.rows if r[1])
+            lines = [f"| {_groupby_alias.title()} | Count |", "| --- | --- |"]
+            for r in _g_res.rows:
+                lines.append(f"| {r[0] or '—'} | {r[1]} |")
+            return {
+                "answer":      (
+                    f"**{table.title()} by {_groupby_alias} ({total} total):**\n\n"
+                    + "\n".join(lines)
+                ),
+                "tables_used": [table],
+                "confidence":  0.96,
+                "sql_queries": [grp_sql],
+            }
+
     select_parts = [f"{name_expr} AS name"]
     for role, alias in [
-        ("identifier", "ref"), ("status", "status"),
-        ("amount", "amount"), ("date", "date"), ("email", "email"),
+        ("identifier", "ref"), ("stage", "stage"), ("status", "status"),
+        ("amount", "amount"), ("date", "date"),
     ]:
         f = REGISTRY.get(table, role, fields)
         if f and f"document->>'{f}'" not in name_expr:
             select_parts.append(f"document->>'{f}' AS {alias}")
-        if len(select_parts) >= 5:
+        if len(select_parts) >= 6:
             break
 
     # ── Field filters ──────────────────────────────────────────────────────────
@@ -1217,13 +1276,18 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         None,
     )
 
-    # top N (explicit number) or bare "top" (→ 10) or singular noun (→ 1)
-    top_match   = re.search(r"\btop\s+(\d+)\b", text)
-    bare_top    = re.search(r"\btop\b", text) and not top_match       # "top invoice" / "top deal"
-    singular    = re.search(r"\b(the\s+)?(top|best|highest|biggest)\s+\w+\b", text) and \
-                  not re.search(r"\b(top|best)\s+\d+\b|\bplural\b", text)
-    n_match     = re.search(r"\blast\s+(\d+)\b|(\d+)\s+(?:record|row|result|item)s?\b", text)
-    first_match = re.search(r"\b(1st|first|oldest|earliest)\b", text)
+    # ── Ordinal / limit parsing ────────────────────────────────────────────────
+    # "top 5", "last 10", "first", "1st", "3rd", "10th", etc.
+    top_match     = re.search(r"\btop\s+(\d+)\b", text)
+    bare_top      = re.search(r"\btop\b", text) and not top_match
+    last_n_match  = re.search(r"\blast\s+(\d+)\b", text)
+    n_match       = re.search(r"(\d+)\s+(?:record|row|result|item)s?\b", text)
+    # Ordinal: "1st", "2nd", "3rd", "10th" — resolve to LIMIT + OFFSET
+    ordinal_match = re.search(r"\b(\d+)(?:st|nd|rd|th)\b", text)
+    first_match   = re.search(r"\b(first|oldest|earliest)\b", text) or (
+                    ordinal_match and int(ordinal_match.group(1)) == 1
+                  )
+    last_match    = re.search(r"\b(last|latest|newest|most\s+recent)\b", text) and not last_n_match
 
     # Synonyms for DESC: highest, biggest, largest, most, recent, latest, newest
     sort_desc_kw = re.search(
@@ -1265,40 +1329,74 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
     has_explicit_sort = bool(sort_asc_kw or sort_desc_kw)
     has_amount_sort   = (sort_desc_kw or sort_asc_kw) and amount_field
 
-    if first_match:
-        limit = 1
-        order = (f"NULLIF(document->>'{doc_date_field}','')::timestamptz ASC NULLS LAST"
-                 if doc_date_field else "updated_at ASC")
+    # Identifier field for "first/last by number" (invoice_number, deal name, etc.)
+    id_field = REGISTRY.get(table, "identifier", fields)
+
+    if ordinal_match and not first_match:
+        # "3rd invoice", "5th deal" → OFFSET n-1, LIMIT 1
+        n       = int(ordinal_match.group(1))
+        limit   = 1
+        _offset = max(0, n - 1)
+        order   = (f"NULLIF(document->>'{id_field}','') ASC NULLS LAST"
+                   if id_field else
+                   f"NULLIF(document->>'{doc_date_field}','')::timestamptz ASC NULLS LAST"
+                   if doc_date_field else "id ASC")
+        # inject OFFSET into sql below
+    elif first_match:
+        limit   = 1
+        _offset = 0
+        # Order by identifier ASC (invoice #1, deal A, etc.) — not by date
+        order   = (f"NULLIF(document->>'{id_field}','') ASC NULLS LAST"
+                   if id_field else
+                   f"NULLIF(document->>'{doc_date_field}','')::timestamptz ASC NULLS LAST"
+                   if doc_date_field else "id ASC")
+    elif last_match:
+        limit   = 1
+        _offset = 0
+        order   = (f"NULLIF(document->>'{id_field}','') DESC NULLS LAST"
+                   if id_field else
+                   f"NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+                   if doc_date_field else "id DESC")
+    elif last_n_match:
+        limit   = min(int(last_n_match.group(1)), 100)
+        _offset = 0
+        order   = _date_desc()
     elif top_match:
-        # "top N …" — N always sets the limit; sort direction sets order
-        limit = min(int(top_match.group(1)), 100)
-        order = (_amount_asc()  if sort_asc_kw  and amount_field else
-                 _amount_desc() if has_amount_sort               else
-                 _amount_desc() if amount_field                   else _date_desc())
+        limit   = min(int(top_match.group(1)), 100)
+        _offset = 0
+        order   = (_amount_asc()  if sort_asc_kw  and amount_field else
+                   _amount_desc() if has_amount_sort               else
+                   _amount_desc() if amount_field                   else _date_desc())
     elif bare_top and re.search(r"\b(invoice|deal|sales|order|customer)\b", text):
-        limit = 10
-        order = _amount_asc() if sort_asc_kw and amount_field else \
-                _amount_desc() if amount_field else _date_desc()
+        limit   = 10
+        _offset = 0
+        order   = _amount_asc() if sort_asc_kw and amount_field else \
+                  _amount_desc() if amount_field else _date_desc()
     elif sort_asc_kw and amount_field:
-        limit = 50
-        order = _amount_asc()
+        limit   = 50
+        _offset = 0
+        order   = _amount_asc()
     elif sort_desc_kw and amount_field and \
          re.search(r"\b(biggest|largest|most|highest|recent|latest|newest|descend)\b", text):
-        limit = 50
-        order = _amount_desc()
+        limit   = 50
+        _offset = 0
+        order   = _amount_desc()
     elif n_match:
-        num   = n_match.group(1) or n_match.group(2)
-        limit = min(int(num), 100) if num else 20
-        order = _date_desc()
+        limit   = min(int(n_match.group(1)), 100)
+        _offset = 0
+        order   = _date_desc()
     elif re.search(r"\ball\b", text):
-        limit = 100
-        order = _date_desc()
+        limit   = 100
+        _offset = 0
+        order   = _date_desc()
     elif wants_details:
-        limit = 100
-        order = _date_desc()
+        limit   = 100
+        _offset = 0
+        order   = _date_desc()
     else:
-        limit = 20
-        order = _date_desc()
+        limit   = 20
+        _offset = 0
+        order   = _date_desc()
 
     count_sql   = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
     _cnt_res    = run_sql(agent, count_sql)
@@ -1308,7 +1406,8 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
     total_rows  = _cnt_res.rows
     total_count = coerce_number(total_rows[0][0] if total_rows else 0)
 
-    sql      = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}".strip()
+    _offset_clause = f" OFFSET {_offset}" if _offset > 0 else ""
+    sql      = f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} ORDER BY {order} LIMIT {limit}{_offset_clause}".strip()
     _row_res = run_sql(agent, sql)
     if _row_res.error:
         return {"answer": "Unable to retrieve data at this time. Please try again.",
@@ -1829,14 +1928,15 @@ def _fp_overdue_aging(agent, user_query: str) -> Optional[Dict]:
     if "invoices" not in table_names:
         return None
 
-    links    = _SCHEMA_LINKS
-    has_co   = links.get("invoices", {}).get("company") == "companies"
+    # Always JOIN companies so we get readable names instead of ObjectIDs.
+    # company field in invoices stores the company's _id.
+    has_co   = "companies" in table_names
     co_join  = (
         'LEFT JOIN "companies" c ON c.document->>\'_id\' = i.document->>\'company\''
         if has_co else ""
     )
     co_col   = (
-        "COALESCE(c.document->>'companyName', i.document->>'company', 'Unknown')"
+        "COALESCE(c.document->>'companyName', c.document->>'name', i.document->>'company', 'Unknown')"
         if has_co else "COALESCE(i.document->>'company','Unknown')"
     )
     tbl_used = ["invoices"] + (["companies"] if has_co else [])
@@ -2138,14 +2238,13 @@ def _fp_pending_invoices(agent, user_query: str) -> Optional[Dict]:
     if "invoices" not in table_names:
         return None
 
-    links   = _SCHEMA_LINKS
-    has_co  = links.get("invoices", {}).get("company") == "companies"
+    has_co  = "companies" in table_names
     co_join = (
         'LEFT JOIN "companies" c ON c.document->>\'_id\' = i.document->>\'company\''
         if has_co else ""
     )
     co_col  = (
-        "COALESCE(c.document->>'companyName', i.document->>'company', 'Unknown')"
+        "COALESCE(c.document->>'companyName', c.document->>'name', i.document->>'company', 'Unknown')"
         if has_co else "COALESCE(i.document->>'company','Unknown')"
     )
 

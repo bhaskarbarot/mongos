@@ -259,7 +259,43 @@ def _build_sql(
 
     # ── find / lookup ─────────────────────────────────────────────────────────
     if action in ("find", "lookup"):
-        return 'SELECT * FROM "' + table + '" WHERE ' + where + ' LIMIT 10'
+        name_f  = REGISTRY.get(table, "name",       fields)
+        first_f = REGISTRY.get(table, "first_name",  fields)
+        last_f  = REGISTRY.get(table, "last_name",   fields)
+        email_f = REGISTRY.get(table, "email",       fields)
+        phone_f = REGISTRY.get(table, "phone",       fields)
+        title_f = REGISTRY.get(table, "title",       fields)
+        status_f= REGISTRY.get(table, "status",      fields)
+        owner_f = REGISTRY.get(table, "owner",       fields)
+
+        selects = []
+        if name_f:
+            selects.append(name_expr + " AS name")
+        elif first_f and last_f:
+            selects.append(
+                "TRIM(CONCAT(COALESCE(document->>'" + first_f + "',''),' ',"
+                "COALESCE(document->>'" + last_f + "',''))) AS name"
+            )
+        elif first_f:
+            selects.append("document->>'" + first_f + "' AS name")
+        if email_f:
+            selects.append("document->>'" + email_f + "' AS email")
+        if phone_f:
+            selects.append("document->>'" + phone_f + "' AS phone")
+        if title_f:
+            selects.append("document->>'" + title_f + "' AS title")
+        if status_f:
+            selects.append("document->>'" + status_f + "' AS status")
+        if owner_f:
+            selects.append("document->>'" + owner_f + "' AS owner")
+        if not selects:
+            selects = ["id"]
+
+        return (
+            'SELECT ' + ", ".join(selects)
+            + ' FROM "' + table + '" WHERE ' + where
+            + ' LIMIT 10'
+        )
 
     # ── top_n ─────────────────────────────────────────────────────────────────
     if action == "top_n":

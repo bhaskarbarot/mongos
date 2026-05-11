@@ -287,8 +287,23 @@ def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
                 return SqlResult(rows=raw)
 
             if isinstance(raw, str):
-                # Handle LangChain Decimal('...') serialization
+                # LangChain serialises Python objects into the result string.
+                # We normalise the three most common non-literal forms:
+                #   Decimal('123.45')        → '123.45'
+                #   datetime.date(Y, M, D)   → 'YYYY-MM-DD'
+                #   datetime.datetime(...)   → 'YYYY-MM-DD HH:MM:SS'
                 sanitized = re.sub(r"Decimal\('([^']+)'\)", r"'\1'", raw)
+                sanitized = re.sub(
+                    r"datetime\.datetime\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*\d+)?\)",
+                    lambda m: f"'{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d} "
+                              f"{int(m.group(4)):02d}:{int(m.group(5)):02d}'",
+                    sanitized,
+                )
+                sanitized = re.sub(
+                    r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)",
+                    lambda m: f"'{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}'",
+                    sanitized,
+                )
                 try:
                     parsed = ast.literal_eval(sanitized)
                     return SqlResult(rows=parsed if isinstance(parsed, list) else [])
