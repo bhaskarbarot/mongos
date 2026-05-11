@@ -45,7 +45,9 @@ _STOPWORDS = {
 }
 
 _PRONOUN_RE = re.compile(
-    r"\b(that|those|them|their|these|it|the same|above|previous|last|similar)\b",
+    r"\b(that|those|them|their|these|it|its|this|his|her|"
+    r"the same|above|previous|last|similar|aforementioned|"
+    r"such|same|said|given|respective)\b",
     re.IGNORECASE,
 )
 _BARE_ACTION_RE = re.compile(
@@ -123,10 +125,11 @@ class ChatMemory:
         self._max_history  = max_history
 
         # Layer 1: working memory
-        self.last_entity: Optional[str] = None
-        self.last_query:  str           = ""
-        self.last_count:  Optional[int] = None
-        self.last_tables: List[str]     = []
+        self.last_entity:     Optional[str] = None
+        self.last_query:      str           = ""
+        self.last_count:      Optional[int] = None
+        self.last_tables:     List[str]     = []
+        self.last_identifier: Optional[str] = None  # e.g. "ELSN/2025/1" for single-record results
 
         # Layer 2: episodic memory
         self.episodes: List[Episode] = []
@@ -155,6 +158,26 @@ class ChatMemory:
         if tables:
             self.last_tables = tables
 
+        # Extract last record identifier — ONLY for single-record results.
+        # Pattern: "**ELSN/2025/1**" or "reference ELSN/2025/1"
+        ans = result.get("answer", "")
+        sql_list = result.get("sql_queries", [])
+        _is_single = (
+            result.get("_count") == 1
+            or bool(re.search(r"LIMIT\s+1\b", " ".join(sql_list), re.I))
+            or bool(re.search(r"\b1\s+(?:invoice|deal|contact|company|task|record)\b", ans, re.I))
+        )
+        if _is_single:
+            _id_m = re.search(
+                r"\b([A-Z]{2,}/\d{4}/\d+)\b"           # invoice numbers like ELSN/2025/1
+                r"|\*\*([A-Z][A-Z0-9/\-]{3,20})\*\*",   # any bold reference code
+                ans,
+            )
+            if _id_m:
+                self.last_identifier = (_id_m.group(1) or _id_m.group(2)).strip()
+        else:
+            self.last_identifier = None  # clear when multiple records shown
+
         # Raw history
         summary_str = _extract_summary(result)
         self._history.append({"query": query, "answer": summary_str})
@@ -180,21 +203,93 @@ class ChatMemory:
 
     def resolve(self, query: str) -> str:
         """
-        Resolve pronouns and bare actions to the last known entity.
+        Multi-level context resolution:
 
-        'those deals' → works as-is
-        'them'        → 'them (referring to deals)'
-        'give me all' → 'give me all of deals'
+        Level 1 — Specific field on last record:
+            "give me that payment status" + last_identifier=ELSN/2025/1
+            → "payment status of ELSN/2025/1 in invoices"
+
+        Level 2 — Field on last entity:
+            "give me that status" + last_entity=invoices
+            → "status of invoices"
+
+        Level 3 — Pronoun → entity:
+            "show those" → "show those (referring to invoices)"
+
+        Level 4 — Bare action → entity:
+            "give me all" → "give me all of invoices"
         """
         if not self.last_entity:
             return query
         t = normalize_text(query)
 
+        # All pronouns that can precede a field name to mean "that/this [field]"
+        _FIELD_PRONOUNS = r"(?:that|this|its|his|her|their|these|those|the|such|said)"
+
+        # Known field semantic words — prevent table names / stopwords from
+        # accidentally triggering the field-resolution levels.
+        _FIELD_WORDS = {
+            "status", "payment", "payment status", "stage", "amount", "total",
+            "date", "name", "email", "phone", "owner", "details", "info",
+            "number", "invoice number", "type", "count", "value", "price",
+            "address", "region", "department", "team", "priority", "source",
+            "currency", "due date", "created", "updated", "assigned",
+        }
+        _tables_lower = {e.lower() for e in self.last_tables}
+
+        _LEADING_STOPWORDS = {"in", "of", "for", "by", "at", "on", "all", "a", "an", "the"}
+
+        def _is_valid_field(word: str) -> bool:
+            """Return True only when the extracted word looks like a field, not a table."""
+            w     = word.lower().strip()
+            parts = w.split()
+            # reject if the word itself is a stopword or table name
+            if w in _tables_lower or w in _LEADING_STOPWORDS:
+                return False
+            # reject if first sub-word is a preposition/stopword (e.g. "in paid")
+            if parts and parts[0] in _LEADING_STOPWORDS:
+                return False
+            if len(w) < 3:
+                return False
+            return True
+
+        # Level 1: "give me that/this/its [field]" with known last record identifier
+        if self.last_identifier:
+            field_ref = re.search(
+                r"\b(?:give\s+me|show|get|what(?:'?s|\s+is)|tell\s+me)?\s*"
+                + _FIELD_PRONOUNS + r"\s+(\w+(?:\s+\w+)?)\s*\??$",
+                t,
+            )
+            if field_ref:
+                field_word = field_ref.group(1).strip()
+                if _is_valid_field(field_word):
+                    resolved = (
+                        f"{field_word} of {self.last_identifier} "
+                        f"from {self.last_entity}"
+                    )
+                    LOGGER.debug("Memory: field+id resolved '%s' → '%s'", query, resolved)
+                    return resolved
+
+        # Level 2: "give me that/this [field]" — field breakdown on last entity
+        field_ref2 = re.search(
+            r"\b(?:give\s+me|show|get)?\s*" + _FIELD_PRONOUNS
+            + r"\s+(\w+(?:\s+\w+)?)\s*\??$",
+            t,
+        )
+        if field_ref2 and self.last_entity:
+            field_word = field_ref2.group(1).strip()
+            if _is_valid_field(field_word):
+                resolved = f"show {self.last_entity} by {field_word}"
+                LOGGER.debug("Memory: field resolved '%s' → '%s'", query, resolved)
+                return resolved
+
+        # Level 3: pronoun → entity
         if _PRONOUN_RE.search(t):
             resolved = f"{query} (referring to {self.last_entity})"
             LOGGER.debug("Memory: pronoun resolved '%s' → '%s'", query, resolved)
             return resolved
 
+        # Level 4: bare action → entity
         if _BARE_ACTION_RE.match(t) and self.last_entity:
             resolved = f"{query} of {self.last_entity}"
             LOGGER.debug("Memory: bare action resolved '%s' → '%s'", query, resolved)

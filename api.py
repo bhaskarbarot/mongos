@@ -248,6 +248,73 @@ def _extract_structured_data(result: dict) -> Optional[Any]:
     return None
 
 
+# ── Memory rebuild helper ────────────────────────────────────────────────────
+
+# Entity keyword → table name (for inferring entity from answer text)
+_ANSWER_ENTITY_RE = [
+    (re.compile(r"\binvoices?\b",              re.I), "invoices"),
+    (re.compile(r"\bbills?\b",                 re.I), "bills"),
+    (re.compile(r"\bdeals?\b",                 re.I), "deals"),
+    (re.compile(r"\bcontacts?\b",              re.I), "contacts"),
+    (re.compile(r"\bcompan(?:y|ies)\b",        re.I), "companies"),
+    (re.compile(r"\btasks?\b",                 re.I), "createtasks"),
+    (re.compile(r"\busers?\b",                 re.I), "users"),
+    (re.compile(r"\btargets?\b",               re.I), "targets"),
+    (re.compile(r"\bsales?\b",                 re.I), "sales"),
+    (re.compile(r"\bdepartments?\b",           re.I), "departments"),
+]
+
+
+def _infer_entity(text: str) -> Optional[str]:
+    """Return the most-mentioned entity name from an answer string."""
+    counts: Dict[str, int] = {}
+    for pat, entity in _ANSWER_ENTITY_RE:
+        n = len(pat.findall(text))
+        if n:
+            counts[entity] = n
+    return max(counts, key=counts.get) if counts else None
+
+
+def _rebuild_memory(mem: ConversationMemory, history: List[ChatMessage]) -> None:
+    """
+    Replay conversation history into ChatMemory so pronoun resolution and
+    episodic matching work across requests.
+
+    The React frontend sends the full history on every POST /chat, so we
+    reconstruct the memory state by iterating user/assistant pairs.
+    We limit to the last 10 exchanges to keep it fast (no LLM call here).
+    """
+    # Pair up user → assistant messages
+    pairs: List[tuple] = []
+    i = 0
+    msgs = list(history)
+    while i < len(msgs):
+        if msgs[i].role == "user":
+            user_content = msgs[i].content
+            asst_content = ""
+            if i + 1 < len(msgs) and msgs[i + 1].role == "assistant":
+                asst_content = msgs[i + 1].content
+                i += 2
+            else:
+                i += 1
+            pairs.append((user_content, asst_content))
+        else:
+            i += 1
+
+    # Replay last 10 pairs into memory (oldest first so state is correct at end)
+    for user_q, asst_a in pairs[-10:]:
+        entity = _infer_entity(asst_a)
+        # Build a synthetic result dict that mem.update() can consume
+        synthetic = {
+            "answer":      asst_a,
+            "tables_used": [entity] if entity else [],
+            "layer":       "history",
+            "confidence":  0.85,
+            "sql_queries": [],
+        }
+        mem.update(user_q, synthetic, success=True)
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -319,12 +386,11 @@ async def chat(req: ChatRequest, request: Request):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    # Per-request ConversationMemory — history is passed each time so we
-    # only need the last assistant message to seed the entity reference.
+    # Rebuild ChatMemory from conversation history so pronoun resolution,
+    # episodic matching, and "give me that X" all work correctly.
+    # Without this, every request gets a fresh memory and context is lost.
     mem = ConversationMemory()
-    for msg in req.history[-6:]:
-        if msg.role == "assistant":
-            pass  # ConversationMemory resolves pronouns; full rebuild not needed
+    _rebuild_memory(mem, req.history)
 
     LOGGER.info("[RID:%s] POST /chat | query: %.80s", request_id, req.query)
     t0 = time.perf_counter()

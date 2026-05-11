@@ -748,29 +748,34 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
         "companies": ["leadStatus", "lifecycleStage", "status", "category"],
     }
 
-    # Step 1 — explicitly mentioned entity table (highest priority)
+    # Step 1 — explicitly mentioned entity table (first-mentioned in query wins)
+    best_pos = len(text) + 1
+    candidates = []
     for t in table_names:
         tl = t.lower()
-        mentioned = re.search(rf"\b{re.escape(tl)}\b", text) or (
-            tl.endswith("s") and re.search(rf"\b{re.escape(tl[:-1])}\b", text)
-        )
-        if not mentioned:
-            continue
-        fields = get_document_fields(agent, t)
-        fl_lower = {f.lower(): f for f in fields}
-        # Exact match first (e.g. "stage" must not pick "Pre_stage")
-        exact = next((f for f in fields if f.lower() == group_kw), None)
-        match = exact or next((f for f in fields if group_kw in f.lower()), None)
+        m  = re.search(rf"\b{re.escape(tl)}\b", text)
+        if not m and tl.endswith("s"):
+            m = re.search(rf"\b{re.escape(tl[:-1])}\b", text)
+        if m and m.start() < best_pos:
+            best_pos = m.start()
+            candidates = [(t, m.start())]
+        elif m and m.start() == best_pos:
+            candidates.append((t, m.start()))
+
+    for cand_table, _ in candidates:
+        tl     = cand_table.lower()
+        fields = get_document_fields(agent, cand_table)
+        exact  = next((f for f in fields if f.lower() == group_kw), None)
+        match  = exact or next((f for f in fields if group_kw in f.lower()), None)
         if match:
-            table, group_field = t, match
+            table, group_field = cand_table, match
             break
-        # Check semantic alias (e.g. "status" → "stage" for deals)
         alias_field_kw = _ENTITY_FIELD_MAP.get(tl, {}).get(group_kw)
         if alias_field_kw:
             alias_match = next((f for f in fields if f.lower() == alias_field_kw
                                 or alias_field_kw in f.lower()), None)
             if alias_match:
-                table, group_field = t, alias_match
+                table, group_field = cand_table, alias_match
                 break
 
     # Step 2 — no explicitly mentioned table: search all tables
@@ -1115,7 +1120,9 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
     }
     _groupby_field: Optional[str] = None
     _groupby_alias: str           = ""
-    _with_groupby = re.search(r"\bwith\s+(\w+)", text)
+    # "with list" / "as list" / "list them" → user wants individual records, skip groupby
+    _wants_list   = bool(re.search(r"\bwith\s+list\b|\bas\s+list\b|\blist\s+them\b|\bwith\s+details?\b", text))
+    _with_groupby = re.search(r"\bwith\s+(\w+)", text) if not _wants_list else None
     if _with_groupby:
         kw = _with_groupby.group(1).lower()
         for pattern, (role, alias) in _GROUPBY_KEYWORDS.items():
@@ -1708,6 +1715,73 @@ ORDER BY NULLIF(t.document->>'year','')::int DESC,
         "tables_used": ["targets", "users"] + (["sales"] if sales_exists else []),
         "confidence":  0.97,
         "sql_queries": [sql],
+    }
+
+
+def _fp_name_of_entity(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'name(s) of X' / 'give me X names' — list an entity by name.
+
+    Examples:
+        "name of departments"    → list all department names
+        "give me names of users" → list all user names
+        "name of departmentts"   → typo-tolerant, still finds departments
+    """
+    text = normalize_text(user_query)
+    m = re.search(
+        r"\bnames?\s+of\s+(\w+)"               # "name of departments"
+        r"|\bgive\s+me\s+(\w+)\s+names?\b"      # "give me department names"
+        r"|\blist\s+(?:all\s+)?(\w+)\s+names?\b", # "list department names"
+        text, re.I,
+    )
+    if not m:
+        return None
+
+    raw_word = next(g for g in m.groups() if g)
+
+    table_names = get_table_names(agent)
+    tl_map      = {t.lower(): t for t in table_names}
+
+    # 1. Exact / plural / singular match
+    target_table: Optional[str] = None
+    for variant in [raw_word, raw_word.rstrip("s"), raw_word + "s",
+                    re.sub(r"(.)\1+", r"\1", raw_word)]:  # deduplicate letters (typo)
+        if variant in tl_map:
+            target_table = tl_map[variant]
+            break
+
+    if not target_table:
+        target_table = resolve_entity_table(raw_word, table_names, user_query)
+    if not target_table:
+        # last resort: fuzzy — remove duplicate consecutive chars ("departmentts" → "departments")
+        cleaned = re.sub(r"(.)\1+", r"\1", raw_word)
+        target_table = resolve_entity_table(cleaned, table_names, user_query)
+    if not target_table:
+        return None
+
+    fields    = get_document_fields(agent, target_table)
+    name_expr = REGISTRY.display_name_expr(target_table, fields)
+    sql       = (
+        f'SELECT DISTINCT {name_expr} AS name '
+        f'FROM "{target_table}" '
+        f"WHERE COALESCE(document->>'deleted','false') != 'true' "
+        f'ORDER BY name LIMIT 100'
+    )
+    _res = run_sql(agent, sql)
+    if _res.error or not _res.rows:
+        return None
+
+    names = [str(r[0]).strip() for r in _res.rows if r[0]]
+    if not names:
+        return None
+
+    lines = "\n".join(f"- {n}" for n in names)
+    return {
+        "answer":      f"**{target_table.title()} ({len(names)} total):**\n\n{lines}",
+        "tables_used": [target_table],
+        "confidence":  0.95,
+        "sql_queries": [sql],
+        "_entity":     target_table,
+        "_count":      len(names),
     }
 
 
@@ -2356,7 +2430,14 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
     canonical = _STATUS_SYNONYMS.get(status_raw.lower(), status_raw.lower())
 
     table_names = get_table_names(agent)
-    inv_table   = next((t for t in table_names if t.lower() == "invoices"), None)
+    # Use "bills" table when user explicitly says "bill/bills" and not "invoice"
+    _wants_bills = re.search(r"\bbills?\b|\bbilling\b", text) and not re.search(r"\binvoices?\b", text)
+    if _wants_bills:
+        inv_table = next((t for t in table_names if t.lower() == "bills"), None)
+    if not _wants_bills or not inv_table:
+        inv_table = next((t for t in table_names if t.lower() == "invoices"), None)
+    if not inv_table:
+        inv_table = find_revenue_table(table_names)
     if not inv_table:
         return None
 
@@ -2448,9 +2529,10 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
                 "tables_used": [inv_table], "confidence": 0.0, "sql_queries": [count_sql, list_sql]}
     rows = _rows.rows
 
+    entity_label = inv_table.title()
     if not rows:
         return {
-            "answer":      f"No **{display_label}** invoices found.",
+            "answer":      f"No **{display_label}** {entity_label} found.",
             "tables_used": [inv_table],
             "confidence":  0.9,
             "sql_queries": [count_sql, list_sql],
@@ -2465,7 +2547,7 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
         lines.append(f"_…and {len(rows)-30} more_")
 
     return {
-        "answer":      f"**{display_label} Invoices — {fmt_number(count)} total:**\n\n" + "\n".join(lines),
+        "answer":      f"**{display_label} {entity_label} — {fmt_number(count)} total:**\n\n" + "\n".join(lines),
         "tables_used": [inv_table],
         "confidence":  0.96,
         "sql_queries": [count_sql, list_sql],
@@ -3939,6 +4021,7 @@ _SPECIALIZED: Dict[str, Any] = {
 
 # General handlers tried in priority order when no specialized route matched
 _GENERAL = [
+    _fp_name_of_entity,   # before search — "name of departments" → list, not person search
     _fp_sales,            # before revenue — catches "sales orders" explicitly
     _fp_revenue,
     _fp_top_customers,
