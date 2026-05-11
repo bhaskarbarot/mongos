@@ -11,7 +11,7 @@ Production-grade schema layer providing:
 All caches are module-level singletons, populated lazily on first access.
 
 Public API:
-    run_sql(agent, sql)                     -> List[Any]
+    run_sql(agent, sql)                     -> SqlResult
     get_table_names(agent)                  -> List[str]
     get_document_fields(agent, table)       -> List[str]
     discover_schema_links(agent)            -> Dict[str, Dict[str, str]]
@@ -328,19 +328,6 @@ def _is_cache_stale() -> bool:
     return (time.time() - _SCHEMA_TIMESTAMP) > _SCHEMA_TTL_SECONDS
 
 
-def invalidate_schema_cache() -> None:
-    """Force refresh of all schema caches on next access."""
-    global _TABLE_NAMES_CACHE, _TABLE_FIELDS_CACHE, _SCHEMA_LINKS
-    global _TEXT2SQL_SCHEMA_CACHE, _SCHEMA_TIMESTAMP
-    with _CACHE_LOCK:
-        _TABLE_NAMES_CACHE    = []
-        _TABLE_FIELDS_CACHE   = {}
-        _SCHEMA_LINKS         = {}
-        _TEXT2SQL_SCHEMA_CACHE = ""
-        _SCHEMA_TIMESTAMP     = 0.0
-        REGISTRY.invalidate()
-    LOGGER.info("Schema caches invalidated")
-
 
 def get_table_names(agent) -> List[str]:
     """Return sorted list of all table names. Cached with TTL.
@@ -408,14 +395,6 @@ def get_document_fields(agent, table: str) -> List[str]:
 
     return _TABLE_FIELDS_CACHE[table]
 
-
-def get_table_row_count(agent, table: str) -> int:
-    """Quick row count for a table (used for schema context)."""
-    try:
-        _res = run_sql(agent, f'SELECT COUNT(*)::int FROM "{table}"')
-        return int(_res.rows[0][0]) if _res.rows and _res.rows[0] else 0
-    except Exception:
-        return 0
 
 
 # ══════════════════════════════════════════════════════════════════════════════

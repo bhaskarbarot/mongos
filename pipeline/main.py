@@ -445,22 +445,3 @@ def run(
             "metrics":     metrics,
         }
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VALIDATION HELPER
-# ══════════════════════════════════════════════════════════════════════════════
-
-def validate_response(answer: str, user_query: str) -> bool:
-    """Return True if the response adequately answers the query."""
-    ans_lower = answer.lower()
-    empty_signals = [
-        "no data found", "no records found", "no invoice",
-        "could not find", "unable to complete", "no answer", "data unavailable",
-    ]
-    if not any(s in ans_lower for s in empty_signals):
-        return True
-    if re.search(r"[A-Z]{2,}/\d{4}/\d+", user_query, re.I):
-        return False
-    if re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,}\b", user_query):
-        return False
-    return True

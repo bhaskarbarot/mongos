@@ -81,12 +81,10 @@ def main() -> None:
         with st.spinner("Thinking..."):
             result = run_agent_query(agent, prompt, memory=memory)
         st.markdown(result["answer"])
-        cache_badge = f" | Cache: {result['cache_similarity']:.0f}% match" if result.get("from_cache") else ""
         st.caption(
             f"Latency: {result['latency_ms']} ms | "
             f"Confidence: {result['confidence']:.2f} | "
             f"Tables: {', '.join(result['tables_used']) if result['tables_used'] else 'None'}"
-            + cache_badge
         )
         if result.get("_sub_results"):
             with st.expander("Query Plan & Sub-results"):
