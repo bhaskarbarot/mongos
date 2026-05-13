@@ -401,13 +401,21 @@ def is_vague_query(text: str) -> bool:
     t = normalize_text(text)
     if len(t.split()) > 2:
         return False
-    # Allow: count/list/show/get/total keywords
-    if re.search(r"\b(count|list|show|get|total|give|fetch|display|find|search)\b", t):
+    # Allow: action + analytical keywords
+    if re.search(
+        r"\b(count|list|show|get|total|give|fetch|display|find|search"
+        r"|pipeline|funnel|revenue|performance|conversion|rate|trend"
+        r"|summary|report|analysis|breakdown|overview|kpi|dashboard"
+        r"|overdue|pending|top|compare|ratio|aging|forecast)\b", t,
+    ):
         return False
     # Allow: known entity + status combinations e.g. "pending invoices", "active customers"
-    _ENTITY_WORDS = r"\b(invoice|deal|contact|company|task|user|sale|order|lead|target|region|product|customer|client|account)\b"
+    _ENTITY_WORDS = r"\b(invoice|deal|contact|company|task|user|sale|order|lead|target|region|product|customer|client|account|meeting)\b"
     _STATUS_WORDS  = r"\b(paid|unpaid|pending|approved|rejected|completed|open|closed|won|lost|draft|cancelled|overdue|active|inactive)\b"
     if re.search(_ENTITY_WORDS, t) or re.search(_STATUS_WORDS, t):
+        return False
+    # Allow: business record numbers — SO12345, ELSN, ELS042, SO00080
+    if re.search(r"\b(SO\d+|ELSN|ELS\d+)\b", text, re.I):
         return False
     return True
 

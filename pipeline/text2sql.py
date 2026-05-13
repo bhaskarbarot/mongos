@@ -122,11 +122,13 @@ def _build_prompt(query: str, schema: str, retry_hint: str = "") -> str:
         f"Question: {query}\n\n"
         "Write ONLY the SQL query. No explanation, no markdown, no text before or after.\n"
         "Rules:\n"
-        "- Use document->>'fieldName' for ALL field access\n"
-        "- Use NULLIF(document->>'field','')::numeric for numbers\n"
-        "- Use NULLIF(document->>'field','')::timestamptz for dates\n"
-        "- Use table names in double quotes: FROM \"tableName\"\n"
-        "- Add COALESCE(document->>'deleted','false')!='true' to filter deleted records\n"
+        "- Use DIRECT column names — NOT document->>'field'\n"
+        "- Numbers (NUMERIC): WHERE grand_total_in_usd > 1000\n"
+        "- Booleans (BOOLEAN): WHERE deleted = false OR deleted IS NULL\n"
+        "- Date strings (TEXT): WHERE \"closeDate\" > '2025-01-01'\n"
+        "- Mixed-case columns: always double-quote: \"closeDate\", \"createdAt\"\n"
+        "- Table names in double quotes: FROM \"tableName\"\n"
+        "- Soft-delete: WHERE deleted = false OR deleted IS NULL\n"
         "- Use ILIKE for text matching\n"
         "- Output ONLY a SELECT statement\n\n"
         "SQL:"
@@ -146,7 +148,7 @@ def _build_retry_prompt(
         f"Previous SQL attempt (FAILED):\n{prev_sql}\n\n"
         f"Error: {error}\n\n"
         "Fix the SQL. Output ONLY the corrected SELECT statement. "
-        "Remember: use document->>'field' for all field access.\n\n"
+        "Use direct column names (NOT document->>'field').\n\n"
         "SQL:"
     )
 
@@ -232,16 +234,9 @@ def _validate_sql(sql: str, table_names: Optional[List[str]] = None) -> Tuple[bo
     if re.search(r"\bSTRFTIME\b|\bSQLITE\b", sql, re.I):
         return False, "wrong dialect: SQLite function used"
 
-    # Bare column access (should use document->>)
-    bare_cols = re.findall(
-        r"\b[a-z]\.(owner|stage|name|company|email|status|currency|amount|"
-        r"createdAt|updatedAt|closeDate|invoice_number|grand_total|"
-        r"payment_status|due_date|dealWonAt|dealLostAt|"
-        r"firstName|lastName|companyName|phoneNumber)\b",
-        sql, re.I,
-    )
-    if bare_cols:
-        return False, f"bare column access (use document->>): {bare_cols[:3]}"
+    # Block old JSONB syntax — direct column access is now correct
+    if re.search(r"document\s*->>'", sql, re.I):
+        return False, "old JSONB syntax detected: use direct column names instead of document->>'field'"
 
     # Table name validation (if table list provided)
     if table_names:
@@ -297,10 +292,10 @@ def _extract_column_headers(sql: str) -> List[str]:
         if as_m:
             clean_headers.append(as_m.group(1))
             continue
-        # document->>'field' without alias
-        doc_m = re.search(r"document->>'(\w+)'\s*$", expr)
-        if doc_m:
-            clean_headers.append(doc_m.group(1))
+        # bare column name "field" or field without alias
+        bare_m = re.search(r'^"?(\w+)"?\s*$', expr.strip())
+        if bare_m:
+            clean_headers.append(bare_m.group(1))
             continue
         # COUNT/SUM/AVG etc.
         agg_m = re.search(r"^(COUNT|SUM|AVG|MIN|MAX)\s*\(", expr, re.I)

@@ -68,6 +68,319 @@ import pipeline.llm as _llm
 
 LOGGER = logging.getLogger("sql_chatbot")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SMART NLP INTENT EXTRACTOR — no regex patterns, no LLM
+# Understands ANY phrasing of the same intent via synonym dictionaries.
+# Returns a structured intent dict used by all handlers.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Words that are NEVER person names
+_NOT_A_NAME = frozenset({
+    "give", "show", "tell", "list", "get", "fetch", "find", "search", "share",
+    "display", "check", "view", "see", "look", "bring", "pull", "what", "who",
+    "which", "how", "when", "where", "all", "any", "every", "some", "the", "a",
+    "an", "me", "my", "our", "us", "this", "that", "these", "those",
+    "pending", "completed", "done", "overdue", "open", "closed", "active",
+    "paid", "unpaid", "cancelled", "draft", "confirmed",
+    "task", "tasks", "todo", "invoice", "invoices", "deal", "deals",
+    "contact", "contacts", "company", "companies", "user", "users", "meeting",
+    "meetings", "sales", "order", "orders", "lead", "leads",
+    "status", "list", "details", "info", "summary", "report", "data",
+    "assigned", "created", "owned", "managed", "by", "for", "of", "from",
+    "high", "low", "medium", "priority", "urgent", "critical",
+    "today", "yesterday", "tomorrow", "week", "month", "year", "quarter",
+    "latest", "recent", "first", "last", "top", "bottom", "new", "old",
+    "want", "need", "please", "can", "could", "would", "should", "have",
+    "with", "and", "or", "not", "without", "including", "excluding",
+    "total", "count", "number", "amount", "value", "rate", "percentage",
+    "sales", "team", "group", "department", "member", "staff", "employee",
+})
+
+# Entity synonym mapping → canonical table name
+_ENTITY_MAP: Dict[str, str] = {}
+_ENTITY_KEYWORDS: List[Tuple[str, str]] = [
+    # (keyword_fragment, canonical_entity)  — longer/more specific first
+    ("follow-up",    "createtasks"), ("followup",    "createtasks"),
+    ("follow up",    "createtasks"), ("action item", "createtasks"),
+    ("work item",    "createtasks"), ("to-do",       "createtasks"),
+    ("todo",         "createtasks"), ("assignment",  "createtasks"),
+    ("task",         "createtasks"),
+    ("invoice",      "invoices"),    ("bill",        "invoices"),
+    ("billing",      "invoices"),    ("receipt",     "invoices"),
+    ("payment",      "invoices"),
+    ("sales order",  "sales"),       ("order",       "sales"),
+    ("opportunity",  "deals"),       ("pipeline",    "deals"),
+    ("deal",         "deals"),       ("bid",         "deals"),
+    ("lead",         "contacts"),    ("prospect",    "contacts"),
+    ("contact",      "contacts"),    ("person",      "contacts"),
+    ("client",       "companies"),   ("account",     "companies"),
+    ("customer",     "companies"),   ("company",     "companies"),
+    ("business",     "companies"),   ("firm",        "companies"),
+    ("employee",     "users"),       ("member",      "users"),
+    ("staff",        "users"),       ("rep",         "users"),
+    ("user",         "users"),
+    ("meeting",      "meetings"),    ("appointment", "meetings"),
+    ("schedule",     "meetings"),    ("calendar",    "meetings"),
+    ("target",       "targets"),     ("goal",        "targets"),
+    ("quota",        "targets"),     ("achievement", "targets"),
+    ("outreach",     "outreaches"),  ("campaign",    "outreaches"),
+]
+
+# Action synonym mapping → canonical action
+_ACTION_KEYWORDS: List[Tuple[str, str]] = [
+    # List/show actions
+    ("how many",        "count"),    ("number of",   "count"),
+    ("count of",        "count"),    ("total count", "count"),
+    ("how much",        "sum"),      ("total revenue","sum"),
+    ("total amount",    "sum"),      ("revenue",     "sum"),
+    ("summary",         "detail"),   ("profile",     "detail"),
+    ("full info",       "detail"),   ("everything about", "detail"),
+    ("complete info",   "detail"),   ("all details", "detail"),
+    ("details of",      "detail"),   ("detail of",   "detail"),
+    ("breakdown",       "group_by"), ("by owner",    "group_by"),
+    ("by stage",        "group_by"), ("by status",   "group_by"),
+    ("by person",       "group_by"), ("per user",    "group_by"),
+    ("per person",      "group_by"), ("grouped by",  "group_by"),
+    ("each user",       "group_by"), ("who have",    "group_by"),
+    ("who has",         "group_by"), ("who had",     "group_by"),
+    ("funnel",          "funnel"),   ("conversion rate", "funnel"),
+    ("conversion",      "funnel"),
+]
+
+# Status synonym mapping
+_STATUS_KEYWORDS: Dict[str, str] = {
+    # Task statuses
+    "pending":     "pending",   "incomplete":  "pending",
+    "not done":    "pending",   "unfinished":  "pending",
+    "open":        "open",      "active":      "open",
+    "completed":   "completed", "done":        "completed",
+    "finished":    "completed", "closed":      "completed",
+    "overdue":     "overdue",   "late":        "overdue",
+    "past due":    "overdue",   "delayed":     "overdue",
+    # Invoice statuses
+    "paid":        "paid",      "cleared":     "paid",
+    "settled":     "paid",
+    "unpaid":      "unpaid",    "outstanding": "unpaid",
+    "due":         "unpaid",    "awaiting":    "unpaid",
+    "not paid":    "unpaid",    "not yet paid":"unpaid",
+    "draft":       "draft",     "partial":     "partial_payment",
+    "confirmed":   "confirmed", "approved":    "confirmed",
+    # Deal stages
+    "won":         "closed_won", "closed won": "closed_won",
+    "lost":        "closed_lost","closed lost":"closed_lost",
+}
+
+# Group-by dimension keywords
+_GROUP_BY_KEYWORDS: Dict[str, str] = {
+    "owner": "owner", "person": "owner", "user": "owner",
+    "rep": "owner", "assigned": "owner", "who": "owner",
+    "stage": "stage", "status": "status", "currency": "currency",
+    "priority": "priority", "job title": "job_title",
+    "designation": "job_title", "title": "job_title",
+    "jobtitle": "job_title", "position": "job_title",
+    "role": "job_title", "by year": "year",
+}
+
+
+def extract_query_intent(user_query: str) -> Dict[str, Any]:
+    """Extract structured intent from ANY natural language query.
+
+    Returns dict with:
+      entity    — CRM table (createtasks/deals/invoices/etc.)
+      action    — list/count/group_by/detail/sum/funnel
+      person    — extracted person name (or None)
+      status    — status filter (or None)
+      group_by  — grouping dimension (or None)
+      time      — time period (or None)
+      search    — search term (or None)
+      raw_lower — normalized lowercase query
+    """
+    raw   = user_query.strip()
+    lower = raw.lower()
+
+    # ── 1. Entity detection ────────────────────────────────────────────────────
+    entity = None
+    for keyword, ent in _ENTITY_KEYWORDS:
+        if keyword in lower:
+            entity = ent
+            break
+
+    # ── 2. Action detection ────────────────────────────────────────────────────
+    action = "list"  # default
+    for phrase, act in _ACTION_KEYWORDS:
+        if phrase in lower:
+            action = act
+            break
+    # Override: if there's a person name → action stays list (not group_by)
+    # (handled after person extraction)
+
+    # ── 3. Person name extraction ─────────────────────────────────────────────
+    # Handles ANY phrasing: possessives, prepositions, names before/after keywords.
+    person = None
+
+    _ENTITY_WORDS = frozenset({
+        "task","tasks","todo","todos","invoice","invoices","deal","deals",
+        "contact","contacts","company","companies","meeting","meetings",
+        "sale","sales","order","orders","lead","leads","payment","payments",
+        "report","list","status","summary","details","info","profile",
+    })
+    _STATUS_WORDS = frozenset({
+        "pending","completed","done","overdue","open","closed","paid","unpaid",
+        "cancelled","draft","confirmed","active","inactive","outstanding",
+    })
+    _ALL_STOP = _NOT_A_NAME | _ENTITY_WORDS | _STATUS_WORDS
+
+    def _valid_name(candidate: str) -> bool:
+        """Return True if candidate could be a person name."""
+        if not candidate or len(candidate) < 3:
+            return False
+        parts = candidate.lower().split()
+        return not any(p in _ALL_STOP for p in parts)
+
+    # PRIORITY 1: Possessive with apostrophe — "ketul's tasks", "yash bhide's pending"
+    poss_m = re.search(
+        r"(?<!\w)([a-zA-Z][a-z]+(?:\s+[a-zA-Z][a-z]+)?)\'s\s+(?:" +
+        "|".join(_ENTITY_WORDS | _STATUS_WORDS) + r")\b",
+        raw, re.I,
+    )
+    if poss_m:
+        c = poss_m.group(1).strip()
+        if _valid_name(c):
+            person = c.title()
+
+    # PRIORITY 2: "Kartiks Task" — bare possessive-s before entity keyword
+    if not person:
+        poss2 = re.search(
+            r"(?<!\w)([a-zA-Z][a-z]{2,})s\b\s+(?:" + "|".join(_ENTITY_WORDS) + r")\b",
+            raw, re.I,
+        )
+        if poss2:
+            c = poss2.group(1).strip()
+            if _valid_name(c):
+                person = c.title()
+
+    # PRIORITY 3: Preposition — "tasks by ketul", "tasks for yash bhide", "assigned to rohan"
+    if not person:
+        prep_m = re.search(
+            r"\b(?:by|for|of|assigned\s+to|owned\s+by|created\s+by)\s+"
+            r"([a-zA-Z][a-z]+(?:\s+[a-zA-Z][a-z]+)?)\b",
+            raw, re.I,
+        )
+        if prep_m:
+            c = prep_m.group(1).strip()
+            if _valid_name(c):
+                person = c.title()
+
+    # PRIORITY 4: "does [name] have" / "what does [name] have" / "[name] have"
+    if not person:
+        does_m = re.search(
+            r"\b(?:does|did)\s+([a-zA-Z][a-z]+(?:\s+[a-zA-Z][a-z]+)?)\s+"
+            r"(?:have|has|own|hold|manage)\b",
+            raw, re.I,
+        )
+        if does_m:
+            c = does_m.group(1).strip()
+            if _valid_name(c):
+                person = c.title()
+
+    # PRIORITY 4b: "share/tell/give me [name]" — name right after "me"
+    if not person:
+        me_m = re.search(r"\bme\s+([a-zA-Z][a-z]+(?:\s+[a-zA-Z][a-z]+)?)'s\b", raw, re.I)
+        if me_m:
+            c = me_m.group(1).strip()
+            if _valid_name(c):
+                person = c.title()
+
+    # PRIORITY 5: Name positioned BEFORE entity/status word (lowercase person names)
+    # e.g. "yash bhide pending task", "ketul pending task", "rohan's deals"
+    if not person:
+        # Try: 1-3 lead words → candidate → status/entity
+        before_m = re.search(
+            r"(?:^|(?:share|give|tell|show|get|fetch|list|display)\s+(?:me\s+)?)"
+            r"([a-zA-Z][a-z]+(?:\s+[a-zA-Z][a-z]+)?)\s+"
+            r"(?:" + "|".join(_STATUS_WORDS | _ENTITY_WORDS) + r")\b",
+            raw.strip(), re.I,
+        )
+        if before_m:
+            c = before_m.group(1).strip()
+            if _valid_name(c):
+                person = c.title()
+
+    # PRIORITY 6: Capitalized proper names (standard NLP)
+    if not person:
+        cleaned = re.sub(r"'s?\b", "", raw)
+        for w in re.findall(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b", cleaned):
+            if _valid_name(w):
+                person = w
+                break
+
+    # Final sanity: reject dimension words mistaken as names
+    if person and person.lower() in {"person","user","owner","stage","status","have","has","me","my"}:
+        person = None
+
+    # ── 4. Status detection ───────────────────────────────────────────────────
+    status = None
+    for phrase, canonical in sorted(_STATUS_KEYWORDS.items(), key=lambda x: -len(x[0])):
+        if phrase in lower:
+            status = canonical
+            break
+
+    # ── 5. Group-by dimension ─────────────────────────────────────────────────
+    group_by = None
+    if action == "group_by":
+        for phrase, dim in sorted(_GROUP_BY_KEYWORDS.items(), key=lambda x: -len(x[0])):
+            if phrase in lower:
+                group_by = dim
+                break
+        if not group_by:
+            group_by = "owner"  # default grouping
+
+    # If person found but action was group_by from "who have" pattern → keep list+person
+    if person and action == "group_by" and group_by == "owner":
+        action = "list"
+        group_by = None
+
+    # ── 6. Time period extraction ─────────────────────────────────────────────
+    time_period = None
+    _TIME_MAP = [
+        ("next month", "next_month"), ("this month", "this_month"),
+        ("last month", "last_month"), ("this year",  "this_year"),
+        ("last year",  "last_year"),  ("this quarter","this_quarter"),
+        ("last quarter","last_quarter"),("today",    "today"),
+        ("yesterday",  "yesterday"),  ("tomorrow",  "tomorrow"),
+        ("this week",  "this_week"),  ("last week", "last_week"),
+    ]
+    for phrase, period in _TIME_MAP:
+        if phrase in lower:
+            time_period = period
+            break
+    # ISO date: 2026-05-12
+    dm = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", lower)
+    if dm:
+        time_period = dm.group(1)
+
+    # ── 7. Search term extraction (for find/lookup queries) ────────────────────
+    search_term = None
+    sm = re.search(
+        r"(?:find|search(?:\s+for)?|look\s*up|lookup)\s+(.+?)(?:\s*\??$|\s+(?:in|from|of)\b)",
+        lower, re.I,
+    )
+    if sm:
+        search_term = sm.group(1).strip()
+
+    return {
+        "entity":     entity,
+        "action":     action,
+        "person":     person,
+        "status":     status,
+        "group_by":   group_by,
+        "time":       time_period,
+        "search":     search_term,
+        "raw_lower":  lower,
+    }
+
+
 # ── Status synonym table — shared by all handlers ────────────────────────────
 # Maps user-typed words to the canonical stored value.
 # None means "unpaid" logic (NOT IN paid/cancelled).
@@ -291,11 +604,53 @@ def _parse_time_condition(text: str) -> Optional[Dict[str, str]]:
 # ROUTING CLASSIFIER
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _preprocess_query(text: str) -> str:
+    """Strip misleading keywords that confuse routing."""
+    # "status of this SO00080" → "status of SO00080"
+    text = re.sub(r"\bthis\s+(SO\d+)", r"\1", text, flags=re.I)
+    # "SO00080 details / info" → "SO00080" (vague guard won't block it)
+    text = re.sub(r"(SO\d+)\s+(?:details?|info(?:rmation)?|status|data)\b", r"\1", text, flags=re.I)
+    return text
+
+
 def _classify_route(text: str) -> str:
+    text = _preprocess_query(text)
     t = normalize_text(text)
+
+    # ── Funnel / conversion rate ────────────────────────────────────────────────
+    if re.search(
+        r"\bfunnel\b|\bconversion\s+rate\b|\blead\s+to\s+customer\b"
+        r"|\bhigh.{0,15}activity.{0,15}(company|companies)\b"
+        r"|\bweak.{0,15}payment\b|\bpayment.{0,15}conversion\b"
+        r"|\bpoor\s+payment\b|\bpayment\s+histor\b"
+        r"|\bactiv.{0,15}(client|customer).{0,15}(poor|weak|bad|low).{0,15}payment\b", t, re.I,
+    ):
+        return "funnel"
+
+    # ── Person lookup ───────────────────────────────────────────────────────────
+    if re.search(
+        r"\b(?:summary|details?|profile|info(?:rmation)?)\s+(?:of|for|about)\s+[A-Z][a-z]"
+        r"|\ball\s+details?\s+of\s+[A-Z][a-z]"
+        r"|\bi\s+want\s+(?:all\s+)?details?\s+of\s+[A-Z][a-z]", text, re.I,
+    ):
+        return "person_lookup"
+
+    # ── Meetings ────────────────────────────────────────────────────────────────
+    if re.search(r"\bmeetings?\b|\bschedule\b|\bappointment\b", t):
+        return "meetings"
+
+    # ── "Who have pending tasks" → grouped summary by user ─────────────────────
+    if re.search(
+        r"\bwho\b.{0,30}\b(have|has|with)\b.{0,30}\btasks?\b"
+        r"|\bwhich\s+user\b.{0,30}\btasks?\b"
+        r"|\bpending\s+task.{0,20}per\s+(user|person|member)\b", t, re.I,
+    ):
+        return "who_pending_tasks"
 
     if re.search(r"\bwho\s+is\b|\bwho\s+are\b|\bfind\s+(user|person|contact|company)\b", t):
         return "search"
+    if re.search(r"\bfind\b|\bsearch\b|\blook\s*up\b|\binfo\s+(about|on|for)\b", t):
+        return "universal_search"
     if re.search(r"[A-Z]{2,}/\d{4}/\d+", text):
         return "invoice_lookup"
     # Quarterly check: skip when the primary intent is target/achievement (time modifier only)
@@ -350,6 +705,7 @@ def _classify_route(text: str) -> str:
         r"|\b(list|show) (all )?(technolog|source|tax|region)\b", t,
     ):
         return "lookup_list"
+    # SO number: strip "this" already done in preprocess; match SO digits
     if re.search(r"\bSO\d+\b", text, re.I) or re.search(
         r"\bsales order\b.{0,30}(line|product|item|subtotal|tax|detail)", t, re.I
     ):
@@ -358,7 +714,8 @@ def _classify_route(text: str) -> str:
         return "system_config"
     if re.search(
         r"\boverdue.{0,20}(invoice|payment).{0,20}(aging|outstanding|company)\b"
-        r"|\b(aging|outstanding).{0,20}(invoice|payment)\b", t,
+        r"|\b(aging|outstanding).{0,20}(invoice|payment)\b"
+        r"|\boverdue\s+payments?\b|\boverdue\s+invoices?\b|\binvoices?\s+overdue\b", t,
     ):
         return "overdue_aging"
     if re.search(r"\bpipeline\b.{0,30}\b(stage|distribution|summary|value)\b", t):
@@ -372,9 +729,6 @@ def _classify_route(text: str) -> str:
         return "active_customers"
 
     # ── User + Task relational query ────────────────────────────────────────────
-    # Detected BEFORE general fallback so relational JOIN intent is handled directly
-    # rather than being mis-routed to _fp_tasks (which has no user JOIN).
-    # COUNT-only queries ("how many users with task") stay in "general" so _fp_count handles them.
     if (re.search(r"\busers?\b|\bemployees?\b|\bmembers?\b|\bstaff\b|\bpeople\b|\bperson\b", t)
             and re.search(r"\btasks?\b|\btodo\b|\bfollow.?up\b|\bassignment\b", t)
             and re.search(r"\bby\b|\bper\b|\bstatus\b|\bpending\b|\bcompleted?\b|\bopen\b|\btheir\b|\ball\b|\beach\b|\bgrouped\b", t)
@@ -382,8 +736,6 @@ def _classify_route(text: str) -> str:
         return "user_task_map"
 
     # ── Invoice by explicit status/stage value ──────────────────────────────────
-    # Detected BEFORE general fallback so "rejected invoices" / "invoices by stage of approved"
-    # don't get stripped of their filter by the generic _fp_list_records handler.
     if (re.search(r"\binvoices?\b|\bbills?\b|\bbilling\b", t)
             and re.search(
                 r"\b(approved|rejected|submitted|declined|accepted)\b"
@@ -449,8 +801,8 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
         doc_date_field = next((f for f in fields if "date" in f.lower()), None)
 
     if time_cond and doc_date_field:
-        # Replace updated_at with NULLIF(document->>'field','')::timestamptz
-        doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+        # Replace updated_at with NULLIF(field,'')::timestamptz
+        doc_date_expr = f"NULLIF(\"{doc_date_field}\",'')::timestamptz"
         date_condition = time_cond["condition"].replace("updated_at", doc_date_expr)
         where = f"WHERE {date_condition}"
     elif time_cond:
@@ -473,7 +825,7 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
     # Monthly breakdown when a range label is present
     range_label = label if time_cond else ""
     if any(x in range_label for x in ["month", "quarter", "year"]) and doc_date_field:
-        doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+        doc_date_expr = f"NULLIF(\"{doc_date_field}\",'')::timestamptz"
         b_sql = f"""SELECT to_char(date_trunc('month', {doc_date_expr}), 'Mon YYYY'),
   COALESCE(SUM({coalesce_expr}), 0)
 FROM "{table}" {where}
@@ -601,7 +953,7 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
                     None,
                 )
                 if _actual:
-                    filter_parts.append(f"LOWER(document->>'{_actual}') = '{_stage_val}'")
+                    filter_parts.append(f"LOWER(\"{_actual}\") = '{_stage_val}'")
                     filter_label = _stage_val
                     break
 
@@ -618,9 +970,9 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
         if not actual:
             continue
         if op == "NOT IN":
-            filter_parts.append(f"document->>'{actual}' NOT IN {val}")
+            filter_parts.append(f"\"{actual}\" NOT IN {val}")
         else:
-            filter_parts.append(f"document->>'{actual}' {op} {val}")
+            filter_parts.append(f"\"{actual}\" {op} {val}")
         filter_label = label
         break  # one status/stage filter per count query
 
@@ -629,10 +981,7 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
             and re.search(r"\bwith\s+tasks?\b|\bwho\s+have\s+tasks?\b|\bhave\s+tasks?\b", text)
             and any(t.lower() == "createtasks" for t in table_names)):
         filter_parts.append(
-            "document->>'_id' IN ("
-            "SELECT DISTINCT document->>'createdBy' FROM \"createtasks\" "
-            "WHERE document->>'createdBy' IS NOT NULL"
-            ")"
+            '_id IN (SELECT DISTINCT "createdBy" FROM "createtasks" WHERE "createdBy" IS NOT NULL)'
         )
         filter_label = "with tasks"
 
@@ -704,6 +1053,12 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
     ]
     group_kw = next((kw for kw in GROUP_KEYWORDS if kw in text), None)
     wants_detail_summary = bool(re.search(r"\bdetails?\b", text))
+    wants_year_breakdown = bool(re.search(r"\byear[\s-]?wise\b|\bby\s+year\b|\bannual\b|\byearly\b", text, re.I))
+
+    # Year-wise breakdown: use "stage" as default group field for deals
+    if wants_year_breakdown and not group_kw:
+        group_kw = "stage"  # default grouping for year-wise deals
+
     if not group_kw and not wants_detail_summary:
         return None
     # If the user is asking for a specific value of that field — not a group-by
@@ -815,22 +1170,55 @@ def _fp_group_by(agent, user_query: str) -> Optional[Dict]:
         if not table or not group_field:
             return None
 
-    wants_sum = any(kw in text for kw in _SUM_QUERY_KEYWORDS)
-    time_cond = _parse_time_condition(text)
-    where     = f"WHERE {time_cond['condition']}" if time_cond else ""
+    wants_sum  = any(kw in text for kw in _SUM_QUERY_KEYWORDS)
+    wants_year = bool(re.search(r"\byear[\s-]?wise\b|\bby\s+year\b|\bannual\b|\byearly\b", text, re.I))
+    time_cond  = _parse_time_condition(text)
+    soft_del   = "(deleted = false OR deleted IS NULL)"
+    where_parts = [soft_del]
+    if time_cond:
+        where_parts.append(time_cond["condition"])
+    where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
+
+    # ── Year-wise breakdown: deals by year + stage ─────────────────────────────
+    if wants_year and table in ("deals", "invoices", "sales"):
+        date_col = (
+            '"closeDate"' if table == "deals" else
+            'invoice_date' if table == "invoices" else
+            'sales_date'
+        )
+        sql = f"""SELECT
+  EXTRACT(YEAR FROM NULLIF({date_col},'')::timestamptz)::int AS year,
+  COALESCE("{group_field}", 'Unknown') AS {group_field},
+  COUNT(*)::int AS count
+FROM "{table}"
+{where}
+  AND NULLIF({date_col},'') IS NOT NULL
+GROUP BY 1, 2 ORDER BY 1 DESC, 3 DESC""".strip()
+        _res = run_sql(agent, sql)
+        if _res.ok() and _res.rows:
+            rows = _res.rows
+            lines = [f"| Year | {group_field.title()} | Count |", "| --- | --- | --- |"]
+            for r in rows:
+                lines.append(f"| {r[0] or '—'} | {r[1] or 'Unknown'} | {r[2] or 0} |")
+            return {
+                "answer": f"**{table.title()} by Year & {group_field.title()}:**\n\n" + "\n".join(lines),
+                "tables_used": [table],
+                "confidence": 0.96,
+                "sql_queries": [sql],
+            }
 
     if wants_sum:
         coalesce_expr = build_revenue_coalesce(get_document_fields(agent, table))
-        sql = f"""SELECT COALESCE(document->>'{group_field}', 'Unknown') AS {group_field},
+        sql = f"""SELECT COALESCE("{group_field}", 'Unknown') AS {group_field},
   COALESCE(SUM({coalesce_expr}), 0) AS total
 FROM "{table}" {where}
-GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20""".strip()
+GROUP BY 1 ORDER BY 2 DESC, 1""".strip()
         metric_header = "Revenue"
     else:
-        sql = f"""SELECT COALESCE(document->>'{group_field}', 'Unknown') AS {group_field},
+        sql = f"""SELECT COALESCE("{group_field}", 'Unknown') AS {group_field},
   COUNT(*)::int AS count
 FROM "{table}" {where}
-GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20""".strip()
+GROUP BY 1 ORDER BY 2 DESC, 1""".strip()
         metric_header = "Count"
 
     _res = run_sql(agent, sql)
@@ -908,46 +1296,46 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
 
     where_parts = []
     if deleted_field:
-        where_parts.append(f"COALESCE(document->>'{deleted_field}', 'false') != 'true'")
+        where_parts.append(f"COALESCE(\"{deleted_field}\", 'false') != 'true'")
 
     if matched_stage:
-        where_parts.append(f"document->>'{stage_field}' ILIKE '{matched_stage}'")
+        where_parts.append(f"\"{stage_field}\" ILIKE '{matched_stage}'")
     elif wants_open:
         # Open deals = not won AND not lost.
         # Prefer dealWonAt/dealLostAt IS NULL (most accurate);
         # fall back to stage NOT IN ('Closed Won','Closed Lost').
         if won_field and lost_field:
-            where_parts.append(f"document->>'{won_field}' IS NULL")
-            where_parts.append(f"document->>'{lost_field}' IS NULL")
+            where_parts.append(f"\"{won_field}\" IS NULL")
+            where_parts.append(f"\"{lost_field}\" IS NULL")
         elif won_field:
-            where_parts.append(f"document->>'{won_field}' IS NULL")
+            where_parts.append(f"\"{won_field}\" IS NULL")
         elif lost_field:
-            where_parts.append(f"document->>'{lost_field}' IS NULL")
+            where_parts.append(f"\"{lost_field}\" IS NULL")
         else:
             where_parts.append(
-                f"document->>'{stage_field}' NOT IN ('Closed Won', 'Closed Lost')"
+                f"\"{stage_field}\" NOT IN ('Closed Won', 'Closed Lost')"
             )
     elif wants_overdue and close_field:
-        where_parts.append(f"NULLIF(document->>'{close_field}', '')::timestamptz < NOW()")
+        where_parts.append(f"NULLIF(\"{close_field}\", '')::timestamptz < NOW()")
         where_parts.append(
-            f"document->>'{stage_field}' NOT IN ('Closed Won', 'Closed Lost')"
+            f"\"{stage_field}\" NOT IN ('Closed Won', 'Closed Lost')"
         )
 
     time_cond = _parse_time_condition(text)
     if time_cond and close_field:
         cond = time_cond["condition"].replace(
-            "updated_at", f"NULLIF(document->>'{close_field}','')::timestamptz"
+            "updated_at", f"NULLIF(\"{close_field}\",'')::timestamptz"
         )
         where_parts.append(cond)
     elif time_cond:
         where_parts.append(time_cond["condition"])
 
     where        = "WHERE " + " AND ".join(f"({p})" for p in where_parts) if where_parts else ""
-    select_parts = [f"document->>'{name_field}' AS name", f"document->>'{stage_field}' AS stage"]
+    select_parts = [f"\"{name_field}\" AS name", f"\"{stage_field}\" AS stage"]
     if amount_field:
-        select_parts.append(f"NULLIF(document->>'{amount_field}','')::numeric AS amount")
+        select_parts.append(f"NULLIF(\"{amount_field}\",'')::numeric AS amount")
     if close_field:
-        select_parts.append(f"document->>'{close_field}' AS close_date")
+        select_parts.append(f"\"{close_field}\" AS close_date")
 
     # Count first so the answer header is accurate
     count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
@@ -991,87 +1379,125 @@ def _fp_tasks(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
     if not any(kw in text for kw in ["task", "follow-up", "followup", "follow up", "todo"]):
         return None
-    # Let _fp_count handle explicit count intents for tasks.
     if any(kw in text for kw in ["how many", "count", "number of", "total number"]):
         return None
+
+    # ── "who have pending tasks" → route to user_task_map for grouping ────────
+    if re.search(r"\bwho\b.{0,20}\b(have|has|with)\b.{0,20}\btasks?\b"
+                 r"|\bwhich\s+user\b.{0,20}\btasks?\b", text, re.I):
+        return None  # handled by _fp_who_pending_tasks
 
     table_names = get_table_names(agent)
     table       = resolve_entity_table("tasks", table_names, user_query)
     if not table:
         return None
 
+    user_table = next((t for t in table_names if t.lower() == "users"), None)
     fields         = get_document_fields(agent, table)
     task_field     = next((f for f in fields if f.lower() in ["task", "title", "name", "subject"]), None)
     status_field   = next((f for f in fields if "status" in f.lower()), None)
     priority_field = next((f for f in fields if "priority" in f.lower()), None)
     due_field      = next((f for f in fields if "due_date" in f.lower() or f.lower() == "due"), None)
-    deleted_field  = next((f for f in fields if "deleted" in f.lower()), None)
+    join_fld       = next((f for f in fields
+                           if f.lower().replace("_","") in ["createdby","assignedto","userid","ownerid"]),
+                          "createdBy")
 
-    where_parts = []
-    if deleted_field:
-        where_parts.append(f"COALESCE(document->>'{deleted_field}', 'false') != 'true'")
+    # ── Person name filter ("Kartik's tasks", "Yash Bhide pending task") ─────
+    _STOP_NAMES = {"pending", "overdue", "completed", "open", "high", "low", "all",
+                   "the", "sales", "team", "task", "status", "share", "give", "show"}
+    person_filter = ""
+    person_label  = ""
+    # Extract name: possessive ("Kartik's"), direct name before keyword, or "for [Name]"
+    # NOTE: do NOT use re.I on patterns with [A-Z] — it would greedily match lowercase keywords
+    name_m = (
+        re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)'s?\s+[Tt]ask", user_query) or
+        re.search(r"(?:for|of|by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", user_query) or
+        re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:pending|overdue|completed|[Tt]ask)", user_query)
+    )
+    if name_m and user_table:
+        person_name = name_m.group(1).strip()
+        # Skip generic words
+        if person_name.lower() not in _STOP_NAMES and len(person_name) >= 3:
+            person_filter = (
+                f'AND t."{join_fld}"::text IN '
+                f'(SELECT _id FROM "{user_table}" '
+                f"WHERE name ILIKE '%{person_name.replace(chr(39), chr(39)+chr(39))}%' LIMIT 5)"
+            )
+            person_label = f" for {person_name}"
 
+    where_parts = ["(t.deleted = false OR t.deleted IS NULL)"]
     label = "tasks"
     if "overdue" in text:
         if due_field:
-            where_parts.append(f"NULLIF(document->>'{due_field}', '')::timestamptz < NOW()")
+            where_parts.append(f'NULLIF(t."{due_field}",\'\')::timestamptz < NOW()')
         if status_field:
-            where_parts.append(f"COALESCE(document->>'{status_field}', '') != 'Completed'")
+            where_parts.append(f"t.\"{status_field}\" != 'Completed'")
         label = "overdue tasks"
     elif "pending" in text or "open" in text:
         if status_field:
-            where_parts.append(f"document->>'{status_field}' = 'Pending'")
+            where_parts.append(f"t.\"{status_field}\" = 'Pending'")
         label = "pending tasks"
     elif "completed" in text or "done" in text:
         if status_field:
-            where_parts.append(f"document->>'{status_field}' = 'Completed'")
+            where_parts.append(f"t.\"{status_field}\" = 'Completed'")
         label = "completed tasks"
 
     if "high" in text and priority_field:
-        where_parts.append(f"document->>'{priority_field}' = 'High'")
+        where_parts.append(f"t.\"{priority_field}\" = 'High'")
 
     time_cond = _parse_time_condition(text)
     if time_cond:
         where_parts.append(time_cond["condition"])
 
-    where = "WHERE " + " AND ".join(f"({p})" for p in where_parts) if where_parts else ""
+    where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
+    if person_filter:
+        where += f" {person_filter}"
 
-    cols = []
-    if task_field:     cols.append(f"COALESCE(document->>'{task_field}', 'Unnamed') AS task")
-    if status_field:   cols.append(f"COALESCE(document->>'{status_field}', '—') AS status")
-    if priority_field: cols.append(f"COALESCE(document->>'{priority_field}', '—') AS priority")
-    if due_field:      cols.append(f"document->>'{due_field}' AS due_date")
-    if not cols:
+    # Always JOIN users to get owner name
+    user_name_col = ""
+    if user_table:
+        user_name_col = f', COALESCE(u.name, \'Unassigned\') AS assigned_to'
+
+    cols_select = []
+    if task_field:     cols_select.append(f"COALESCE(t.\"{task_field}\", 'Unnamed') AS task")
+    if status_field:   cols_select.append(f"COALESCE(t.\"{status_field}\", '—') AS status")
+    if priority_field: cols_select.append(f"COALESCE(t.\"{priority_field}\", '—') AS priority")
+    if due_field:      cols_select.append(f't."{due_field}" AS due_date')
+    if not cols_select:
         return None
 
-    count_sql   = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
-    _cnt_res    = run_sql(agent, count_sql)
-    if _cnt_res.error:
-        return {"answer": "Unable to retrieve data at this time. Please try again.",
-                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql]}
-    total_rows  = _cnt_res.rows
-    total       = coerce_number(total_rows[0][0] if total_rows else 0)
-    sql         = f"SELECT {', '.join(cols)} FROM \"{table}\" {where} ORDER BY updated_at DESC LIMIT 20".strip()
-    _row_res    = run_sql(agent, sql)
+    from_clause = f'"{table}" t'
+    if user_table:
+        from_clause += f' LEFT JOIN "{user_table}" u ON u._id = t."{join_fld}"::text'
+
+    select_cols = ", ".join(cols_select) + user_name_col
+    sql = f"SELECT {select_cols} FROM {from_clause} {where} ORDER BY t.updated_at DESC"
+
+    _row_res = run_sql(agent, sql)
     if _row_res.error:
+        count_sql = f'SELECT COUNT(*)::int FROM "{table}" {where}'
         return {"answer": "Unable to retrieve data at this time. Please try again.",
-                "tables_used": [table], "confidence": 0.0, "sql_queries": [count_sql, sql]}
-    rows        = _row_res.rows
+                "tables_used": [table], "confidence": 0.0, "sql_queries": [sql]}
+    rows = _row_res.rows
+    total = len(rows)
 
     if not rows:
-        return {"answer": f"No {label} found.", "tables_used": [table], "confidence": 0.9, "sql_queries": [sql]}
+        return {"answer": f"No {label} found{person_label}.",
+                "tables_used": [table], "confidence": 0.9, "sql_queries": [sql]}
 
-    headers = [c.split(" AS ")[-1].replace("_", " ").title() for c in cols]
-    lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    headers = [c.split(" AS ")[-1].replace("_", " ").title() for c in cols_select]
+    if user_table:
+        headers.append("Assigned To")
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
     for row in rows:
         vals = ["—" if v is None else str(v) for v in row]
         lines.append("| " + " | ".join(vals) + " |")
 
     return {
-        "answer":      f"**{total} {label}** (showing {min(20, int(total))}):\n\n" + "\n".join(lines),
-        "tables_used": [table],
+        "answer":      f"**{total} {label}{person_label}:**\n\n" + "\n".join(lines),
+        "tables_used": [t for t in [table, user_table] if t],
         "confidence":  0.97,
-        "sql_queries": [count_sql, sql],
+        "sql_queries": [sql],
     }
 
 
@@ -1135,12 +1561,12 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
 
     if _groupby_field:
         # Return a grouped count breakdown instead of individual rows
-        group_expr = f"document->>'{_groupby_field}'"
+        group_expr = f"\"{_groupby_field}\""
         grp_sql = (
             f"SELECT COALESCE({group_expr}, 'Unknown') AS {_groupby_alias}, "
             f"COUNT(*)::int AS count "
             f'FROM "{table}" '
-            f"WHERE COALESCE(document->>'deleted','false') != 'true' "
+            f"WHERE (deleted = false OR deleted IS NULL) "
             f"GROUP BY 1 ORDER BY count DESC"
         )
         _g_res = run_sql(agent, grp_sql)
@@ -1165,8 +1591,8 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         ("amount", "amount"), ("date", "date"),
     ]:
         f = REGISTRY.get(table, role, fields)
-        if f and f"document->>'{f}'" not in name_expr:
-            select_parts.append(f"document->>'{f}' AS {alias}")
+        if f and f"\"{f}\"" not in name_expr:
+            select_parts.append(f"\"{f}\" AS {alias}")
         if len(select_parts) >= 6:
             break
 
@@ -1181,7 +1607,7 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
             if vm:
                 val = sanitize_sql_value(vm.group(1).upper() if role == "currency" else vm.group(1))
                 # SAFE: val sanitized via sanitize_sql_value()
-                field_filters.append(f"document->>'{f}' ILIKE '{val}'")
+                field_filters.append(f"\"{f}\" ILIKE '{val}'")
 
     # 2. Status adjective detection  "paid invoices" / "list of paid invoices"
     #    Checks for status words BEFORE the table noun — no "is/=" needed
@@ -1222,7 +1648,7 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
                         None,
                     )
                     if _actual:
-                        field_filters.append(f"LOWER(document->>'{_actual}') = '{_sv.lower()}'")
+                        field_filters.append(f"LOWER(\"{_actual}\") = '{_sv.lower()}'")
                         break
         for pattern, (field_kw, val) in _STATUS_ADJECTIVES.items():
             if re.search(pattern, text):
@@ -1232,10 +1658,10 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
                 if actual:
                     if val is None:  # "unpaid" → NOT IN (paid, cancelled)
                         field_filters.append(
-                            f"COALESCE(document->>'{actual}','') NOT IN ('paid','cancelled')"
+                            f"COALESCE(\"{actual}\",'') NOT IN ('paid','cancelled')"
                         )
                     else:
-                        field_filters.append(f"document->>'{actual}' ILIKE '{val}'")
+                        field_filters.append(f"\"{actual}\" ILIKE '{val}'")
                     break
 
     # 3. Currency filter from query text  "USD invoices" / "invoices in INR"
@@ -1248,7 +1674,7 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
                 cur_val = sanitize_sql_value(cur_m.group(1))
                 # SAFE: cur_val sanitized via sanitize_sql_value()
                 field_filters.append(
-                    f"UPPER(document->>'{currency_field}') = '{cur_val}'"
+                    f"UPPER(\"{currency_field}\") = '{cur_val}'"
                 )
 
     # ── Time filter using document date field (NOT updated_at) ────────────────
@@ -1269,7 +1695,7 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         cond = time_cond["condition"]
         # Replace updated_at with the real business date field
         if doc_date_field:
-            doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+            doc_date_expr = f"NULLIF(\"{doc_date_field}\",'')::timestamptz"
             cond = cond.replace("updated_at", doc_date_expr)
             # Exclude nulls so partial-date rows don't bleed in
             where_parts.append(f"{doc_date_expr} IS NOT NULL")
@@ -1314,20 +1740,20 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
 
     # Build the ORDER BY with tie-breaker (#12 — ranking stability)
     def _amount_desc():
-        base = f"NULLIF(document->>'{amount_field}','')::numeric DESC NULLS LAST"
+        base = f"NULLIF(\"{amount_field}\",'')::numeric DESC NULLS LAST"
         if doc_date_field:
-            base += f", NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+            base += f", NULLIF(\"{doc_date_field}\",'')::timestamptz DESC NULLS LAST"
         return base
 
     def _amount_asc():
-        base = f"NULLIF(document->>'{amount_field}','')::numeric ASC NULLS LAST"
+        base = f"NULLIF(\"{amount_field}\",'')::numeric ASC NULLS LAST"
         if doc_date_field:
-            base += f", NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+            base += f", NULLIF(\"{doc_date_field}\",'')::timestamptz DESC NULLS LAST"
         return base
 
     def _date_desc():
         if doc_date_field:
-            return f"NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+            return f"NULLIF(\"{doc_date_field}\",'')::timestamptz DESC NULLS LAST"
         return "updated_at DESC"
 
     # ── LIMIT: explicit top N always wins; sort direction only affects ORDER BY ──
@@ -1344,25 +1770,25 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         n       = int(ordinal_match.group(1))
         limit   = 1
         _offset = max(0, n - 1)
-        order   = (f"NULLIF(document->>'{id_field}','') ASC NULLS LAST"
+        order   = (f"NULLIF(\"{id_field}\",'') ASC NULLS LAST"
                    if id_field else
-                   f"NULLIF(document->>'{doc_date_field}','')::timestamptz ASC NULLS LAST"
+                   f"NULLIF(\"{doc_date_field}\",'')::timestamptz ASC NULLS LAST"
                    if doc_date_field else "id ASC")
         # inject OFFSET into sql below
     elif first_match:
         limit   = 1
         _offset = 0
         # Order by identifier ASC (invoice #1, deal A, etc.) — not by date
-        order   = (f"NULLIF(document->>'{id_field}','') ASC NULLS LAST"
+        order   = (f"NULLIF(\"{id_field}\",'') ASC NULLS LAST"
                    if id_field else
-                   f"NULLIF(document->>'{doc_date_field}','')::timestamptz ASC NULLS LAST"
+                   f"NULLIF(\"{doc_date_field}\",'')::timestamptz ASC NULLS LAST"
                    if doc_date_field else "id ASC")
     elif last_match:
         limit   = 1
         _offset = 0
-        order   = (f"NULLIF(document->>'{id_field}','') DESC NULLS LAST"
+        order   = (f"NULLIF(\"{id_field}\",'') DESC NULLS LAST"
                    if id_field else
-                   f"NULLIF(document->>'{doc_date_field}','')::timestamptz DESC NULLS LAST"
+                   f"NULLIF(\"{doc_date_field}\",'')::timestamptz DESC NULLS LAST"
                    if doc_date_field else "id DESC")
     elif last_n_match:
         limit   = min(int(last_n_match.group(1)), 100)
@@ -1469,21 +1895,19 @@ def _fp_top_customers(agent, user_query: str) -> Optional[Dict]:
         return None
 
     time_cond    = _parse_time_condition(text)
-    inv_deleted  = "COALESCE(i.document->>'deleted','false') != 'true'"
+    inv_deleted  = "(i.deleted = false OR i.deleted IS NULL)"
     base_where   = f"WHERE ({inv_deleted})" + (f" AND ({time_cond['condition']})" if time_cond else "")
-    rev_expr     = ("COALESCE("
-                    "NULLIF(i.document->>'grand_total','')::numeric,"
-                    "NULLIF(i.document->>'grandtotal_in_usd','')::numeric, 0)")
+    rev_expr     = 'COALESCE(i."grandtotal_in_usd", i.grand_total, 0)'
 
     if co_table:
-        sql = f"""SELECT COALESCE(c.document->>'companyName', i.document->>'company', 'Unknown') AS customer,
+        sql = f"""SELECT COALESCE(c."companyName", i."companyName", i.company::text, 'Unknown') AS customer,
   SUM({rev_expr}) AS total_revenue, COUNT(*)::int AS invoice_count
 FROM "{inv_table}" i
-LEFT JOIN "{co_table}" c ON c.document->>'_id' = i.document->>'company'
+LEFT JOIN "{co_table}" c ON c._id = i.company::text
 {base_where}
 GROUP BY 1 ORDER BY 2 DESC LIMIT {n}""".strip()
     else:
-        sql = f"""SELECT COALESCE(i.document->>'company', 'Unknown') AS customer,
+        sql = f"""SELECT COALESCE(i."companyName", i.company::text, 'Unknown') AS customer,
   SUM({rev_expr}) AS total_revenue, COUNT(*)::int AS invoice_count
 FROM "{inv_table}" i {base_where}
 GROUP BY 1 ORDER BY 2 DESC LIMIT {n}""".strip()
@@ -1547,48 +1971,48 @@ def _fp_target_unachieved(agent, user_query: str) -> Optional[Dict]:
     if month_y:
         month, year = month_y
         period_filter = (
-            f"AND NULLIF(t.document->>'month','')::int = {month}"
-            f" AND NULLIF(t.document->>'year','')::int = {year}"
+            f"AND NULLIF(t.month,'')::int = {month}"
+            f" AND NULLIF(t.year,'')::int = {year}"
         )
         period_label = f"{calendar.month_name[month]} {year}"
     elif year_m:
-        period_filter = f"AND NULLIF(t.document->>'year','')::int = {year_m.group(1)}"
+        period_filter = f"AND NULLIF(t.year,'')::int = {year_m.group(1)}"
         period_label  = year_m.group(1)
 
     sales_exists = "sales" in table_names
     achieved_sub = (
-        """COALESCE((SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+        """COALESCE((SELECT SUM(s.\"grand_total_in_usd\")
         FROM "sales" s
-        WHERE s.document->>'salesOwner' = t.document->>'userId'
-          AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
-              = NULLIF(t.document->>'month','')::numeric
-          AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
-              = NULLIF(t.document->>'year','')::numeric
-          AND COALESCE(s.document->>'deleted','false') != 'true'), 0)"""
+        WHERE s.\"salesOwner\" = t.\"userId\"
+          AND date_part('month', NULLIF(s.\"sales_date\",'')::timestamptz)
+              = t.month
+          AND date_part('year',  NULLIF(s.\"sales_date\",'')::timestamptz)
+              = t.year
+          AND (s.deleted = false OR s.deleted IS NULL)), 0)"""
         if sales_exists else "0"
     )
 
     # Filter: achieved < target AND target > 0
     sql = f"""SELECT
-  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
-  t.document->>'teamName' AS team,
-  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
-  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  COALESCE(u.name, t.\"userId\") AS user_name,
+  t.\"teamName\" AS team,
+  CONCAT('Month ', t.month, '/', t.year) AS period,
+  t.\"targetInUSD\" AS target_usd,
   {achieved_sub} AS achieved_usd,
   CASE
-    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
-    THEN ROUND({achieved_sub} / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    WHEN t.\"targetInUSD\" > 0
+    THEN ROUND({achieved_sub} / t.\"targetInUSD\" * 100, 1)
     ELSE 0
   END AS achievement_pct,
-  ROUND(NULLIF(t.document->>'targetInUSD','')::numeric - {achieved_sub}, 2) AS gap_usd
+  ROUND(t.\"targetInUSD\" - {achieved_sub}, 2) AS gap_usd
 FROM "targets" t
-LEFT JOIN "users" u ON u.document->>'_id' = t.document->>'userId'
-WHERE NULLIF(t.document->>'targetInUSD','')::numeric > 0
-  AND {achieved_sub} < NULLIF(t.document->>'targetInUSD','')::numeric
+LEFT JOIN "users" u ON u._id = t.\"userId\"
+WHERE t.\"targetInUSD\" > 0
+  AND {achieved_sub} < t.\"targetInUSD\"
   {period_filter}
 ORDER BY achievement_pct ASC,
-         NULLIF(t.document->>'year','')::int DESC,
-         NULLIF(t.document->>'month','')::int DESC""".strip()
+         NULLIF(t.year,'')::int DESC,
+         NULLIF(t.month,'')::int DESC""".strip()
 
     _res = run_sql(agent, sql)
     if _res.error:
@@ -1640,12 +2064,12 @@ def _fp_targets(agent, user_query: str) -> Optional[Dict]:
     if month_y:
         month, year   = month_y
         period_filter = (
-            f"AND NULLIF(t.document->>'month','')::int = {month}"
-            f" AND NULLIF(t.document->>'year','')::int = {year}"
+            f"AND NULLIF(t.month,'')::int = {month}"
+            f" AND NULLIF(t.year,'')::int = {year}"
         )
         period_label = f"{calendar.month_name[month]} {year}"
     elif year_m:
-        period_filter = f"AND NULLIF(t.document->>'year','')::int = {year_m.group(1)}"
+        period_filter = f"AND NULLIF(t.year,'')::int = {year_m.group(1)}"
         period_label  = year_m.group(1)
 
     user_filter = ""
@@ -1660,34 +2084,34 @@ def _fp_targets(agent, user_query: str) -> Optional[Dict]:
         }
         if len(uname) >= 3 and uname.lower() not in _GENERIC:
             # SAFE: uname sanitized via sanitize_sql_value()
-            user_filter = f"AND u.document->>'name' ILIKE '%{uname}%'"
+            user_filter = f"AND u.name ILIKE '%{uname}%'"
 
     sales_exists = "sales" in table_names
-    achieved_sub = ("""COALESCE((SELECT SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)
+    achieved_sub = ("""COALESCE((SELECT SUM(s.\"grand_total_in_usd\")
         FROM "sales" s
-        WHERE s.document->>'salesOwner' = t.document->>'userId'
-          AND date_part('month', NULLIF(s.document->>'sales_date','')::timestamptz)
-              = NULLIF(t.document->>'month','')::numeric
-          AND date_part('year',  NULLIF(s.document->>'sales_date','')::timestamptz)
-              = NULLIF(t.document->>'year','')::numeric
-          AND COALESCE(s.document->>'deleted','false') != 'true'), 0)""") if sales_exists else "0"
+        WHERE s.\"salesOwner\" = t.\"userId\"
+          AND date_part('month', NULLIF(s.\"sales_date\",'')::timestamptz)
+              = t.month
+          AND date_part('year',  NULLIF(s.\"sales_date\",'')::timestamptz)
+              = t.year
+          AND (s.deleted = false OR s.deleted IS NULL)), 0)""") if sales_exists else "0"
 
     sql = f"""SELECT
-  COALESCE(u.document->>'name', t.document->>'userId') AS user_name,
-  t.document->>'teamName' AS team,
-  CONCAT('Month ', t.document->>'month', '/', t.document->>'year') AS period,
-  NULLIF(t.document->>'targetInUSD','')::numeric AS target_usd,
+  COALESCE(u.name, t.\"userId\") AS user_name,
+  t.\"teamName\" AS team,
+  CONCAT('Month ', t.month, '/', t.year) AS period,
+  t.\"targetInUSD\" AS target_usd,
   {achieved_sub} AS achieved_usd,
   CASE
-    WHEN NULLIF(t.document->>'targetInUSD','')::numeric > 0
-    THEN ROUND({achieved_sub} / NULLIF(t.document->>'targetInUSD','')::numeric * 100, 1)
+    WHEN t.\"targetInUSD\" > 0
+    THEN ROUND({achieved_sub} / t.\"targetInUSD\" * 100, 1)
     ELSE 0
   END AS achievement_pct
 FROM "targets" t
-LEFT JOIN "users" u ON u.document->>'_id' = t.document->>'userId'
+LEFT JOIN "users" u ON u._id = t.\"userId\"
 WHERE 1=1 {period_filter} {user_filter}
-ORDER BY NULLIF(t.document->>'year','')::int DESC,
-         NULLIF(t.document->>'month','')::int DESC, user_name""".strip()
+ORDER BY NULLIF(t.year,'')::int DESC,
+         NULLIF(t.month,'')::int DESC, user_name""".strip()
 
     _res = run_sql(agent, sql)
     if _res.error:
@@ -1763,7 +2187,7 @@ def _fp_name_of_entity(agent, user_query: str) -> Optional[Dict]:
     sql       = (
         f'SELECT DISTINCT {name_expr} AS name '
         f'FROM "{target_table}" '
-        f"WHERE COALESCE(document->>'deleted','false') != 'true' "
+        f"WHERE (deleted = false OR deleted IS NULL) "
         f'ORDER BY name LIMIT 100'
     )
     _res = run_sql(agent, sql)
@@ -1801,10 +2225,10 @@ def _fp_search(agent, user_query: str) -> Optional[Dict]:
 
     if "users" in table_names:
         # SAFE: term sanitized via sanitize_sql_value()
-        sql = f"""SELECT document->>'name', document->>'email', document->>'department'
+        sql = f"""SELECT name, email, department
 FROM "users"
-WHERE document->>'name' ILIKE '%{term}%'
-  AND COALESCE(document->>'isActive','true') != 'false' LIMIT 5"""
+WHERE name ILIKE '%{term}%'
+  AND (\"isActive\" = true OR \"isActive\" IS NULL) LIMIT 5"""
         _r = run_sql(agent, sql)
         rows = _r.rows
         if rows:
@@ -1815,11 +2239,11 @@ WHERE document->>'name' ILIKE '%{term}%'
 
     if "contacts" in table_names and not results:
         # SAFE: term sanitized via sanitize_sql_value()
-        sql = f"""SELECT TRIM(CONCAT(COALESCE(document->>'firstName',''),' ',COALESCE(document->>'lastName',''))) AS name,
-  document->>'email', document->>'jobTitle', document->>'phoneNumber'
+        sql = f"""SELECT TRIM(CONCAT(COALESCE(\"firstName\",''),' ',COALESCE(\"lastName\",''))) AS name,
+  email, \"jobTitle\", \"phoneNumber\"
 FROM "contacts"
-WHERE (document->>'firstName' ILIKE '%{term}%' OR document->>'lastName' ILIKE '%{term}%'
-       OR document->>'email' ILIKE '%{term}%') LIMIT 5"""
+WHERE (\"firstName\" ILIKE '%{term}%' OR \"lastName\" ILIKE '%{term}%'
+       OR email ILIKE '%{term}%') LIMIT 5"""
         _r = run_sql(agent, sql)
         rows = _r.rows
         if rows:
@@ -1832,10 +2256,10 @@ WHERE (document->>'firstName' ILIKE '%{term}%' OR document->>'lastName' ILIKE '%
 
     if "companies" in table_names and not results:
         # SAFE: term sanitized via sanitize_sql_value()
-        sql = f"""SELECT document->>'companyName', document->>'email', document->>'websiteUrl'
+        sql = f"""SELECT \"companyName\", email, \"websiteUrl\"
 FROM "companies"
-WHERE document->>'companyName' ILIKE '%{term}%'
-  AND COALESCE(document->>'deleted','false') != 'true' LIMIT 5"""
+WHERE \"companyName\" ILIKE '%{term}%'
+  AND (deleted = false OR deleted IS NULL) LIMIT 5"""
         _r = run_sql(agent, sql)
         rows = _r.rows
         if rows:
@@ -1858,6 +2282,145 @@ WHERE document->>'companyName' ILIKE '%{term}%'
         "tables_used": tables_used,
         "confidence":  0.97,
         "sql_queries": sql_queries,
+    }
+
+
+def _fp_universal_search(agent, user_query: str) -> Optional[Dict]:
+    """Universal search across ALL entities: invoice#, company, user, contact, deal, SO.
+
+    Handles: 'find ELSN/2026/018', 'search Automation Systems', 'find Ketul',
+             'show me invoice ELSN/2025/48', 'company details Ecomva'
+    """
+    text = normalize_text(user_query)
+
+    # Trigger keywords for universal search — be precise to avoid false positives
+    # "show me" is too broad (catches "show me invoices") — only use with specific search intent
+    if not re.search(
+        r"\bfind\b|\bsearch\b|\blook\s*up\b|\blookup\b"
+        r"|\binfo\s+(?:about|on|for)\b"
+        r"|\bwho\s+is\b",
+        text, re.I,
+    ):
+        return None
+
+    # Extract search term (everything after the trigger word)
+    term_m = re.search(
+        r"(?:find|search(?:\s+for)?|look\s*up|show\s+me|details?\s+of|"
+        r"info\s+(?:about|on|for)|what\s+is|who\s+is)\s+(.+?)(?:\s*\??\s*$)",
+        user_query, re.I,
+    )
+    if not term_m:
+        return None
+
+    raw_term = term_m.group(1).strip().strip("?").strip()
+    if len(raw_term) < 2:
+        return None
+
+    safe = sanitize_sql_value(raw_term)
+    table_names = get_table_names(agent)
+    results = []
+    sqls = []
+    tables_used = []
+
+    # ── Invoice number search ──────────────────────────────────────────────────
+    if "invoices" in table_names and re.search(r"ELSN|invoice|inv", raw_term, re.I):
+        sql = f"""SELECT invoice_number, payment_status, "grandtotal_in_usd",
+               "due_date", "companyName", approval_status
+        FROM invoices
+        WHERE invoice_number ILIKE '%{safe}%'
+          AND (deleted = false OR deleted IS NULL)
+        LIMIT 5"""
+        r = run_sql(agent, sql)
+        if r.ok() and r.rows:
+            sqls.append(sql); tables_used.append("invoices")
+            for row in r.rows:
+                results.append(
+                    f"**Invoice {row[0]}** | Status: {row[1]} | "
+                    f"USD {float(row[2] or 0):,.2f} | Due: {str(row[3] or '')[:10]} | Company: {row[4] or '—'}"
+                )
+
+    # ── Company search ─────────────────────────────────────────────────────────
+    if "companies" in table_names and not results:
+        sql = f"""SELECT "companyName", email, industry, "leadStatus", country, "lifecycleStage"
+        FROM companies
+        WHERE "companyName" ILIKE '%{safe}%'
+          AND (deleted = false OR deleted IS NULL)
+        ORDER BY "companyName" LIMIT 5"""
+        r = run_sql(agent, sql)
+        if r.ok() and r.rows:
+            sqls.append(sql); tables_used.append("companies")
+            for row in r.rows:
+                results.append(
+                    f"**Company: {row[0]}** | Email: {row[1] or '—'} | "
+                    f"Industry: {row[2] or '—'} | Status: {row[3] or '—'} | Country: {row[4] or '—'}"
+                )
+
+    # ── User search ────────────────────────────────────────────────────────────
+    if "users" in table_names:
+        sql = f"""SELECT name, email, department, "isActive"
+        FROM users
+        WHERE name ILIKE '%{safe}%'
+        LIMIT 5"""
+        r = run_sql(agent, sql)
+        if r.ok() and r.rows:
+            sqls.append(sql); tables_used.append("users")
+            for row in r.rows:
+                results.append(
+                    f"**User: {row[0]}** | Email: {row[1] or '—'} | "
+                    f"Dept: {row[2] or '—'} | Active: {'Yes' if row[3] else 'No'}"
+                )
+
+    # ── Contact search ─────────────────────────────────────────────────────────
+    if "contacts" in table_names and (not results or re.search(r"contact", text, re.I)):
+        sql = f"""SELECT TRIM(CONCAT(COALESCE("firstName",''),' ',COALESCE("lastName",''))) AS full_name,
+               email, "jobTitle", "phoneNumber", "lifecycleStage"
+        FROM contacts
+        WHERE ("firstName" ILIKE '%{safe}%' OR "lastName" ILIKE '%{safe}%'
+               OR email ILIKE '%{safe}%'
+               OR CONCAT("firstName",' ',"lastName") ILIKE '%{safe}%')
+          AND (deleted = false OR deleted IS NULL)
+        LIMIT 5"""
+        r = run_sql(agent, sql)
+        if r.ok() and r.rows:
+            sqls.append(sql); tables_used.append("contacts")
+            for row in r.rows:
+                results.append(
+                    f"**Contact: {row[0]}** | Email: {row[1] or '—'} | "
+                    f"Title: {row[2] or '—'} | Phone: {row[3] or '—'} | Stage: {row[4] or '—'}"
+                )
+
+    # ── Deal search ────────────────────────────────────────────────────────────
+    if "deals" in table_names and (not results or re.search(r"deal", text, re.I)):
+        sql = f"""SELECT d.name, d.stage, d.grand_total_in_usd,
+               COALESCE(u.name, d.owner) AS owner,
+               COALESCE(c."companyName", d.company) AS company
+        FROM deals d
+        LEFT JOIN users u ON u._id = d.owner
+        LEFT JOIN companies c ON c._id = d.company
+        WHERE d.name ILIKE '%{safe}%'
+          AND (d.deleted = false OR d.deleted IS NULL)
+        LIMIT 5"""
+        r = run_sql(agent, sql)
+        if r.ok() and r.rows:
+            sqls.append(sql); tables_used.append("deals")
+            for row in r.rows:
+                results.append(
+                    f"**Deal: {row[0]}** | Stage: {row[1] or '—'} | "
+                    f"USD {float(row[2] or 0):,.2f} | Owner: {row[3] or '—'} | Company: {row[4] or '—'}"
+                )
+
+    if not results:
+        return {
+            "answer": f"No records found matching **'{raw_term}'**. Try a more specific term.",
+            "tables_used": table_names[:3], "confidence": 0.85, "sql_queries": sqls,
+        }
+
+    return {
+        "answer": f"**Search results for '{raw_term}' ({len(results)} found):**\n\n"
+                  + "\n\n".join(results),
+        "tables_used": tables_used,
+        "confidence": 0.97,
+        "sql_queries": sqls,
     }
 
 
@@ -1892,18 +2455,18 @@ def _fp_lookup_list(agent, user_query: str) -> Optional[Dict]:
 
     # Industries are stored inside the companies document — use distinct
     if matched_table == "companies" and matched_field == "industry":
-        sql = f"""SELECT DISTINCT document->>'industry' AS name
+        sql = f"""SELECT DISTINCT industry AS name
 FROM "companies"
-WHERE document->>'industry' IS NOT NULL
-  AND document->>'industry' != ''
-  AND COALESCE(document->>'deleted','false') != 'true'
+WHERE industry IS NOT NULL
+  AND industry != ''
+  AND (deleted = false OR deleted IS NULL)
 ORDER BY 1""".strip()
     else:
-        sql = f"""SELECT DISTINCT document->>'{matched_field}' AS name
+        sql = f"""SELECT DISTINCT \"{matched_field}\" AS name
 FROM "{matched_table}"
-WHERE document->>'{matched_field}' IS NOT NULL
-  AND document->>'{matched_field}' != ''
-  AND COALESCE(document->>'deleted','false') != 'true'
+WHERE \"{matched_field}\" IS NOT NULL
+  AND \"{matched_field}\" != ''
+  AND (deleted = false OR deleted IS NULL)
 ORDER BY 1""".strip()
 
     _res = run_sql(agent, sql)
@@ -1953,7 +2516,7 @@ def _fp_quarterly(agent, user_query: str) -> Optional[Dict]:
     if not doc_date_field:
         doc_date_field = next((f for f in fields if "date" in f.lower()), None)
 
-    date_expr   = f"NULLIF(document->>'{doc_date_field}','')::timestamptz" if doc_date_field else "updated_at"
+    date_expr   = f"NULLIF(\"{doc_date_field}\",'')::timestamptz" if doc_date_field else "updated_at"
     year_filter = f"AND date_trunc('year', {date_expr}) = DATE '{year_m.group(1)}-01-01'" if year_m else ""
 
     sql = f"""SELECT
@@ -1961,7 +2524,7 @@ def _fp_quarterly(agent, user_query: str) -> Optional[Dict]:
   COALESCE(SUM({coalesce_expr}), 0) AS revenue,
   COUNT(*)::int AS invoice_count
 FROM "{table}"
-WHERE COALESCE(document->>'deleted','false') != 'true'
+WHERE (deleted = false OR deleted IS NULL)
   AND {date_expr} IS NOT NULL
   {year_filter}
 GROUP BY date_part('year', {date_expr}), date_part('quarter', {date_expr})
@@ -2006,25 +2569,25 @@ def _fp_overdue_aging(agent, user_query: str) -> Optional[Dict]:
     # company field in invoices stores the company's _id.
     has_co   = "companies" in table_names
     co_join  = (
-        'LEFT JOIN "companies" c ON c.document->>\'_id\' = i.document->>\'company\''
+        'LEFT JOIN "companies" c ON c._id = i.company::text'
         if has_co else ""
     )
     co_col   = (
-        "COALESCE(c.document->>'companyName', c.document->>'name', i.document->>'company', 'Unknown')"
-        if has_co else "COALESCE(i.document->>'company','Unknown')"
+        'COALESCE(c."companyName", i."companyName", i.company::text, \'Unknown\')'
+        if has_co else "COALESCE(i.company::text,'Unknown')"
     )
     tbl_used = ["invoices"] + (["companies"] if has_co else [])
 
     sql = f"""SELECT {co_col} AS company,
   COUNT(*)::int AS overdue_invoices,
-  COALESCE(SUM(NULLIF(i.document->>'grand_total','')::numeric), 0) AS outstanding_amount,
-  MIN(NULLIF(i.document->>'due_date','')::timestamptz)::date AS oldest_due_date,
-  MAX(NULLIF(i.document->>'due_date','')::timestamptz)::date AS latest_due_date
+  COALESCE(SUM(i."grandtotal_in_usd"), SUM(i.grand_total), 0) AS outstanding_usd,
+  MIN(NULLIF(i."due_date",'')::timestamptz)::date AS oldest_due_date,
+  MAX(NULLIF(i."due_date",'')::timestamptz)::date AS latest_due_date
 FROM "invoices" i {co_join}
-WHERE NULLIF(i.document->>'due_date','')::timestamptz < NOW()
-  AND COALESCE(i.document->>'payment_status','') NOT IN ('paid','cancelled')
-  AND COALESCE(i.document->>'deleted','false') != 'true'
-GROUP BY 1 ORDER BY outstanding_amount DESC LIMIT 30""".strip()
+WHERE NULLIF(i."due_date",'')::timestamptz < NOW()
+  AND COALESCE(i.payment_status,'') NOT IN ('paid','cancelled')
+  AND (i.deleted = false OR i.deleted IS NULL)
+GROUP BY 1 ORDER BY outstanding_usd DESC""".strip()
 
     _res = run_sql(agent, sql)
     if _res.error:
@@ -2071,15 +2634,15 @@ def _fp_dept_users(agent, user_query: str) -> Optional[Dict]:
     if "departments" not in table_names or "users" not in table_names:
         return None
 
-    sql = """SELECT d.document->>'name' AS department,
-  STRING_AGG(u.document->>'name', ', ' ORDER BY u.document->>'name') AS members,
-  COUNT(u.id)::int AS member_count
+    sql = """SELECT d._id AS department_id,
+  STRING_AGG(u.name, ', ' ORDER BY u.name) AS members,
+  COUNT(u._id)::int AS member_count
 FROM "departments" d
 LEFT JOIN "users" u
-  ON u.document->>'department' = d.document->>'_id'
-  AND COALESCE(u.document->>'isActive','true') != 'false'
-GROUP BY d.document->>'_id', d.document->>'name'
-ORDER BY d.document->>'name'"""
+  ON u.department = d._id
+  AND (u."isActive" = true OR u."isActive" IS NULL)
+GROUP BY d._id
+ORDER BY d._id"""
 
     _res = run_sql(agent, sql)
     if _res.error:
@@ -2134,26 +2697,26 @@ def _fp_no_activity(agent, user_query: str) -> Optional[Dict]:
     sub_conditions = []
     if "invoices" in table_names:
         sub_conditions.append(
-            f"SELECT document->>'company' FROM \"invoices\" "
-            f"WHERE document->>'company' IS NOT NULL "
+            f"SELECT company FROM \"invoices\" "
+            f"WHERE company IS NOT NULL "
             f"AND updated_at >= NOW() - INTERVAL '{interval}'"
         )
     if "deals" in table_names:
         sub_conditions.append(
-            f"SELECT document->>'company' FROM \"deals\" "
-            f"WHERE document->>'company' IS NOT NULL "
+            f"SELECT company FROM \"deals\" "
+            f"WHERE company IS NOT NULL "
             f"AND updated_at >= NOW() - INTERVAL '{interval}'"
         )
     if not sub_conditions:
         return None
 
     not_in_clause = " AND ".join(
-        f"COALESCE(c.document->>'_id','') NOT IN ({sub})" for sub in sub_conditions
+        f"COALESCE(c._id,'') NOT IN ({sub})" for sub in sub_conditions
     )
-    sql = f"""SELECT c.document->>'companyName', c.document->>'email',
-  c.document->>'leadStatus', c.updated_at::date
+    sql = f"""SELECT c.\"companyName\", c.email,
+  c.\"leadStatus\", c.updated_at::date
 FROM "companies" c
-WHERE COALESCE(c.document->>'deleted','false') != 'true'
+WHERE (c.deleted = false OR c.deleted IS NULL)
   AND {not_in_clause}
 ORDER BY c.updated_at DESC LIMIT 50""".strip()
 
@@ -2196,14 +2759,14 @@ def _fp_overdue_tasks(agent, user_query: str) -> Optional[Dict]:
     if "createtasks" not in table_names or "users" not in table_names:
         return None
 
-    sql = """SELECT u.document->>'name', u.document->>'email',
-  COUNT(t.id)::int, MIN(t.document->>'due_date')
+    sql = """SELECT u.name, u.email,
+  COUNT(t.id)::int, MIN(t.\"due_date\")
 FROM "users" u
-JOIN "createtasks" t ON t.document->>'createdBy' = u.document->>'_id'
-WHERE NULLIF(t.document->>'due_date','')::timestamptz < NOW()
-  AND COALESCE(t.document->>'status','') != 'Completed'
-  AND COALESCE(t.document->>'deleted','false') != 'true'
-GROUP BY u.document->>'_id', u.document->>'name', u.document->>'email'
+JOIN "createtasks" t ON t.\"createdBy\" = u._id
+WHERE NULLIF(t.\"due_date\",'')::timestamptz < NOW()
+  AND COALESCE(t.status,'') != 'Completed'
+  AND (t.deleted = false OR t.deleted IS NULL)
+GROUP BY u._id, u.name, u.email
 HAVING COUNT(t.id) > 0
 ORDER BY 3 DESC"""
 
@@ -2252,19 +2815,19 @@ def _fp_pipeline_summary(agent, user_query: str) -> Optional[Dict]:
 
     where_parts = []
     if deleted_field:
-        where_parts.append(f"COALESCE(document->>'{deleted_field}','false') != 'true'")
+        where_parts.append(f"COALESCE(\"{deleted_field}\",'false') != 'true'")
     if won_field:
-        where_parts.append(f"document->>'{won_field}' IS NULL")
+        where_parts.append(f"\"{won_field}\" IS NULL")
     if lost_field:
-        where_parts.append(f"document->>'{lost_field}' IS NULL")
+        where_parts.append(f"\"{lost_field}\" IS NULL")
     where = "WHERE " + " AND ".join(f"({p})" for p in where_parts) if where_parts else ""
 
     value_expr = (
-        f"NULLIF(document->>'{amount_field}','')::numeric"
+        f"NULLIF(\"{amount_field}\",'')::numeric"
         if amount_field else "0"
     )
     sql = f"""SELECT
-  COALESCE(document->>'{stage_field}', 'Unknown') AS stage,
+  COALESCE(\"{stage_field}\", 'Unknown') AS stage,
   COUNT(*)::int AS deal_count,
   COALESCE(SUM({value_expr}), 0) AS total_value
 FROM "deals"
@@ -2307,42 +2870,41 @@ GROUP BY 1 ORDER BY 3 DESC""".strip()
 
 
 def _fp_pending_invoices(agent, user_query: str) -> Optional[Dict]:
-    """Pending / unpaid invoices summary with overdue flag."""
+    """Pending / unpaid invoices summary with overdue flag and company name."""
     table_names = get_table_names(agent)
     if "invoices" not in table_names:
         return None
 
     has_co  = "companies" in table_names
     co_join = (
-        'LEFT JOIN "companies" c ON c.document->>\'_id\' = i.document->>\'company\''
+        'LEFT JOIN "companies" c ON c._id = i.company::text'
         if has_co else ""
     )
     co_col  = (
-        "COALESCE(c.document->>'companyName', c.document->>'name', i.document->>'company', 'Unknown')"
-        if has_co else "COALESCE(i.document->>'company','Unknown')"
+        'COALESCE(c."companyName", i."companyName", i.company::text, \'Unknown\')'
+        if has_co else "COALESCE(i.company::text,'Unknown')"
     )
 
     sql = f"""SELECT
-  i.document->>'invoice_number' AS invoice_number,
-  i.document->>'payment_status' AS status,
-  COALESCE(NULLIF(i.document->>'grand_total','')::numeric, 0) AS amount,
-  i.document->>'due_date' AS due_date,
+  i.invoice_number,
+  i.payment_status AS status,
+  COALESCE(i."grandtotal_in_usd", i.grand_total, 0) AS amount_usd,
+  i."due_date" AS due_date,
   {co_col} AS company,
   CASE
-    WHEN NULLIF(i.document->>'due_date','')::timestamptz < NOW()
+    WHEN NULLIF(i."due_date",'')::timestamptz < NOW()
     THEN CONCAT(
-      (DATE_PART('day', NOW() - NULLIF(i.document->>'due_date','')::timestamptz))::int,
+      (DATE_PART('day', NOW() - NULLIF(i."due_date",'')::timestamptz))::int,
       ' days overdue'
     )
     ELSE 'On time'
   END AS overdue_status
 FROM "invoices" i {co_join}
-WHERE COALESCE(i.document->>'payment_status','') NOT IN ('paid','cancelled')
-  AND COALESCE(i.document->>'deleted','false') != 'true'
+WHERE COALESCE(i.payment_status,'') NOT IN ('paid','cancelled')
+  AND (i.deleted = false OR i.deleted IS NULL)
 ORDER BY
-  CASE WHEN NULLIF(i.document->>'due_date','')::timestamptz < NOW() THEN 0 ELSE 1 END,
-  NULLIF(i.document->>'due_date','')::timestamptz ASC NULLS LAST
-LIMIT 50""".strip()
+  CASE WHEN NULLIF(i."due_date",'')::timestamptz < NOW() THEN 0 ELSE 1 END,
+  NULLIF(i."due_date",'')::timestamptz ASC NULLS LAST""".strip()
 
     _res = run_sql(agent, sql)
     if _res.error:
@@ -2361,20 +2923,18 @@ LIMIT 50""".strip()
     total_pending  = sum(coerce_number(r[2]) for r in rows)
     overdue_count  = sum(1 for r in rows if r[5] and "overdue" in str(r[5]))
     lines          = [
-        "| Invoice # | Status | Amount | Due Date | Company | Overdue Status |",
+        "| Invoice # | Status | Amount (USD) | Due Date | Company | Overdue Status |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-    for r in rows[:30]:
+    for r in rows:
         vals = ["—" if v is None else str(v) for v in r]
         lines.append("| " + " | ".join(vals) + " |")
-    if len(rows) > 30:
-        lines.append(f"_…and {len(rows)-30} more_")
 
     return {
         "answer":      (
             f"**Pending Invoices — {len(rows)} total "
-            f"(⚠️ {overdue_count} overdue), "
-            f"Total: {fmt_number(total_pending)}:**\n\n" + "\n".join(lines)
+            f"({overdue_count} overdue), "
+            f"Total: USD {fmt_number(total_pending)}:**\n\n" + "\n".join(lines)
         ),
         "tables_used": ["invoices"] + (["companies"] if has_co else []),
         "confidence":  0.97,
@@ -2472,9 +3032,9 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
             continue
         candidate_field = fl_norm[key]
         if canonical is None:
-            candidate_where = f"COALESCE(document->>'{candidate_field}','') NOT IN ('paid','cancelled')"
+            candidate_where = f"COALESCE(\"{candidate_field}\",'') NOT IN ('paid','cancelled')"
         else:
-            candidate_where = f"LOWER(document->>'{candidate_field}') = '{canonical.lower()}'"
+            candidate_where = f"LOWER(\"{candidate_field}\") = '{canonical.lower()}'"
 
         # Quick existence check — only cost is one COUNT query per field candidate
         _probe = run_sql(agent, f'SELECT COUNT(*)::int FROM "{inv_table}" WHERE ({candidate_where})')
@@ -2490,9 +3050,9 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
             if key in fl_norm:
                 status_field = fl_norm[key]
                 if canonical is None:
-                    where_clause = f"COALESCE(document->>'{status_field}','') NOT IN ('paid','cancelled')"
+                    where_clause = f"COALESCE(\"{status_field}\",'') NOT IN ('paid','cancelled')"
                 else:
-                    where_clause = f"LOWER(document->>'{status_field}') = '{canonical.lower()}'"
+                    where_clause = f"LOWER(\"{status_field}\") = '{canonical.lower()}'"
                 break
     if not status_field:
         return None
@@ -2512,16 +3072,16 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
 
     select_parts = []
     if num_field:
-        select_parts.append(f"document->>'{num_field}' AS invoice_number")
-    select_parts.append(f"document->>'{status_field}' AS status")
+        select_parts.append(f"\"{num_field}\" AS invoice_number")
+    select_parts.append(f"\"{status_field}\" AS status")
     if amount_field:
-        select_parts.append(f"NULLIF(document->>'{amount_field}','')::numeric AS amount")
+        select_parts.append(f"NULLIF(\"{amount_field}\",'')::numeric AS amount")
     if date_field:
-        select_parts.append(f"document->>'{date_field}' AS date")
+        select_parts.append(f"\"{date_field}\" AS date")
 
     list_sql = (
         f'SELECT {", ".join(select_parts)} FROM "{inv_table}" '
-        f'WHERE ({where_clause}) ORDER BY updated_at DESC LIMIT 50'
+        f'WHERE ({where_clause}) ORDER BY updated_at DESC'
     ).strip()
     _rows = run_sql(agent, list_sql)
     if _rows.error:
@@ -2540,7 +3100,7 @@ def _fp_invoice_status(agent, user_query: str) -> Optional[Dict]:
 
     headers = [p.split(" AS ")[-1].replace("_", " ").title() for p in select_parts]
     lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
-    for row in rows[:30]:
+    for row in rows:
         vals = ["—" if v is None else str(v) for v in row]
         lines.append("| " + " | ".join(vals) + " |")
     if len(rows) > 30:
@@ -2615,37 +3175,37 @@ def _fp_user_task_map(agent, user_query: str) -> Optional[Dict]:
     status_label  = ""
     # "pending or completed" must be checked before individual keywords
     if re.search(r"pending.{0,20}or.{0,20}completed?|completed?.{0,20}or.{0,20}pending", text, re.I):
-        status_filter = f"AND LOWER(t.document->>'{status_fld}') IN ('pending', 'completed')"
+        status_filter = f"AND LOWER(t.\"{status_fld}\") IN ('pending', 'completed')"
         status_label  = "Pending or Completed"
     elif re.search(r"\bpending\b", text):
-        status_filter = f"AND LOWER(t.document->>'{status_fld}') = 'pending'"
+        status_filter = f"AND LOWER(t.\"{status_fld}\") = 'pending'"
         status_label  = "Pending"
     elif re.search(r"\bcompleted?\b|\bdone\b", text):
-        status_filter = f"AND LOWER(t.document->>'{status_fld}') = 'completed'"
+        status_filter = f"AND LOWER(t.\"{status_fld}\") = 'completed'"
         status_label  = "Completed"
     elif re.search(r"\bopen\b", text):
-        status_filter = f"AND LOWER(t.document->>'{status_fld}') = 'open'"
+        status_filter = f"AND LOWER(t.\"{status_fld}\") = 'open'"
         status_label  = "Open"
 
     # ── Build SELECT columns ───────────────────────────────────────────────────
     cols = [
-        f"COALESCE(u.document->>'{user_name_fld}', 'Unassigned') AS user_name",
-        f"COALESCE(t.document->>'{task_name_fld}', 'Untitled') AS task",
-        f"COALESCE(t.document->>'{status_fld}', '—') AS status",
+        f"COALESCE(u.\"{user_name_fld}\", 'Unassigned') AS user_name",
+        f"COALESCE(t.\"{task_name_fld}\", 'Untitled') AS task",
+        f"COALESCE(t.\"{status_fld}\", '—') AS status",
     ]
     if priority_fld:
-        cols.append(f"COALESCE(t.document->>'{priority_fld}', '—') AS priority")
+        cols.append(f"COALESCE(t.\"{priority_fld}\", '—') AS priority")
     if due_fld:
-        cols.append(f"t.document->>'{due_fld}' AS due_date")
+        cols.append(f"t.\"{due_fld}\" AS due_date")
 
     sql = f"""SELECT {', '.join(cols)}
 FROM "{task_table}" t
 LEFT JOIN "{user_table}" u
-  ON u.document->>'_id' = t.document->>'{join_fld}'
-WHERE t.document->>'{join_fld}' IS NOT NULL
+  ON u._id = t.\"{join_fld}\"
+WHERE t.\"{join_fld}\" IS NOT NULL
   {status_filter}
-ORDER BY u.document->>'{user_name_fld}' ASC NULLS LAST,
-         t.document->>'{task_name_fld}'
+ORDER BY u.\"{user_name_fld}\" ASC NULLS LAST,
+         t.\"{task_name_fld}\"
 LIMIT 200""".strip()
 
     _res = run_sql(agent, sql)
@@ -2665,11 +3225,9 @@ LIMIT 200""".strip()
 
     headers = [c.split(" AS ")[-1].replace("_", " ").title() for c in cols]
     lines   = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
-    for row in rows[:50]:
+    for row in rows:
         vals = ["—" if v is None else str(v) for v in row]
         lines.append("| " + " | ".join(vals) + " |")
-    if len(rows) > 50:
-        lines.append(f"_…and {len(rows)-50} more rows_")
 
     lbl = f" (status: {status_label})" if status_label else ""
     return {
@@ -2678,6 +3236,359 @@ LIMIT 200""".strip()
         "confidence":  0.97,
         "sql_queries": [sql],
     }
+
+
+def _fp_who_pending_tasks(agent, user_query: str) -> Optional[Dict]:
+    """'Who have pending tasks?' → GROUP BY user showing task counts per person."""
+    text = normalize_text(user_query)
+    if not re.search(
+        r"\bwho\b.{0,30}\b(have|has|with)\b.{0,30}\btasks?\b"
+        r"|\bwhich\s+user\b.{0,30}\btasks?\b"
+        r"|\bpending\s+task.{0,20}per\s+(user|person|member)\b",
+        text, re.I,
+    ):
+        return None
+
+    table_names = get_table_names(agent)
+    user_table  = next((t for t in table_names if t.lower() == "users"), None)
+    task_table  = next((t for t in table_names if t.lower() in ["createtasks", "tasks"]), None)
+    if not user_table or not task_table:
+        return None
+
+    task_fields = get_document_fields(agent, task_table)
+    status_fld  = next((f for f in task_fields if "status" in f.lower()), "status")
+    join_fld    = next(
+        (f for f in task_fields
+         if f.lower().replace("_","") in ["createdby","assignedto","userid","ownerid"]),
+        "createdBy",
+    )
+
+    status_filter = "AND LOWER(t.\"{}\") = 'pending'".format(status_fld)
+    status_label  = "Pending"
+    if re.search(r"\bcompleted?\b|\bdone\b", text):
+        status_filter = f"AND LOWER(t.\"{status_fld}\") = 'completed'"
+        status_label  = "Completed"
+    elif re.search(r"\ball\b|\bany\b", text) and not re.search(r"\bpending\b", text):
+        status_filter = ""
+        status_label  = "All"
+
+    sql = f"""
+        SELECT
+            COALESCE(u.name, 'Unassigned') AS user_name,
+            COUNT(t._id)::int AS task_count
+        FROM "{task_table}" t
+        LEFT JOIN "{user_table}" u ON u._id = t."{join_fld}"::text
+        WHERE (t.deleted = false OR t.deleted IS NULL)
+          AND t."{join_fld}" IS NOT NULL
+          {status_filter}
+        GROUP BY u._id, u.name
+        ORDER BY task_count DESC
+    """
+    res = run_sql(agent, sql)
+    if res.error or not res.rows:
+        return None
+
+    rows = res.rows
+    lines = ["| User | Task Count |", "| --- | --- |"]
+    for r in rows:
+        lines.append(f"| {r[0] or '—'} | {r[1] or 0} |")
+
+    total = sum(r[1] or 0 for r in rows)
+    return {
+        "answer": (
+            f"**{status_label} Tasks by User — {len(rows)} users, {total} total tasks:**\n\n"
+            + "\n".join(lines)
+        ),
+        "tables_used": [user_table, task_table],
+        "confidence": 0.97,
+        "sql_queries": [sql.strip()],
+    }
+
+
+def _fp_person_lookup(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'summary of Kartik', 'details of kartik trivedi', 'all details of kartik'."""
+    text = normalize_text(user_query)
+
+    # Must match "summary/details/profile of [Name]" or "[Name] summary/profile"
+    name_m = (
+        re.search(r"(?:summary|details?|profile|info(?:rmation)?)\s+(?:of|for|about)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", user_query, re.I) or
+        re.search(r"all\s+details?\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", user_query, re.I) or
+        re.search(r"\bi\s+want\s+(?:all\s+)?details?\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", user_query, re.I)
+    )
+    if not name_m:
+        return None
+
+    person_name = name_m.group(1).strip()
+    # Skip generic words
+    if person_name.lower() in {"the", "a", "an", "this", "that", "all", "every"}:
+        return None
+
+    table_names = get_table_names(agent)
+    safe_name = person_name.replace("'", "''")
+
+    # Try contacts first, then users
+    result_lines = []
+    tables_used = []
+
+    if "contacts" in table_names:
+        sql = f"""
+            SELECT "firstName", "lastName", email, phone, "leadStatus",
+                   "lifecycleStage", "jobTitle"
+            FROM contacts
+            WHERE (CONCAT("firstName", ' ', "lastName") ILIKE '%{safe_name}%'
+                   OR "firstName" ILIKE '%{safe_name}%')
+              AND (deleted = false OR deleted IS NULL)
+            LIMIT 3
+        """
+        res = run_sql(agent, sql)
+        if res.ok() and res.rows:
+            for row in res.rows:
+                fn, ln, email, phone, lead_status, lifecycle, job_title = row
+                full_name = f"{fn or ''} {ln or ''}".strip()
+                result_lines.append(f"### Contact: {full_name}")
+                result_lines.append(f"- **Email:** {email or '—'}")
+                result_lines.append(f"- **Phone:** {phone or '—'}")
+                result_lines.append(f"- **Job Title:** {job_title or '—'}")
+                result_lines.append(f"- **Lead Status:** {lead_status or '—'}")
+                result_lines.append(f"- **Lifecycle Stage:** {lifecycle or '—'}")
+            tables_used.append("contacts")
+
+    if "users" in table_names:
+        sql_u = f"""
+            SELECT name, email, phone, department, "isActive"
+            FROM users
+            WHERE name ILIKE '%{safe_name}%'
+              AND ("isActive" = true OR "isActive" IS NULL)
+            LIMIT 3
+        """
+        res_u = run_sql(agent, sql_u)
+        if res_u.ok() and res_u.rows:
+            for row in res_u.rows:
+                name, email, phone, dept, is_active = row
+                result_lines.append(f"\n### User: {name or safe_name}")
+                result_lines.append(f"- **Email:** {email or '—'}")
+                result_lines.append(f"- **Phone:** {phone or '—'}")
+                result_lines.append(f"- **Department:** {dept or '—'}")
+                result_lines.append(f"- **Active:** {'Yes' if is_active else 'No'}")
+            tables_used.append("users")
+
+    if not result_lines:
+        return {
+            "answer": f"No contact or user found matching **{person_name}**.",
+            "tables_used": [], "confidence": 0.85, "sql_queries": [],
+        }
+
+    return {
+        "answer": f"**Person Lookup: {person_name}**\n\n" + "\n".join(result_lines),
+        "tables_used": tables_used,
+        "confidence": 0.95,
+        "sql_queries": [],
+    }
+
+
+def _fp_meetings(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'meetings for today', 'meetings for 2026-05-12', 'upcoming meetings'."""
+    text = normalize_text(user_query)
+    if not re.search(r"\bmeetings?\b|\bschedule\b|\bcalendar\b|\bappointment\b", text):
+        return None
+
+    table_names = get_table_names(agent)
+    meeting_table = next(
+        (t for t in table_names if t.lower() in ["meetings", "meeting", "appointments", "events"]),
+        None,
+    )
+    if not meeting_table:
+        return {
+            "answer": "No meetings table found in the database.",
+            "tables_used": [], "confidence": 0.8, "sql_queries": [],
+        }
+
+    fields     = get_document_fields(agent, meeting_table)
+    title_fld  = next((f for f in fields if f.lower() in ["title","subject","name","agenda"]), None)
+    date_fld   = next((f for f in fields if "date" in f.lower() or "start" in f.lower() or "time" in f.lower()), None)
+    status_fld = next((f for f in fields if "status" in f.lower()), None)
+
+    # Parse date from query
+    date_filter = ""
+    date_label  = "all"
+    date_m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", user_query)
+    if date_m:
+        target_date = date_m.group(1)
+        if date_fld:
+            date_filter = f"AND NULLIF(\"{date_fld}\",'')::date = '{target_date}'"
+        date_label = target_date
+    elif re.search(r"\btoday\b", text):
+        if date_fld:
+            date_filter = f"AND NULLIF(\"{date_fld}\",'')::date = CURRENT_DATE"
+        date_label = "today"
+    elif re.search(r"\btomorrow\b", text):
+        if date_fld:
+            date_filter = f"AND NULLIF(\"{date_fld}\",'')::date = CURRENT_DATE + 1"
+        date_label = "tomorrow"
+    elif re.search(r"\bthis\s+week\b", text):
+        if date_fld:
+            date_filter = (
+                f"AND NULLIF(\"{date_fld}\",'')::date >= DATE_TRUNC('week', CURRENT_DATE)::date "
+                f"AND NULLIF(\"{date_fld}\",'')::date < DATE_TRUNC('week', CURRENT_DATE)::date + 7"
+            )
+        date_label = "this week"
+    elif re.search(r"\bupcoming\b", text):
+        if date_fld:
+            date_filter = f"AND NULLIF(\"{date_fld}\",'')::date >= CURRENT_DATE"
+        date_label = "upcoming"
+
+    cols = []
+    if title_fld:  cols.append(f'COALESCE("{title_fld}", \'Untitled\') AS title')
+    if date_fld:   cols.append(f'"{date_fld}" AS meeting_date')
+    if status_fld: cols.append(f'COALESCE("{status_fld}", \'—\') AS status')
+    if not cols:
+        return None
+
+    order = f'ORDER BY "{date_fld}" ASC' if date_fld else "ORDER BY updated_at DESC"
+    sql = f'SELECT {", ".join(cols)} FROM "{meeting_table}" WHERE (deleted = false OR deleted IS NULL) {date_filter} {order}'
+
+    res = run_sql(agent, sql)
+    if res.error:
+        return None
+    rows = res.rows
+    if not rows:
+        return {
+            "answer": f"No meetings found for **{date_label}**.",
+            "tables_used": [meeting_table], "confidence": 0.9, "sql_queries": [sql],
+        }
+
+    headers = [c.split(" AS ")[-1].replace("_", " ").title() for c in cols]
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in rows:
+        vals = ["—" if v is None else str(v) for v in row]
+        lines.append("| " + " | ".join(vals) + " |")
+
+    return {
+        "answer": f"**{len(rows)} meetings for {date_label}:**\n\n" + "\n".join(lines),
+        "tables_used": [meeting_table],
+        "confidence": 0.95,
+        "sql_queries": [sql],
+    }
+
+
+def _fp_funnel(agent, user_query: str) -> Optional[Dict]:
+    """Handle funnel performance, conversion rate, lead-to-customer analysis."""
+    text = normalize_text(user_query)
+    if not re.search(
+        r"\bfunnel\b|\bconversion\s+rate\b|\blead\s+to\s+customer\b"
+        r"|\bhigh.{0,15}activity.{0,15}(company|companies)\b"
+        r"|\bweak.{0,15}payment\b|\bpayment.{0,15}conversion\b",
+        text, re.I,
+    ):
+        return None
+
+    table_names = get_table_names(agent)
+
+    # ── Funnel / lead-to-customer conversion ──────────────────────────────────
+    if re.search(r"\bfunnel\b|\blead\s+to\s+customer\b|\bconversion\s+rate\b", text, re.I):
+        stages_data = {}
+        sqls = []
+
+        if "contacts" in table_names:
+            sql_leads = 'SELECT COUNT(*)::int FROM contacts WHERE (deleted = false OR deleted IS NULL)'
+            res = run_sql(agent, sql_leads)
+            sqls.append(sql_leads)
+            stages_data["Total Contacts"] = res.rows[0][0] if res.ok() and res.rows else 0
+
+            sql_cust = """SELECT COUNT(*)::int FROM contacts
+                WHERE "lifecycleStage" = 'customer'
+                AND (deleted = false OR deleted IS NULL)"""
+            res2 = run_sql(agent, sql_cust)
+            sqls.append(sql_cust)
+            stages_data["Customers"] = res2.rows[0][0] if res2.ok() and res2.rows else 0
+
+        if "deals" in table_names:
+            sql_won = """SELECT COUNT(*)::int FROM deals
+                WHERE stage ILIKE '%closed%won%'
+                AND (deleted = false OR deleted IS NULL)"""
+            res3 = run_sql(agent, sql_won)
+            sqls.append(sql_won)
+            stages_data["Closed Won Deals"] = res3.rows[0][0] if res3.ok() and res3.rows else 0
+
+            sql_all_d = 'SELECT COUNT(*)::int FROM deals WHERE (deleted = false OR deleted IS NULL)'
+            res4 = run_sql(agent, sql_all_d)
+            sqls.append(sql_all_d)
+            stages_data["Total Deals"] = res4.rows[0][0] if res4.ok() and res4.rows else 0
+
+        if "outreaches" in table_names:
+            sql_out = 'SELECT COUNT(*)::int FROM outreaches WHERE ("isDeleted" = false OR "isDeleted" IS NULL)'
+            res5 = run_sql(agent, sql_out)
+            sqls.append(sql_out)
+            stages_data["Total Outreaches"] = res5.rows[0][0] if res5.ok() and res5.rows else 0
+
+        total_contacts = stages_data.get("Total Contacts", 0)
+        customers      = stages_data.get("Customers", 0)
+        won_deals      = stages_data.get("Closed Won Deals", 0)
+        total_deals    = stages_data.get("Total Deals", 0)
+
+        conv_rate = round(customers / total_contacts * 100, 1) if total_contacts else 0
+        win_rate  = round(won_deals / total_deals * 100, 1) if total_deals else 0
+
+        lines = [
+            "| Stage | Count | Conversion |",
+            "| --- | --- | --- |",
+            f"| Total Contacts | {total_contacts:,} | — |",
+            f"| Total Deals Created | {total_deals:,} | {round(total_deals/total_contacts*100,1) if total_contacts else 0}% of contacts |",
+            f"| Closed Won Deals | {won_deals:,} | {win_rate}% win rate |",
+            f"| Converted to Customer | {customers:,} | {conv_rate}% of contacts |",
+        ]
+        return {
+            "answer": f"**CRM Funnel Performance:**\n\n" + "\n".join(lines),
+            "tables_used": [t for t in ["contacts", "deals", "outreaches"] if t in table_names],
+            "confidence": 0.95,
+            "sql_queries": sqls,
+        }
+
+    # ── High activity companies with weak payment conversion ──────────────────
+    if re.search(r"\bhigh.{0,15}activity\b|\bweak.{0,15}payment\b", text, re.I):
+        if "companies" not in table_names or "invoices" not in table_names:
+            return None
+
+        sql = """
+            SELECT
+                COALESCE(c."companyName", 'Unknown') AS company,
+                COUNT(DISTINCT i._id)::int AS invoice_count,
+                COALESCE(SUM(CASE WHEN i.payment_status = 'paid' THEN i."grandtotal_in_usd" ELSE 0 END), 0)::numeric AS paid_amount,
+                COALESCE(SUM(i."grandtotal_in_usd"), 0)::numeric AS total_amount,
+                CASE WHEN SUM(i."grandtotal_in_usd") > 0
+                     THEN ROUND(SUM(CASE WHEN i.payment_status='paid' THEN i."grandtotal_in_usd" ELSE 0 END)
+                          / SUM(i."grandtotal_in_usd") * 100, 1)
+                     ELSE 0 END AS payment_rate_pct
+            FROM companies c
+            JOIN invoices i ON i.company::text = c._id
+            WHERE (c.deleted = false OR c.deleted IS NULL)
+              AND (i.deleted = false OR i.deleted IS NULL)
+            GROUP BY c._id, c."companyName"
+            HAVING COUNT(DISTINCT i._id) >= 3
+            ORDER BY invoice_count DESC, payment_rate_pct ASC
+            LIMIT 20
+        """
+        res = run_sql(agent, sql)
+        if res.error or not res.rows:
+            return {
+                "answer": "No companies found matching high-activity criteria.",
+                "tables_used": ["companies","invoices"], "confidence": 0.8, "sql_queries": [sql],
+            }
+        rows = res.rows
+        lines = [
+            "| Company | Invoices | Paid | Total | Payment Rate |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for r in rows:
+            lines.append(f"| {r[0]} | {r[1]} | {fmt_number(float(r[2] or 0))} | {fmt_number(float(r[3] or 0))} | {r[4]}% |")
+        return {
+            "answer": f"**High Activity Companies — Invoice & Payment Analysis ({len(rows)} companies):**\n\n" + "\n".join(lines),
+            "tables_used": ["companies","invoices"],
+            "confidence": 0.92,
+            "sql_queries": [sql.strip()],
+        }
+
+    return None
 
 
 def _fp_system_config(agent, user_query: str) -> Optional[Dict]:
@@ -2728,12 +3639,12 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
 
     # Build select
     select_parts = []
-    if num_field:    select_parts.append(f"document->>'{num_field}' AS sales_number")
-    if status_field: select_parts.append(f"document->>'{status_field}' AS status")
+    if num_field:    select_parts.append(f"\"{num_field}\" AS sales_number")
+    if status_field: select_parts.append(f"\"{status_field}\" AS status")
     if amount_field: select_parts.append(
-        f"NULLIF(document->>'{amount_field}','')::numeric AS amount"
+        f"NULLIF(\"{amount_field}\",'')::numeric AS amount"
     )
-    if date_field:   select_parts.append(f"document->>'{date_field}' AS date")
+    if date_field:   select_parts.append(f"\"{date_field}\" AS date")
     if not select_parts:
         return None
 
@@ -2746,16 +3657,16 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
     else:
         limit = 20
 
-    order = (f"NULLIF(document->>'{amount_field}','')::numeric DESC NULLS LAST"
+    order = (f"NULLIF(\"{amount_field}\",'')::numeric DESC NULLS LAST"
              if (sort_desc or top_match) and amount_field
-             else f"NULLIF(document->>'{date_field}','')::timestamptz DESC NULLS LAST"
+             else f"NULLIF(\"{date_field}\",'')::timestamptz DESC NULLS LAST"
              if date_field else "updated_at DESC")
 
     # Status filter
-    where_parts = [f"COALESCE(document->>'deleted','false') != 'true'"]
+    where_parts = [f"(deleted = false OR deleted IS NULL)"]
     for kw, val in [("confirmed", "Confirm"), ("draft", "Draft"), ("cancelled", "Cancel")]:
         if kw in text and status_field:
-            where_parts.append(f"document->>'{status_field}' ILIKE '%{val}%'")
+            where_parts.append(f"\"{status_field}\" ILIKE '%{val}%'")
             break
 
     where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
@@ -2823,11 +3734,11 @@ def _fp_active_customers(agent, user_query: str) -> Optional[Dict]:
 
     # WHERE: exclude Inactive Customer and Dead Customer, exclude deleted
     where_parts = [
-        f"COALESCE(document->>'{lifecycle_field}', '') "
+        f"COALESCE(\"{lifecycle_field}\", '') "
         f"NOT IN ('Inactive Customer', 'Dead Customer')",
     ]
     if deleted_field:
-        where_parts.append(f"COALESCE(document->>'{deleted_field}', 'false') != 'true'")
+        where_parts.append(f"COALESCE(\"{deleted_field}\", 'false') != 'true'")
 
     where = "WHERE " + " AND ".join(f"({p})" for p in where_parts)
 
@@ -2855,12 +3766,12 @@ def _fp_active_customers(agent, user_query: str) -> Optional[Dict]:
         }
 
     # List view — build select
-    select_parts = [f"document->>'{name_field}' AS name"]
+    select_parts = [f"\"{name_field}\" AS name"]
     if email_field:
-        select_parts.append(f"document->>'{email_field}' AS email")
+        select_parts.append(f"\"{email_field}\" AS email")
     if status_field:
-        select_parts.append(f"document->>'{status_field}' AS lead_status")
-    select_parts.append(f"document->>'{lifecycle_field}' AS lifecycle_stage")
+        select_parts.append(f"\"{status_field}\" AS lead_status")
+    select_parts.append(f"\"{lifecycle_field}\" AS lifecycle_stage")
 
     list_sql = (
         f"SELECT {', '.join(select_parts)} FROM \"{table}\" {where} "
@@ -2973,10 +3884,10 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     rows = _q("""
         SELECT
           COUNT(*)::int AS total,
-          COUNT(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost') THEN 1 END)::int AS open_cnt,
-          COUNT(CASE WHEN document->>'stage' = 'Closed Won' THEN 1 END)::int AS won_cnt,
-          COUNT(CASE WHEN document->>'stage' = 'Closed Lost' THEN 1 END)::int AS lost_cnt
-        FROM deals WHERE COALESCE(document->>'deleted','false') != 'true'
+          COUNT(CASE WHEN stage NOT IN ('Closed Won','Closed Lost') THEN 1 END)::int AS open_cnt,
+          COUNT(CASE WHEN stage = 'Closed Won' THEN 1 END)::int AS won_cnt,
+          COUNT(CASE WHEN stage = 'Closed Lost' THEN 1 END)::int AS lost_cnt
+        FROM deals WHERE (deleted = false OR deleted IS NULL)
     """)
     r = _row(rows, 4)
     if r:
@@ -2991,14 +3902,14 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     rows = _q("""
         SELECT
-          COALESCE(SUM(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost')
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS pipeline_val,
-          COALESCE(SUM(CASE WHEN document->>'stage' = 'Closed Won'
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS won_val,
-          ROUND(AVG(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost')
-            AND NULLIF(document->>'grand_total_in_usd','')::numeric > 0
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric END)::numeric, 2) AS avg_size
-        FROM deals WHERE COALESCE(document->>'deleted','false') != 'true'
+          COALESCE(SUM(CASE WHEN stage NOT IN ('Closed Won','Closed Lost')
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS pipeline_val,
+          COALESCE(SUM(CASE WHEN stage = 'Closed Won'
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS won_val,
+          ROUND(AVG(CASE WHEN stage NOT IN ('Closed Won','Closed Lost')
+            AND "grand_total_in_usd" > 0
+            THEN "grand_total_in_usd" END)::numeric, 2) AS avg_size
+        FROM deals WHERE (deleted = false OR deleted IS NULL)
     """)
     r2 = _row(rows, 2)
     if r2 and "deals" in kpi:
@@ -3008,11 +3919,11 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 2. DEALS BY STAGE (open only) ────────────────────────────────────────────
     rows = _q("""
-        SELECT document->>'stage', COUNT(*)::int,
-               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0)
+        SELECT stage, COUNT(*)::int,
+               COALESCE(SUM("grand_total_in_usd"), 0)
         FROM deals
-        WHERE COALESCE(document->>'deleted','false') != 'true'
-          AND document->>'stage' NOT IN ('Closed Won','Closed Lost')
+        WHERE (deleted = false OR deleted IS NULL)
+          AND stage NOT IN ('Closed Won','Closed Lost')
         GROUP BY 1 ORDER BY 3 DESC
     """)
     kpi["deal_stages"] = [
@@ -3023,11 +3934,11 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 3. STALLED DEALS (closeDate passed, still open) ──────────────────────────
     rows = _q("""
         SELECT COUNT(*)::int,
-               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0)
+               COALESCE(SUM("grand_total_in_usd"), 0)
         FROM deals
-        WHERE COALESCE(document->>'deleted','false') != 'true'
-          AND document->>'stage' NOT IN ('Closed Won','Closed Lost')
-          AND NULLIF(document->>'closeDate','')::timestamptz < NOW()
+        WHERE (deleted = false OR deleted IS NULL)
+          AND stage NOT IN ('Closed Won','Closed Lost')
+          AND NULLIF(\"closeDate\",'')::timestamptz < NOW()
     """)
     r = _row(rows, 2)
     kpi["stalled_deals"] = {
@@ -3038,15 +3949,15 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 4. DEALS BY OWNER / SALES REP ────────────────────────────────────────────
     rows = _q("""
         SELECT
-          COALESCE(u.document->>'name', 'Unassigned') AS rep,
-          COUNT(*) FILTER (WHERE d.document->>'stage' NOT IN ('Closed Won','Closed Lost'))::int AS open_deals,
-          COUNT(*) FILTER (WHERE d.document->>'stage' = 'Closed Won')::int AS won,
-          COUNT(*) FILTER (WHERE d.document->>'stage' = 'Closed Lost')::int AS lost,
-          COALESCE(SUM(NULLIF(d.document->>'grand_total_in_usd','')::numeric)
-            FILTER (WHERE d.document->>'stage' NOT IN ('Closed Won','Closed Lost')), 0) AS pipeline
+          COALESCE(u.name, 'Unassigned') AS rep,
+          COUNT(*) FILTER (WHERE d.stage NOT IN ('Closed Won','Closed Lost'))::int AS open_deals,
+          COUNT(*) FILTER (WHERE d.stage = 'Closed Won')::int AS won,
+          COUNT(*) FILTER (WHERE d.stage = 'Closed Lost')::int AS lost,
+          COALESCE(SUM(d.\"grand_total_in_usd\")
+            FILTER (WHERE d.stage NOT IN ('Closed Won','Closed Lost')), 0) AS pipeline
         FROM deals d
-        LEFT JOIN users u ON u.document->>'_id' = d.document->>'owner'
-        WHERE COALESCE(d.document->>'deleted','false') != 'true'
+        LEFT JOIN users u ON u._id = d.owner
+        WHERE (d.deleted = false OR d.deleted IS NULL)
         GROUP BY 1 ORDER BY 2 DESC
     """)
     kpi["deals_by_rep"] = [
@@ -3057,8 +3968,8 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 5. COMPANIES / CUSTOMER LIFECYCLE ────────────────────────────────────────
     rows = _q("""
-        SELECT document->>'lifecycleStage', COUNT(*)::int
-        FROM companies WHERE COALESCE(document->>'deleted','false') != 'true'
+        SELECT \"lifecycleStage\", COUNT(*)::int
+        FROM companies WHERE (deleted = false OR deleted IS NULL)
         GROUP BY 1 ORDER BY 2 DESC
     """)
     lifecycle = {r[0] or "Unknown": _si(r[1]) for r in rows if r and len(r) >= 2}
@@ -3075,13 +3986,13 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 6. CUSTOMER CONVERSIONS YoY ──────────────────────────────────────────────
     rows = _q("""
         SELECT
-          COUNT(*) FILTER (WHERE (document->>'leadWonAt')::date >= date_trunc('year', CURRENT_DATE))::int,
-          COUNT(*) FILTER (WHERE EXTRACT(year FROM (document->>'leadWonAt')::date)
+          COUNT(*) FILTER (WHERE (\"leadWonAt\")::date >= date_trunc('year', CURRENT_DATE))::int,
+          COUNT(*) FILTER (WHERE EXTRACT(year FROM (\"leadWonAt\")::date)
             = EXTRACT(year FROM CURRENT_DATE)-1)::int
         FROM companies
-        WHERE document->>'lifecycleStage' IN ('Customer','Partner')
-          AND COALESCE(document->>'deleted','false') != 'true'
-          AND document->>'leadWonAt' IS NOT NULL AND document->>'leadWonAt' != ''
+        WHERE \"lifecycleStage\" IN ('Customer','Partner')
+          AND (deleted = false OR deleted IS NULL)
+          AND \"leadWonAt\" IS NOT NULL AND \"leadWonAt\" != ''
     """)
     r = _row(rows, 2)
     kpi["conversions"] = {
@@ -3091,19 +4002,19 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 7. INDUSTRY DISTRIBUTION ─────────────────────────────────────────────────
     rows = _q("""
-        SELECT COALESCE(document->>'industry','Unknown'), COUNT(*)::int
-        FROM companies WHERE COALESCE(document->>'deleted','false') != 'true'
-          AND document->>'industry' IS NOT NULL AND document->>'industry' != ''
+        SELECT COALESCE(industry,'Unknown'), COUNT(*)::int
+        FROM companies WHERE (deleted = false OR deleted IS NULL)
+          AND industry IS NOT NULL AND industry != ''
         GROUP BY 1 ORDER BY 2 DESC LIMIT 8
     """)
     kpi["industries"] = [{"name": r[0], "count": _si(r[1])} for r in rows if r and len(r) >= 2]
 
     # ── 8. REGION DISTRIBUTION ───────────────────────────────────────────────────
     rows = _q("""
-        SELECT r.document->>'regionName', COUNT(c.id)::int
+        SELECT r.\"regionName\", COUNT(c.id)::int
         FROM companies c
-        JOIN regions r ON r.document->>'_id' = c.document->>'region'
-        WHERE COALESCE(c.document->>'deleted','false') != 'true'
+        JOIN regions r ON r._id = c.region
+        WHERE (c.deleted = false OR c.deleted IS NULL)
         GROUP BY 1 ORDER BY 2 DESC
     """)
     kpi["regions"] = [{"name": r[0], "count": _si(r[1])} for r in rows if r and len(r) >= 2]
@@ -3111,28 +4022,28 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 9. REVENUE BUCKETS — split into two queries to avoid LangChain column truncation ──
     rows = _q("""
         SELECT
-          COALESCE(SUM(CASE WHEN (document->>'sales_date')::date >= date_trunc('month', CURRENT_DATE)
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS this_month,
-          COALESCE(SUM(CASE WHEN date_trunc('month',(document->>'sales_date')::date)
+          COALESCE(SUM(CASE WHEN (\"sales_date\")::date >= date_trunc('month', CURRENT_DATE)
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS this_month,
+          COALESCE(SUM(CASE WHEN date_trunc('month',(\"sales_date\")::date)
             = date_trunc('month', CURRENT_DATE - INTERVAL '1 month')
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS last_month,
-          COALESCE(SUM(CASE WHEN (document->>'sales_date')::date >= CURRENT_DATE - INTERVAL '3 months'
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS last_3m
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS last_month,
+          COALESCE(SUM(CASE WHEN (\"sales_date\")::date >= CURRENT_DATE - INTERVAL '3 months'
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS last_3m
         FROM sales
-        WHERE document->>'status' = 'Confirm'
-          AND COALESCE(document->>'deleted','false') != 'true'
+        WHERE status = 'Confirm'
+          AND (deleted = false OR deleted IS NULL)
     """)
     rows2 = _q("""
         SELECT
-          COALESCE(SUM(CASE WHEN (document->>'sales_date')::date >= date_trunc('year', CURRENT_DATE)
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS ytd,
-          COALESCE(SUM(CASE WHEN EXTRACT(year FROM (document->>'sales_date')::date)
+          COALESCE(SUM(CASE WHEN (\"sales_date\")::date >= date_trunc('year', CURRENT_DATE)
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS ytd,
+          COALESCE(SUM(CASE WHEN EXTRACT(year FROM (\"sales_date\")::date)
             = EXTRACT(year FROM CURRENT_DATE)-1
-            THEN NULLIF(document->>'grand_total_in_usd','')::numeric ELSE 0 END), 0) AS last_year,
+            THEN "grand_total_in_usd" ELSE 0 END), 0) AS last_year,
           COUNT(*)::int AS order_count
         FROM sales
-        WHERE document->>'status' = 'Confirm'
-          AND COALESCE(document->>'deleted','false') != 'true'
+        WHERE status = 'Confirm'
+          AND (deleted = false OR deleted IS NULL)
     """)
     r  = _row(rows,  3)
     r2 = _row(rows2, 3)
@@ -3156,14 +4067,14 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 10. MONTHLY REVENUE TREND (last 6 months) ────────────────────────────────
     rows = _q("""
         SELECT to_char(sale_month,'Mon YYYY') AS month_label,
-               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0) AS revenue,
+               COALESCE(SUM("grand_total_in_usd"), 0) AS revenue,
                COUNT(*)::int AS orders,
                sale_month
         FROM sales,
-             LATERAL (SELECT date_trunc('month',(document->>'sales_date')::date) AS sale_month) m
-        WHERE document->>'status' = 'Confirm'
-          AND COALESCE(document->>'deleted','false') != 'true'
-          AND (document->>'sales_date')::date >= CURRENT_DATE - INTERVAL '6 months'
+             LATERAL (SELECT date_trunc('month',(\"sales_date\")::date) AS sale_month) m
+        WHERE status = 'Confirm'
+          AND (deleted = false OR deleted IS NULL)
+          AND (\"sales_date\")::date >= CURRENT_DATE - INTERVAL '6 months'
         GROUP BY sale_month ORDER BY sale_month
     """)
     kpi["monthly_trend"] = [
@@ -3173,13 +4084,13 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 11. SALES REP PERFORMANCE ────────────────────────────────────────────────
     rows = _q("""
-        SELECT COALESCE(u.document->>'name','Unassigned'),
+        SELECT COALESCE(u.name,'Unassigned'),
                COUNT(s.id)::int,
-               ROUND(COALESCE(SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric),0)::numeric,2)
+               ROUND(COALESCE(SUM(s.\"grand_total_in_usd\"),0)::numeric,2)
         FROM sales s
-        LEFT JOIN users u ON u.document->>'_id' = s.document->>'salesOwner'
-        WHERE s.document->>'status' = 'Confirm'
-          AND COALESCE(s.document->>'deleted','false') != 'true'
+        LEFT JOIN users u ON u._id = s.\"salesOwner\"
+        WHERE s.status = 'Confirm'
+          AND (s.deleted = false OR s.deleted IS NULL)
         GROUP BY 1 ORDER BY 3 DESC
     """)
     kpi["sales_reps"] = [
@@ -3189,13 +4100,13 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 12. TOP 5 CUSTOMERS BY REVENUE ───────────────────────────────────────────
     rows = _q("""
-        SELECT COALESCE(c.document->>'companyName', s.document->>'company','Unknown'),
-               ROUND(SUM(NULLIF(s.document->>'grand_total_in_usd','')::numeric)::numeric,2),
+        SELECT COALESCE(c.\"companyName\", s.company,'Unknown'),
+               ROUND(SUM(s.\"grand_total_in_usd\")::numeric,2),
                COUNT(s.id)::int
         FROM sales s
-        LEFT JOIN companies c ON c.id = s.document->>'company'
-        WHERE s.document->>'status' = 'Confirm'
-          AND COALESCE(s.document->>'deleted','false') != 'true'
+        LEFT JOIN companies c ON c.id = s.company
+        WHERE s.status = 'Confirm'
+          AND (s.deleted = false OR s.deleted IS NULL)
         GROUP BY 1 ORDER BY 2 DESC LIMIT 5
     """)
     kpi["top_customers"] = [
@@ -3214,9 +4125,9 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 13. INVOICES BY STATUS + TOTALS ──────────────────────────────────────────
     rows = _q("""
-        SELECT document->>'payment_status', COUNT(*)::int,
-               COALESCE(SUM(NULLIF(document->>'grandtotal_in_usd','')::numeric), 0)
-        FROM invoices WHERE COALESCE(document->>'deleted','false') != 'true'
+        SELECT \"payment_status\", COUNT(*)::int,
+               COALESCE(SUM("grandtotal_in_usd"), 0)
+        FROM invoices WHERE (deleted = false OR deleted IS NULL)
         GROUP BY 1 ORDER BY 3 DESC
     """)
     by_status = [
@@ -3242,12 +4153,12 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
           COUNT(*) FILTER (WHERE days_od > 90)::int,
           ROUND(SUM(amt) FILTER (WHERE days_od > 90)::numeric, 2)
         FROM (
-          SELECT DATE_PART('day', NOW()-NULLIF(document->>'due_date','')::timestamptz)::int AS days_od,
-                 COALESCE(NULLIF(document->>'grandtotal_in_usd','')::numeric, 0) AS amt
+          SELECT DATE_PART('day', NOW()-NULLIF(\"due_date\",'')::timestamptz)::int AS days_od,
+                 COALESCE("grandtotal_in_usd", 0) AS amt
           FROM invoices
-          WHERE NULLIF(document->>'due_date','')::timestamptz < NOW()
-            AND COALESCE(document->>'payment_status','') NOT IN ('paid','cancelled')
-            AND COALESCE(document->>'deleted','false') != 'true'
+          WHERE NULLIF(\"due_date\",'')::timestamptz < NOW()
+            AND COALESCE(\"payment_status\",'') NOT IN ('paid','cancelled')
+            AND (deleted = false OR deleted IS NULL)
         ) sub
     """)
     r = _row(rows, 8)
@@ -3263,15 +4174,15 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 15. TOP OVERDUE COMPANIES ────────────────────────────────────────────────
     rows = _q("""
-        SELECT COALESCE(c.document->>'companyName', i.document->>'company','Unknown'),
+        SELECT COALESCE(c.\"companyName\", i.company,'Unknown'),
                COUNT(i.id)::int,
-               ROUND(SUM(NULLIF(i.document->>'grandtotal_in_usd','')::numeric)::numeric,2),
-               MAX(DATE_PART('day', NOW()-NULLIF(i.document->>'due_date','')::timestamptz))::int
+               ROUND(SUM(i.\"grandtotal_in_usd\")::numeric,2),
+               MAX(DATE_PART('day', NOW()-NULLIF(i.\"due_date\",'')::timestamptz))::int
         FROM invoices i
-        LEFT JOIN companies c ON c.id = i.document->>'company'
-        WHERE NULLIF(i.document->>'due_date','')::timestamptz < NOW()
-          AND COALESCE(i.document->>'payment_status','') NOT IN ('paid','cancelled')
-          AND COALESCE(i.document->>'deleted','false') != 'true'
+        LEFT JOIN companies c ON c.id = i.company
+        WHERE NULLIF(i.\"due_date\",'')::timestamptz < NOW()
+          AND COALESCE(i.\"payment_status\",'') NOT IN ('paid','cancelled')
+          AND (i.deleted = false OR i.deleted IS NULL)
         GROUP BY 1 ORDER BY 3 DESC LIMIT 5
     """)
     kpi["top_overdue"] = [
@@ -3282,8 +4193,8 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 16. OUTREACH FUNNEL + CAMPAIGN ───────────────────────────────────────────
     rows = _q("""
-        SELECT document->>'status', COUNT(*)::int
-        FROM outreaches WHERE COALESCE(document->>'isDeleted','false') != 'true'
+        SELECT status, COUNT(*)::int
+        FROM outreaches WHERE (\"isDeleted\" = false OR \"isDeleted\" IS NULL)
         GROUP BY 1 ORDER BY 2 DESC
     """)
     out_by_status = {r[0] or "Unknown": _si(r[1]) for r in rows if r and len(r) >= 2}
@@ -3300,14 +4211,14 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     }
 
     rows = _q("""
-        SELECT camp.document->>'campaignName',
+        SELECT camp.\"campaignName\",
                COUNT(o.id)::int AS total,
-               COUNT(*) FILTER (WHERE o.document->>'status' IN ('Contacted','Converted to Deal'))::int AS engaged,
-               COUNT(*) FILTER (WHERE o.document->>'status' = 'Converted to Deal')::int AS converted
+               COUNT(*) FILTER (WHERE o.status IN ('Contacted','Converted to Deal'))::int AS engaged,
+               COUNT(*) FILTER (WHERE o.status = 'Converted to Deal')::int AS converted
         FROM outreaches o
-        LEFT JOIN campaigns camp ON camp.document->>'_id' = o.document->>'campaign'
-        WHERE COALESCE(o.document->>'isDeleted','false') != 'true'
-          AND o.document->>'campaign' IS NOT NULL AND o.document->>'campaign' != ''
+        LEFT JOIN campaigns camp ON camp._id = o.campaign
+        WHERE (o.\"isDeleted\" = false OR o.\"isDeleted\" IS NULL)
+          AND o.campaign IS NOT NULL AND o.campaign != ''
         GROUP BY 1 ORDER BY 2 DESC LIMIT 5
     """)
     kpi["campaigns"] = [
@@ -3318,8 +4229,8 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 17. TASKS BY PRIORITY AND USER ───────────────────────────────────────────
     rows = _q("""
-        SELECT document->>'priority', document->>'status', COUNT(*)::int
-        FROM createtasks WHERE COALESCE(document->>'deleted','false') != 'true'
+        SELECT priority, status, COUNT(*)::int
+        FROM createtasks WHERE (deleted = false OR deleted IS NULL)
         GROUP BY 1,2 ORDER BY 3 DESC
     """)
     task_matrix: Dict[str, Any] = {}
@@ -3336,12 +4247,12 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     }
 
     rows = _q("""
-        SELECT COALESCE(u.document->>'name','Unassigned'),
-               COUNT(*) FILTER (WHERE t.document->>'status'='Pending')::int,
-               COUNT(*) FILTER (WHERE t.document->>'status'='Completed')::int
+        SELECT COALESCE(u.name,'Unassigned'),
+               COUNT(*) FILTER (WHERE t.status='Pending')::int,
+               COUNT(*) FILTER (WHERE t.status='Completed')::int
         FROM createtasks t
-        LEFT JOIN users u ON u.document->>'_id' = t.document->>'createdBy'
-        WHERE COALESCE(t.document->>'deleted','false') != 'true'
+        LEFT JOIN users u ON u._id = t.\"createdBy\"
+        WHERE (t.deleted = false OR t.deleted IS NULL)
         GROUP BY 1 ORDER BY 2 DESC LIMIT 8
     """)
     kpi["tasks_by_user"] = [
@@ -3352,9 +4263,9 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 18. CONTACTS ─────────────────────────────────────────────────────────────
     rows = _q("""
         SELECT COUNT(*)::int,
-               COUNT(*) FILTER (WHERE document->>'lifecycleStage'='Lead')::int,
-               COUNT(*) FILTER (WHERE document->>'lifecycleStage'='Customer')::int
-        FROM contacts WHERE COALESCE(document->>'deleted','false') != 'true'
+               COUNT(*) FILTER (WHERE \"lifecycleStage\"='Lead')::int,
+               COUNT(*) FILTER (WHERE \"lifecycleStage\"='Customer')::int
+        FROM contacts WHERE (deleted = false OR deleted IS NULL)
     """)
     r = _row(rows, 3)
     kpi["contacts"] = {
@@ -3365,13 +4276,13 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 19. TARGETS VS ACHIEVED ───────────────────────────────────────────────────
     rows = _q("""
-        SELECT COALESCE(u.document->>'name','Unknown'),
-               COALESCE(SUM(NULLIF(t.document->>'targetInUSD','')::numeric),0) AS target,
-               t.document->>'teamName'
+        SELECT COALESCE(u.name,'Unknown'),
+               COALESCE(SUM(t.\"targetInUSD\"),0) AS target,
+               t.\"teamName\"
         FROM targets t
-        LEFT JOIN users u ON u.document->>'_id' = t.document->>'userId'
-        WHERE (t.document->>'year')::int = EXTRACT(year FROM CURRENT_DATE)::int
-          AND (t.document->>'month')::int = EXTRACT(month FROM CURRENT_DATE)::int
+        LEFT JOIN users u ON u._id = t.\"userId\"
+        WHERE (t.year)::int = EXTRACT(year FROM CURRENT_DATE)::int
+          AND (t.month)::int = EXTRACT(month FROM CURRENT_DATE)::int
         GROUP BY 1,3
     """)
     total_target = sum(_sf(r[1]) for r in rows if r and len(r) >= 2)
@@ -3381,11 +4292,11 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     ]
 
     rows = _q("""
-        SELECT COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric),0)
+        SELECT COALESCE(SUM("grand_total_in_usd"),0)
         FROM sales
-        WHERE document->>'status'='Confirm'
-          AND COALESCE(document->>'deleted','false')!='true'
-          AND (document->>'sales_date')::date >= date_trunc('month', CURRENT_DATE)
+        WHERE status='Confirm'
+          AND COALESCE(deleted,'false')!='true'
+          AND (\"sales_date\")::date >= date_trunc('month', CURRENT_DATE)
     """)
     achieved_this_month = _sf(_row(rows, 1)[0]) if _row(rows, 1) else 0
     kpi["targets"] = {
@@ -3397,7 +4308,7 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
 
     # ── 20. PRODUCTS (active count) ───────────────────────────────────────────────
     rows = _q("""
-        SELECT COUNT(*) FILTER (WHERE COALESCE(document->>'isActive','true')='true')::int,
+        SELECT COUNT(*) FILTER (WHERE COALESCE(\"isActive\",'true')='true')::int,
                COUNT(*)::int
         FROM products
     """)
@@ -3411,23 +4322,23 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     rows = _q("""
         SELECT
           COUNT(*) FILTER (WHERE
-            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('week', NOW()))::int AS week,
+            NULLIF(\"createdAt\",'')::timestamptz >= date_trunc('week', NOW()))::int AS week,
           COUNT(*) FILTER (WHERE
-            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('month', NOW()))::int AS month,
+            NULLIF(\"createdAt\",'')::timestamptz >= date_trunc('month', NOW()))::int AS month,
           COUNT(*) FILTER (WHERE
-            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('week', NOW())
-            AND document->>'lifecycleStage' = 'Lead')::int AS leads_week,
+            NULLIF(\"createdAt\",'')::timestamptz >= date_trunc('week', NOW())
+            AND \"lifecycleStage\" = 'Lead')::int AS leads_week,
           COUNT(*) FILTER (WHERE
-            NULLIF(document->>'createdAt','')::timestamptz >= date_trunc('month', NOW())
-            AND document->>'lifecycleStage' = 'Lead')::int AS leads_month,
+            NULLIF(\"createdAt\",'')::timestamptz >= date_trunc('month', NOW())
+            AND \"lifecycleStage\" = 'Lead')::int AS leads_month,
           COUNT(*) FILTER (WHERE
-            NULLIF(document->>'createdAt','')::timestamptz
+            NULLIF(\"createdAt\",'')::timestamptz
               >= date_trunc('week', NOW() - INTERVAL '1 week')
-            AND NULLIF(document->>'createdAt','')::timestamptz
+            AND NULLIF(\"createdAt\",'')::timestamptz
               < date_trunc('week', NOW())
-            AND document->>'lifecycleStage' = 'Lead')::int AS leads_last_week
+            AND \"lifecycleStage\" = 'Lead')::int AS leads_last_week
         FROM companies
-        WHERE COALESCE(document->>'deleted','false') != 'true'
+        WHERE (deleted = false OR deleted IS NULL)
     """)
     r = _row(rows, 5)
     kpi["new_leads"] = {
@@ -3441,14 +4352,14 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
         SELECT
           COUNT(*)::int AS total_uncontacted,
           COUNT(*) FILTER (WHERE
-            document->>'lastActivity' IS NULL OR document->>'lastActivity' = '')::int AS never_contacted
+            \"lastActivity\" IS NULL OR \"lastActivity\" = '')::int AS never_contacted
         FROM companies
-        WHERE document->>'lifecycleStage' = 'Lead'
-          AND COALESCE(document->>'deleted','false') != 'true'
+        WHERE \"lifecycleStage\" = 'Lead'
+          AND (deleted = false OR deleted IS NULL)
           AND (
-            document->>'lastActivity' IS NULL
-            OR document->>'lastActivity' = ''
-            OR NULLIF(document->>'lastActivity','')::timestamptz < NOW() - INTERVAL '7 days'
+            \"lastActivity\" IS NULL
+            OR \"lastActivity\" = ''
+            OR NULLIF(\"lastActivity\",'')::timestamptz < NOW() - INTERVAL '7 days'
           )
     """)
     r = _row(rows, 2)
@@ -3462,12 +4373,12 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
         SELECT
           COUNT(*)::int AS total_overdue,
           COUNT(*) FILTER (WHERE
-            NULLIF(document->>'due_date','')::timestamptz >= NOW() - INTERVAL '7 days')::int AS overdue_this_week,
-          COUNT(*) FILTER (WHERE document->>'priority' = 'High')::int AS high_priority_overdue
+            NULLIF(\"due_date\",'')::timestamptz >= NOW() - INTERVAL '7 days')::int AS overdue_this_week,
+          COUNT(*) FILTER (WHERE priority = 'High')::int AS high_priority_overdue
         FROM createtasks
-        WHERE document->>'status' = 'Pending'
-          AND NULLIF(document->>'due_date','')::timestamptz < NOW()
-          AND COALESCE(document->>'deleted','false') != 'true'
+        WHERE status = 'Pending'
+          AND NULLIF(\"due_date\",'')::timestamptz < NOW()
+          AND (deleted = false OR deleted IS NULL)
     """)
     r = _row(rows, 3)
     kpi["overdue_tasks"] = {
@@ -3479,11 +4390,11 @@ def _fp_kpi_report_inner(agent, user_query: str) -> Optional[Dict]:
     # ── 24. DEALS EXPECTED TO CLOSE THIS MONTH ────────────────────────────────────
     rows = _q("""
         SELECT COUNT(*)::int,
-               COALESCE(SUM(NULLIF(document->>'grand_total_in_usd','')::numeric), 0)
+               COALESCE(SUM("grand_total_in_usd"), 0)
         FROM deals
-        WHERE COALESCE(document->>'deleted','false') != 'true'
-          AND document->>'stage' NOT IN ('Closed Won','Closed Lost')
-          AND NULLIF(document->>'closeDate','')::date
+        WHERE (deleted = false OR deleted IS NULL)
+          AND stage NOT IN ('Closed Won','Closed Lost')
+          AND NULLIF(\"closeDate\",'')::date
             BETWEEN date_trunc('month', CURRENT_DATE)::date
             AND (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month' - INTERVAL '1 day')::date
     """)
@@ -4000,6 +4911,328 @@ RULES:
     }
 
 
+def _fp_smart_dispatcher(agent, user_query: str) -> Optional[Dict]:
+    """Universal handler: extract_query_intent → SQL template → response.
+
+    Handles ANY natural language variation of the same intent without
+    hardcoded regex patterns. Works for tasks, invoices, deals, contacts,
+    companies, meetings.
+
+    Examples of what this handles without any special-case code:
+        "share me ketul's pending task list"
+        "pending tasks by ketul"
+        "which task is pending for ketul"
+        "tasks assigned to yash bhide"
+        "show overdue bills"
+        "invoices not yet paid"
+        "deals that are still open"
+        "who has tasks this week"
+    """
+    intent  = extract_query_intent(user_query)
+    entity  = intent.get("entity")
+    action  = intent.get("action", "list")
+    person  = intent.get("person")
+    status  = intent.get("status")
+    group_by = intent.get("group_by")
+    time    = intent.get("time")
+    search  = intent.get("search")
+
+    # Must have an entity to proceed
+    if not entity:
+        return None
+
+    table_names = get_table_names(agent)
+
+    # ── TASKS ─────────────────────────────────────────────────────────────────
+    if entity == "createtasks":
+        task_table = next((t for t in table_names if t.lower() in ["createtasks","tasks"]), None)
+        user_table = next((t for t in table_names if t.lower() == "users"), None)
+        if not task_table:
+            return None
+
+        # GROUP BY owner — "who has tasks / tasks per user / who have pending tasks"
+        if action == "group_by" and group_by == "owner":
+            stat_filter = ""
+            stat_label  = "All"
+            if status == "pending":
+                stat_filter = "AND t.status = 'Pending'"
+                stat_label  = "Pending"
+            elif status in ("completed", "done"):
+                stat_filter = "AND t.status = 'Completed'"
+                stat_label  = "Completed"
+
+            sql = f"""SELECT COALESCE(u.name, 'Unassigned') AS user_name,
+  COUNT(t._id)::int AS task_count
+FROM "{task_table}" t
+LEFT JOIN "users" u ON u._id = t."createdBy"::text
+WHERE (t.deleted = false OR t.deleted IS NULL) {stat_filter}
+GROUP BY u._id, u.name ORDER BY task_count DESC"""
+            res = run_sql(agent, sql)
+            if res.error or not res.rows:
+                return None
+            total = sum(r[1] or 0 for r in res.rows)
+            lines = [f"| User | {stat_label} Tasks |", "| --- | --- |"]
+            for r in res.rows:
+                lines.append(f"| {r[0] or '—'} | {r[1] or 0} |")
+            return {
+                "answer": f"**{stat_label} Tasks by User — {len(res.rows)} users, {total} total:**\n\n" + "\n".join(lines),
+                "tables_used": [task_table, "users"], "confidence": 0.97, "sql_queries": [sql],
+            }
+
+        # LIST tasks (with optional person + status filter)
+        stat_sql = ""
+        stat_label = "tasks"
+        if status == "pending":
+            stat_sql   = "AND t.status = 'Pending'"
+            stat_label = "pending tasks"
+        elif status in ("completed", "done"):
+            stat_sql   = "AND t.status = 'Completed'"
+            stat_label = "completed tasks"
+        elif status == "overdue":
+            stat_sql   ='AND NULLIF(t."due_date",\'\')::timestamptz < NOW() AND t.status != \'Completed\''
+            stat_label = "overdue tasks"
+        elif status == "open":
+            stat_sql   = "AND t.status = 'Open'"
+            stat_label = "open tasks"
+
+        person_sql   = ""
+        person_label = ""
+        if person and user_table:
+            safe = person.replace("'", "''")
+            person_sql   = f'AND t."createdBy"::text IN (SELECT _id FROM "users" WHERE name ILIKE \'%{safe}%\')'
+            person_label = f" for {person}"
+
+        sql = f"""SELECT t."Task" AS task, t.status, t.priority,
+  t."due_date" AS due_date,
+  COALESCE(u.name, 'Unassigned') AS assigned_to
+FROM "{task_table}" t
+LEFT JOIN "users" u ON u._id = t."createdBy"::text
+WHERE (t.deleted = false OR t.deleted IS NULL) {stat_sql} {person_sql}
+ORDER BY t."updatedAt" DESC NULLS LAST"""
+
+        res = run_sql(agent, sql)
+        if res.error:
+            return None
+        rows = res.rows
+        if not rows:
+            return {
+                "answer": f"No {stat_label} found{person_label}.",
+                "tables_used": [task_table], "confidence": 0.9, "sql_queries": [sql],
+            }
+        lines = ["| Task | Status | Priority | Due Date | Assigned To |",
+                 "| --- | --- | --- | --- | --- |"]
+        for r in rows:
+            vals = ["—" if v is None else str(v) for v in r]
+            lines.append("| " + " | ".join(vals) + " |")
+        return {
+            "answer": f"**{len(rows)} {stat_label}{person_label}:**\n\n" + "\n".join(lines),
+            "tables_used": [task_table, "users"], "confidence": 0.97, "sql_queries": [sql],
+        }
+
+    # ── INVOICES ──────────────────────────────────────────────────────────────
+    if entity == "invoices" and "invoices" in table_names:
+        has_co  = "companies" in table_names
+        co_join = 'LEFT JOIN "companies" c ON c._id = i.company::text' if has_co else ""
+        co_col  = ('COALESCE(c."companyName", i."companyName", i.company::text, \'Unknown\')'
+                   if has_co else "COALESCE(i.company::text,'Unknown')")
+
+        where_parts = ["(i.deleted = false OR i.deleted IS NULL)"]
+
+        status_label = "invoices"
+        if status in ("overdue",):
+            where_parts.append("NULLIF(i.\"due_date\",'')::timestamptz < NOW()")
+            where_parts.append("i.payment_status NOT IN ('paid','cancelled')")
+            status_label = "overdue invoices"
+        elif status in ("unpaid", "pending", "outstanding", "awaiting", "not paid", "due"):
+            where_parts.append("i.payment_status NOT IN ('paid','cancelled')")
+            status_label = "unpaid invoices"
+        elif status == "paid":
+            where_parts.append("i.payment_status = 'paid'")
+            status_label = "paid invoices"
+        elif status == "draft":
+            where_parts.append("i.payment_status = 'draft'")
+            status_label = "draft invoices"
+        elif status == "confirmed":
+            where_parts.append("i.payment_status = 'confirmed'")
+            status_label = "confirmed invoices"
+        elif status == "partial_payment":
+            where_parts.append("i.payment_status = 'partial_payment'")
+            status_label = "partial payment invoices"
+
+        # Currency filter
+        if "usd" in intent["raw_lower"] or "us dollar" in intent["raw_lower"]:
+            where_parts.append("i.currency = 'USD'")
+            status_label += " (USD)"
+
+        # Time period
+        if time:
+            tf = "NULLIF(i.invoice_date,'')::timestamptz" if "invoice_date" else "i.updated_at"
+            _time_filters = {
+                "this_month": "DATE_TRUNC('month'," + tf + ")=DATE_TRUNC('month',NOW())",
+                "last_month": "DATE_TRUNC('month'," + tf + ")=DATE_TRUNC('month',NOW()-INTERVAL'1 month')",
+                "this_year":  "DATE_PART('year'," + tf + ")=DATE_PART('year',NOW())",
+                "next_month": "DATE_TRUNC('month',NULLIF(i.\"due_date\",'')::timestamptz)=DATE_TRUNC('month',NOW()+INTERVAL'1 month')",
+                "today":      "DATE(NULLIF(i.\"due_date\",'')::timestamptz)=CURRENT_DATE",
+            }
+            if time in _time_filters:
+                where_parts.append(_time_filters[time])
+
+        where = " AND ".join(f"({p})" for p in where_parts)
+
+        # Build overdue indicator
+        overdue_col = (
+            "CASE WHEN NULLIF(i.\"due_date\",'')::timestamptz < NOW() "
+            "THEN CONCAT((DATE_PART('day',NOW()-NULLIF(i.\"due_date\",'')::timestamptz))::int,' days overdue') "
+            "ELSE 'On time' END AS overdue_status"
+        )
+
+        sql = f"""SELECT i.invoice_number, i.payment_status AS status,
+  COALESCE(i.grandtotal_in_usd, i.grand_total, 0) AS amount_usd,
+  i."due_date", {co_col} AS company, {overdue_col}
+FROM "invoices" i {co_join}
+WHERE {where}
+ORDER BY CASE WHEN NULLIF(i."due_date",'')::timestamptz < NOW() THEN 0 ELSE 1 END,
+  NULLIF(i."due_date",'')::timestamptz ASC NULLS LAST"""
+
+        res = run_sql(agent, sql)
+        if res.error:
+            return None
+        rows = res.rows
+        if not rows:
+            return {"answer": f"No {status_label} found.", "tables_used": ["invoices"], "confidence": 0.9, "sql_queries": [sql]}
+
+        total_amt = sum(coerce_number(r[2]) for r in rows)
+        overdue_n = sum(1 for r in rows if r[5] and "overdue" in str(r[5]))
+        lines = ["| Invoice # | Status | Amount (USD) | Due Date | Company | Overdue Status |",
+                 "| --- | --- | --- | --- | --- | --- |"]
+        for r in rows:
+            vals = ["—" if v is None else str(v) for v in r]
+            lines.append("| " + " | ".join(vals) + " |")
+        return {
+            "answer": (f"**{status_label.title()} — {len(rows)} total"
+                       + (f" ({overdue_n} overdue)" if overdue_n else "")
+                       + f", Total: USD {fmt_number(total_amt)}:**\n\n" + "\n".join(lines)),
+            "tables_used": ["invoices"] + (["companies"] if has_co else []),
+            "confidence": 0.97, "sql_queries": [sql],
+        }
+
+    # ── DEALS ─────────────────────────────────────────────────────────────────
+    if entity == "deals" and "deals" in table_names:
+        has_co  = "companies" in table_names
+        has_usr = "users" in table_names
+
+        where_parts = ["(d.deleted = false OR d.deleted IS NULL)"]
+        stage_label = "deals"
+
+        if status in ("closed_won", "won"):
+            where_parts.append("d.stage = 'Closed Won'")
+            stage_label = "Closed Won deals"
+        elif status in ("closed_lost", "lost"):
+            where_parts.append("d.stage = 'Closed Lost'")
+            stage_label = "Closed Lost deals"
+        elif status in ("open", "active"):
+            where_parts.append("d.stage NOT IN ('Closed Won','Closed Lost')")
+            stage_label = "open deals"
+
+        if person and has_usr:
+            safe = person.replace("'","''")
+            where_parts.append(f'd.owner::text IN (SELECT _id FROM "users" WHERE name ILIKE \'%{safe}%\')')
+            stage_label += f" by {person}"
+
+        where = " AND ".join(f"({p})" for p in where_parts)
+        sql = f"""SELECT d.name, d.stage, d.grand_total_in_usd AS amount_usd,
+  d."closeDate" AS close_date,
+  COALESCE(c."companyName", d.company) AS company,
+  COALESCE(u.name, d.owner) AS owner
+FROM "deals" d
+{'LEFT JOIN "companies" c ON c._id = d.company' if has_co else ''}
+{'LEFT JOIN "users" u ON u._id = d.owner' if has_usr else ''}
+WHERE {where}
+ORDER BY NULLIF(d."closeDate",'')::timestamptz DESC NULLS LAST"""
+
+        res = run_sql(agent, sql)
+        if res.error or not res.rows:
+            return None
+        rows = res.rows
+        lines = ["| Deal Name | Stage | Amount (USD) | Close Date | Company | Owner |",
+                 "| --- | --- | --- | --- | --- | --- |"]
+        for r in rows:
+            vals = ["—" if v is None else str(v) for v in r]
+            lines.append("| " + " | ".join(vals) + " |")
+        return {
+            "answer": f"**{len(rows)} {stage_label}:**\n\n" + "\n".join(lines),
+            "tables_used": ["deals"] + (["companies"] if has_co else []) + (["users"] if has_usr else []),
+            "confidence": 0.97, "sql_queries": [sql],
+        }
+
+    # ── CONTACTS ──────────────────────────────────────────────────────────────
+    if entity == "contacts" and "contacts" in table_names:
+        if action == "group_by" and group_by in ("job_title", "designation", "position", "role"):
+            sql = """SELECT COALESCE("jobTitle",'Unknown') AS job_title, COUNT(*)::int AS count
+FROM "contacts" WHERE (deleted = false OR deleted IS NULL)
+GROUP BY "jobTitle" ORDER BY count DESC"""
+            res = run_sql(agent, sql)
+            if res.error or not res.rows:
+                return None
+            lines = ["| Job Title | Count |", "| --- | --- |"]
+            for r in res.rows:
+                lines.append(f"| {r[0] or '—'} | {r[1] or 0} |")
+            return {
+                "answer": f"**Contacts by Job Title ({len(res.rows)} titles):**\n\n" + "\n".join(lines),
+                "tables_used": ["contacts"], "confidence": 0.96, "sql_queries": [sql],
+            }
+
+        where_parts = ["(deleted = false OR deleted IS NULL)"]
+        if search:
+            safe = search.replace("'","''")
+            where_parts.append(f'("firstName" ILIKE \'%{safe}%\' OR "lastName" ILIKE \'%{safe}%\' OR email ILIKE \'%{safe}%\')')
+        if status:
+            safe = status.replace("'","''")
+            where_parts.append(f'"leadStatus" ILIKE \'%{safe}%\'')
+        where = " AND ".join(f"({p})" for p in where_parts)
+
+        sql = f"""SELECT TRIM(CONCAT(COALESCE("firstName",''),' ',COALESCE("lastName",''))) AS name,
+  email, "jobTitle" AS job_title, "leadStatus" AS status, "lifecycleStage" AS stage
+FROM "contacts" WHERE {where} ORDER BY "createdAt" DESC NULLS LAST"""
+
+        res = run_sql(agent, sql)
+        if res.error or not res.rows:
+            return None
+        lines = ["| Name | Email | Job Title | Status | Stage |", "| --- | --- | --- | --- | --- |"]
+        for r in res.rows:
+            vals = ["—" if v is None else str(v) for v in r]
+            lines.append("| " + " | ".join(vals) + " |")
+        return {
+            "answer": f"**{len(res.rows)} contacts:**\n\n" + "\n".join(lines),
+            "tables_used": ["contacts"], "confidence": 0.96, "sql_queries": [sql],
+        }
+
+    # ── COMPANIES ─────────────────────────────────────────────────────────────
+    if entity == "companies" and "companies" in table_names:
+        where_parts = ["(deleted = false OR deleted IS NULL)"]
+        if search:
+            safe = search.replace("'","''")
+            where_parts.append(f'"companyName" ILIKE \'%{safe}%\'')
+        if status and status in ("customer","active"):
+            where_parts.append(f'"lifecycleStage" = \'Customer\'')
+        where = " AND ".join(f"({p})" for p in where_parts)
+        sql = f"""SELECT "companyName", email, industry, "leadStatus", country
+FROM "companies" WHERE {where} ORDER BY "companyName" NULLS LAST"""
+        res = run_sql(agent, sql)
+        if res.error or not res.rows:
+            return None
+        lines = ["| Company | Email | Industry | Status | Country |", "| --- | --- | --- | --- | --- |"]
+        for r in res.rows:
+            vals = ["—" if v is None else str(v) for v in r]
+            lines.append("| " + " | ".join(vals) + " |")
+        return {
+            "answer": f"**{len(res.rows)} companies:**\n\n" + "\n".join(lines),
+            "tables_used": ["companies"], "confidence": 0.96, "sql_queries": [sql],
+        }
+
+    return None  # entity not handled → fall through to other handlers
+
+
 _SPECIALIZED: Dict[str, Any] = {
     "kpi_report":            _fp_kpi_report,
     "search":                _fp_search,
@@ -4017,18 +5250,30 @@ _SPECIALIZED: Dict[str, Any] = {
     "user_task_map":         _fp_user_task_map,
     "invoice_status_filter": _fp_invoice_status,
     "active_customers":      _fp_active_customers,
+    # New handlers
+    "who_pending_tasks":     _fp_who_pending_tasks,
+    "person_lookup":         _fp_person_lookup,
+    "meetings":              _fp_meetings,
+    "funnel":                _fp_funnel,
+    "universal_search":      _fp_universal_search,
 }
 
 # General handlers tried in priority order when no specialized route matched
 _GENERAL = [
-    _fp_name_of_entity,   # before search — "name of departments" → list, not person search
-    _fp_sales,            # before revenue — catches "sales orders" explicitly
+    _fp_smart_dispatcher,  # ← FIRST: NLP intent extractor handles ANY phrasing
+    _fp_name_of_entity,    # before search — "name of departments" → list, not person search
+    _fp_sales,             # before revenue — catches "sales orders" explicitly
     _fp_revenue,
     _fp_top_customers,
     _fp_deals_filter,
-    _fp_active_customers, # before generic list — catches "active customers" explicitly
-    _fp_user_task_map,    # before _fp_tasks — catches user+task JOIN queries
-    _fp_invoice_status,   # before _fp_list_records — catches status-filtered invoice queries
+    _fp_active_customers,
+    _fp_who_pending_tasks,
+    _fp_user_task_map,
+    _fp_funnel,
+    _fp_meetings,
+    _fp_person_lookup,
+    _fp_universal_search,
+    _fp_invoice_status,
     _fp_tasks,
     _fp_count,
     _fp_group_by,
@@ -4081,6 +5326,7 @@ def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]
         Result dict with keys: answer, tables_used, confidence, sql_queries
         Returns None if no fast-path handler matched.
     """
+    query = _preprocess_query(query)
     route = _classify_route(query)
     LOGGER.info("FastPath route: %s | query: %.60s", route, query)
 

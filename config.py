@@ -56,6 +56,7 @@ class Settings:
     ollama_classify_model: str = os.getenv("OLLAMA_CLASSIFY_MODEL", "qwen2.5:1.5b")
 
     strict_grounded_mode: bool = os.getenv("STRICT_GROUNDED_MODE", "false").lower() == "true"
+    fast_path_enabled: bool    = os.getenv("FAST_PATH_ENABLED", "true").lower() == "true"
     log_file: str = os.getenv("QUERY_LOG_FILE", "logs/query.log")
     max_retries: int = int(os.getenv("AGENT_MAX_RETRIES", "0"))
 

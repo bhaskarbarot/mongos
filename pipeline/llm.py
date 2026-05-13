@@ -232,34 +232,49 @@ def call(
     Returns:
         Response string, or None if ALL providers failed (caller should handle gracefully).
 
-    Provider chains:
-        classify  → Groq 8b  → Gemini → Ollama 1.5b          (small prompt)
-        decompose → Groq 8b  → Gemini → OpenRouter → Ollama 7b
-        synthesize→ Groq 70b → Gemini → OpenRouter → Ollama 7b (large output)
+    Provider chains (all using latest free models):
+        classify  → Groq Llama-4-Scout-17b → Gemini-2.5-flash → Ollama 1.5b
+        decompose → Groq Llama-4-Scout-17b → Gemini-2.5-flash → OR Llama-3.3-70b:free → Ollama 7b
+        synthesize→ Groq Llama-3.3-70b     → Gemini-2.5-flash → OR Hermes-3-405b:free → Ollama 7b
     """
     t0 = time.perf_counter()
 
+    # Short label for logging — extract the key part of the model name
+    def _label(model: str) -> str:
+        return model.split("/")[-1].replace("-instruct", "").replace(":free", "")[:18]
+
     if task == "classify":
         steps = [
-            ("Groq-8b",   lambda: _groq(settings.groq_classify_model,       system, user, max_tokens, timeout=15)),
-            ("Gemini",    lambda: _gemini(settings.gemini_classify_model,    system, user, max_tokens, timeout=20)),
-            ("Ollama-1.5b",lambda: _ollama(settings.ollama_classify_model,  system, user, max_tokens, timeout=30)),
+            ("Groq-" + _label(settings.groq_classify_model),
+             lambda: _groq(settings.groq_classify_model,    system, user, max_tokens, timeout=20)),
+            ("Gemini-2.5-flash",
+             lambda: _gemini(settings.gemini_classify_model, system, user, max_tokens, timeout=20)),
+            ("Ollama-1.5b",
+             lambda: _ollama(settings.ollama_classify_model, system, user, max_tokens, timeout=30)),
         ]
 
     elif task == "decompose":
         steps = [
-            ("Groq-8b",    lambda: _groq(settings.groq_decompose_model,        system, user, max_tokens, timeout=15)),
-            ("Gemini",     lambda: _gemini(settings.gemini_decompose_model,     system, user, max_tokens, timeout=20)),
-            ("OpenRouter", lambda: _openrouter(settings.openrouter_decompose_model, system, user, max_tokens, timeout=20)),
-            ("Ollama-7b",  lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=60)),
+            ("Groq-" + _label(settings.groq_decompose_model),
+             lambda: _groq(settings.groq_decompose_model,        system, user, max_tokens, timeout=20)),
+            ("Gemini-2.5-flash",
+             lambda: _gemini(settings.gemini_decompose_model,     system, user, max_tokens, timeout=25)),
+            ("OR-Llama3.3-70b",
+             lambda: _openrouter(settings.openrouter_decompose_model, system, user, max_tokens, timeout=30)),
+            ("Ollama-7b",
+             lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=60)),
         ]
 
     elif task == "synthesize":
         steps = [
-            ("Groq-70b",   lambda: _groq(settings.groq_synthesis_model,        system, user, max_tokens, timeout=30)),
-            ("Gemini",     lambda: _gemini(settings.gemini_synthesis_model,     system, user, max_tokens, timeout=30)),
-            ("OpenRouter", lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=30)),
-            ("Ollama-7b",  lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=90)),
+            ("Groq-" + _label(settings.groq_synthesis_model),
+             lambda: _groq(settings.groq_synthesis_model,        system, user, max_tokens, timeout=30)),
+            ("Gemini-2.5-flash",
+             lambda: _gemini(settings.gemini_synthesis_model,     system, user, max_tokens, timeout=30)),
+            ("OR-Hermes3-405b",
+             lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=45)),
+            ("Ollama-7b",
+             lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=90)),
         ]
 
     else:

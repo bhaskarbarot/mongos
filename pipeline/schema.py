@@ -187,21 +187,21 @@ class SchemaRegistry:
         """Build a SQL expression for the 'display name' of a record."""
         name = self.get(table, "name", fields)
         if name:
-            return f"document->>'{name}'"
+            return f'"{name}"'
 
         first = self.get(table, "first_name", fields)
         last  = self.get(table, "last_name", fields)
         if first and last:
-            return (f"TRIM(CONCAT(COALESCE(document->>'{first}',''), ' ',"
-                    f" COALESCE(document->>'{last}','')))")
+            return (f'TRIM(CONCAT(COALESCE("{first}"::text,\'\'), \' \','
+                    f' COALESCE("{last}"::text,\'\')))')
         if first:
-            return f"document->>'{first}'"
+            return f'"{first}"'
 
         ident = self.get(table, "identifier", fields)
         if ident:
-            return f"document->>'{ident}'"
+            return f'"{ident}"'
 
-        return "id::text"
+        return '"_id"'
 
     def get_all_roles(self, table: str, fields: List[str]) -> Dict[str, str]:
         """Resolve all known roles for a table. Returns {role: field_name}."""
@@ -221,6 +221,16 @@ class SchemaRegistry:
 
 
 REGISTRY = SchemaRegistry()
+
+
+def invalidate_all_caches() -> None:
+    """Clear all schema caches — call after DB schema changes (e.g. column migration)."""
+    global _TABLE_FIELDS_CACHE, _SCHEMA_LINKS, _TEXT2SQL_SCHEMA_CACHE
+    _TABLE_FIELDS_CACHE.clear()
+    _SCHEMA_LINKS = {}
+    _TEXT2SQL_SCHEMA_CACHE = ""
+    REGISTRY.invalidate()
+    LOGGER.info("Schema: all caches invalidated")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -383,32 +393,44 @@ def get_table_names(agent) -> List[str]:
 
 
 def get_document_fields(agent, table: str) -> List[str]:
-    """Return JSONB field names for a table. Cached per table.
-
-    E7: double-checked locking — SQL execution is outside the lock.
-    """
-    # Fast path: no lock needed for read
+    """Return column names for a table via information_schema. Cached per table."""
     if table in _TABLE_FIELDS_CACHE:
         return _TABLE_FIELDS_CACHE[table]
 
     try:
         sql = (
-            f"SELECT DISTINCT key FROM \"{table}\","
-            f" jsonb_object_keys(document) AS key LIMIT 300"
+            f"SELECT column_name FROM information_schema.columns"
+            f" WHERE table_schema = 'public' AND table_name = '{table}'"
+            f" AND column_name NOT IN ('_synced_at')"
+            f" ORDER BY ordinal_position"
         )
         _res   = run_sql(agent, sql)
-        fields = sorted([r[0] for r in _res.rows if r and r[0]])
+        fields = [r[0] for r in _res.rows if r and r[0]]
     except Exception as exc:
         LOGGER.warning("Schema: field discovery failed for %s: %s", table, exc)
         fields = []
 
-    # Safe path: write under lock, double-check to avoid overwriting a concurrent write
     with _CACHE_LOCK:
         if table not in _TABLE_FIELDS_CACHE:
             _TABLE_FIELDS_CACHE[table] = fields
-            LOGGER.debug("Schema: %s has %d fields", table, len(fields))
+            LOGGER.debug("Schema: %s has %d columns", table, len(fields))
 
     return _TABLE_FIELDS_CACHE[table]
+
+
+def get_column_types(agent, table: str) -> Dict[str, str]:
+    """Return {column_name: pg_data_type} for a table via information_schema."""
+    try:
+        sql = (
+            f"SELECT column_name, data_type FROM information_schema.columns"
+            f" WHERE table_schema = 'public' AND table_name = '{table}'"
+            f" AND column_name NOT IN ('_synced_at')"
+            f" ORDER BY ordinal_position"
+        )
+        _res = run_sql(agent, sql)
+        return {r[0]: r[1] for r in _res.rows if r and r[0]}
+    except Exception:
+        return {}
 
 
 
@@ -454,13 +476,13 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                 if not target_name or target_name == table:
                     continue
 
-                # Validate with a sample value (SQL runs outside lock via RLock re-entrancy)
+                # Validate with a sample value — direct column access (no JSONB)
                 try:
                     _s_res = run_sql(
                         agent,
-                        f"SELECT document->>'{field}' FROM \"{table}\""
-                        f" WHERE document->>'{field}' IS NOT NULL"
-                        f" AND document->>'{field}' != '' LIMIT 1",
+                        f'SELECT "{field}"::text FROM "{table}"'
+                        f' WHERE "{field}" IS NOT NULL'
+                        f" AND \"{field}\"::text != '' LIMIT 1",
                     )
                     val = _s_res.rows[0][0] if _s_res.rows and _s_res.rows[0] else None
                     if not val:
@@ -474,8 +496,8 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                     # Verify the ID exists in the target table
                     _v_res = run_sql(
                         agent,
-                        f"SELECT 1 FROM \"{target_name}\""
-                        f" WHERE document->>'_id' = '{val_str}' LIMIT 1",
+                        f'SELECT 1 FROM "{target_name}"'
+                        f" WHERE \"_id\" = '{val_str}' LIMIT 1",
                     )
                     if _v_res.rows:
                         links.setdefault(table, {})[field] = target_name
@@ -492,12 +514,11 @@ def schema_links_prompt(links: Dict[str, Dict[str, str]]) -> str:
     """Generate a human-readable prompt section for cross-table relationships."""
     if not links:
         return ""
-    lines = ["## Cross-Table Relationships (always use these for JOINs):"]
+    lines = ["## Cross-Table Relationships (use these for JOINs):"]
     for tbl, flds in sorted(links.items()):
         for fld, tgt in sorted(flds.items()):
             lines.append(
-                f"  JOIN: \"{tbl}\" t1 → \"{tgt}\" t2"
-                f"  ON t1.document->>'{fld}' = t2.document->>'_id'"
+                f'  "{tbl}"."{fld}" = "{tgt}"."_id"'
             )
     return "\n".join(lines)
 
@@ -509,11 +530,8 @@ def schema_links_prompt(links: Dict[str, Dict[str, str]]) -> str:
 def build_text2sql_schema(agent) -> str:
     """Build a compact schema description optimized for Text2SQL model prompts.
 
-    Includes:
-      • Critical JSONB access rules
-      • Table names with their top fields
-      • Cross-table JOIN relationships
-      • CRM domain hints (revenue fields, soft delete, etc.)
+    New column-per-field format — each MongoDB field is a typed PostgreSQL column.
+    Includes: SQL rules, table+column list with types, JOINs, CRM hints.
     """
     global _TEXT2SQL_SCHEMA_CACHE
 
@@ -525,49 +543,111 @@ def build_text2sql_schema(agent) -> str:
             return _TEXT2SQL_SCHEMA_CACHE
 
         table_names = get_table_names(agent)
+
+        # Short type labels for readability
+        _TYPE_SHORT = {
+            "text": "TEXT", "character varying": "TEXT",
+            "numeric": "NUM", "double precision": "NUM", "integer": "NUM", "bigint": "NUM",
+            "boolean": "BOOL",
+            "jsonb": "JSONB", "json": "JSONB",
+            "timestamp with time zone": "TS", "timestamp without time zone": "TS",
+        }
+
         lines = [
-            "PostgreSQL JSONB database — CRITICAL SQL RULES:",
-            "  • ALL field access: document->>'fieldName'",
-            "  • Numbers: NULLIF(document->>'field','')::numeric",
-            "  • Dates: NULLIF(document->>'field','')::timestamptz",
-            "  • NEVER use bare column names — always document->>''",
-            "  • Soft-delete: add COALESCE(document->>'deleted','false')!='true'",
-            "  • Table names in double quotes: FROM \"tableName\"",
-            "  • Use COALESCE for nullable fields",
+            "PostgreSQL column-per-field database — CRITICAL SQL RULES:",
+            "  • Use DIRECT column names — NO document->>'field' syntax",
+            "  • Strings  (TEXT):    WHERE name ILIKE '%value%'",
+            "  • Numbers  (NUM):     WHERE grand_total_in_usd > 1000",
+            "  • Booleans (BOOL):    WHERE deleted = false OR deleted IS NULL",
+            "  • Date strings(TEXT): WHERE \"closeDate\" > '2025-01-01'",
+            "  • Nested objects(JSONB): WHERE \"lastActivity\"->>'type' = 'email'",
+            "  • Primary key: \"_id\" TEXT (24-char hex MongoDB ObjectId)",
+            "  • Soft-delete: WHERE deleted = false OR deleted IS NULL",
+            "  • Always double-quote mixed-case column names: \"closeDate\", \"grandTotal\"",
+            "  • Always double-quote table names: FROM \"deals\"",
             "  • Use ILIKE for case-insensitive text matching",
             "",
-            "TABLES & FIELDS:",
+            "TABLES (column: TYPE):",
         ]
 
         for table in table_names:
-            fields = get_document_fields(agent, table)
-            if fields:
-                # Show up to 25 fields for completeness
-                field_str = ", ".join(fields[:25])
-                if len(fields) > 25:
-                    field_str += f" (+{len(fields) - 25} more)"
-                lines.append(f"  \"{table}\": [{field_str}]")
+            col_types = get_column_types(agent, table)
+            if not col_types:
+                continue
+            # Show _id first, then up to 30 other columns with types
+            cols = []
+            if "_id" in col_types:
+                cols.append("_id:TEXT")
+            for col, dtype in col_types.items():
+                if col == "_id":
+                    continue
+                short = _TYPE_SHORT.get(dtype, dtype[:4].upper())
+                cols.append(f'"{col}":{short}' if col[0].isupper() or " " in col else f"{col}:{short}")
+                if len(cols) >= 32:
+                    cols.append(f"(+{len(col_types) - 32} more)")
+                    break
+            lines.append(f'  "{table}": {", ".join(cols)}')
 
-        # Add relationship context
+        # JOIN relationships
         links = _SCHEMA_LINKS or discover_schema_links(agent)
         if links:
             lines.extend(["", "JOIN RELATIONSHIPS:"])
             for tbl, flds in sorted(links.items()):
                 for fld, tgt in sorted(flds.items()):
-                    lines.append(
-                        f"  \"{tbl}\".document->>'{fld}' = \"{tgt}\".document->>'_id'"
-                    )
+                    lines.append(f'  "{tbl}"."{fld}" = "{tgt}"."_id"')
 
-        # CRM domain hints
+        # Rich domain knowledge from DATABASE_METADATA.md
         lines.extend([
             "",
-            "CRM DOMAIN:",
-            "  • Revenue = invoices WHERE payment_status='paid', field: grandtotal_in_usd",
-            "  • Open deals = dealWonAt IS NULL AND dealLostAt IS NULL",
-            "  • Won deals = dealWonAt IS NOT NULL",
-            "  • Targets: targetInUSD per userId per month/year",
-            "  • Tasks: createtasks (status: Pending/Completed, priority: Low/Medium/High)",
-            "  • Outreaches: isDeleted field (not deleted)",
+            "═══ CRITICAL DOMAIN RULES ═══",
+            "",
+            "REVENUE & INVOICES:",
+            "  • Revenue = invoices WHERE payment_status='paid', col: grandtotal_in_usd",
+            "  • NEVER use sales table for revenue — invoices is the source of truth",
+            "  • invoices.grandtotal_in_usd   ← NO underscore before 'in' (revenue field)",
+            "  • deals.grand_total_in_usd      ← WITH underscore before 'in' (deal value)",
+            "  • payment_status values: 'draft'|'paid'|'confirmed'|'cancelled'|'partial_payment'",
+            "  • invoice_date=when issued, due_date=payment deadline, payment_date=when received",
+            "  • Pending invoices: payment_status IN ('draft','confirmed','partial_payment')",
+            "  • Overdue: \"due_date\"::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')",
+            "",
+            "DEALS:",
+            "  • Closed Won = stage='Closed Won' OR \"dealWonAt\" IS NOT NULL",
+            "  • Closed Lost = stage='Closed Lost' OR \"dealLostAt\" IS NOT NULL",
+            "  • Open deals = stage NOT IN ('Closed Won','Closed Lost')",
+            "  • Deal stages: 'Analysis - To be Quoted'|'Negotiation'|'Closed Won'|'Closed Lost'|'On Hold'|'Contract Under Review'|'Quotation Sent'",
+            "  • Deal number = 'ELS' || LPAD(sequence_number::text,3,'0')  e.g. ELS001",
+            "",
+            "COMPANIES:",
+            "  • Customers: lifecycleStage='Customer'",
+            "  • Leads: lifecycleStage='Lead'",
+            "  • Inactive: \"inActiveSince\" IS NOT NULL",
+            "  • Won: \"leadWonAt\" IS NOT NULL",
+            "",
+            "SOFT DELETE (PER TABLE):",
+            "  • Most tables: WHERE deleted=false OR deleted IS NULL",
+            "  • outreaches: WHERE \"isDeleted\"=false OR \"isDeleted\" IS NULL  ← DIFFERENT!",
+            "",
+            "SORTING PATTERNS:",
+            "  • First/1st/oldest: ORDER BY \"createdAt\" ASC NULLS LAST LIMIT 1",
+            "  • Last/latest/recent: ORDER BY \"createdAt\" DESC NULLS LAST LIMIT 1",
+            "  • Top N invoices by amount: ORDER BY \"grandtotal_in_usd\" DESC LIMIT N",
+            "  • Top N deals by value: ORDER BY \"grand_total_in_usd\" DESC LIMIT N",
+            "  • Top N companies by revenue: JOIN invoices, GROUP BY company, ORDER BY SUM DESC",
+            "",
+            "GROUPING PATTERNS:",
+            "  • By stage: GROUP BY stage ORDER BY COUNT(*) DESC",
+            "  • By owner: GROUP BY owner → JOIN users ON users._id = owner",
+            "  • By month: GROUP BY DATE_TRUNC('month',\"invoice_date\"::timestamptz)",
+            "  • By status: GROUP BY payment_status",
+            "",
+            "KEY FIELD NAMES (exact column names):",
+            "  • contacts name: \"firstName\" || ' ' || \"lastName\"",
+            "  • companies name: \"companyName\"",
+            "  • tasks description: \"Task\" (capital T)",
+            "  • targets month: 0-indexed (Jan=0, Feb=1, ..., Dec=11)",
+            "  • outreaches status: 'Unassigned'|'Not Contacted'|'Contacted'|'Converted to Deal'",
+            "  • tasks status: 'Pending'|'Completed', priority: 'Low'|'Medium'|'High'",
         ])
 
         _TEXT2SQL_SCHEMA_CACHE = "\n".join(lines)
@@ -622,7 +702,7 @@ def build_revenue_coalesce(fields: List[str]) -> str:
     if not candidates:
         candidates = ["grand_total"]
 
-    parts = [f"NULLIF(document->>'{f}','')::numeric" for f in candidates]
+    parts = [f'COALESCE("{f}", 0)' for f in candidates]
     return "COALESCE(" + ", ".join(parts) + ", 0)"
 
 

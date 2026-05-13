@@ -34,7 +34,8 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from pipeline import fast_path, text2sql
+from config import settings
+from pipeline import fast_path, record_lookup, text2sql
 from pipeline.chat_memory import ChatMemory
 from pipeline.classifier import classify
 from pipeline.decomposer import decompose
@@ -129,8 +130,9 @@ def _extract_entity_from_result(result: Dict[str, Any]) -> Optional[str]:
 
 def _empty_metrics() -> Dict[str, Any]:
     return {
-        "guard_ms": 0, "intent_router_ms": 0, "classifier_ms": 0,
-        "fastpath_ms": 0, "text2sql_ms": 0, "decomposer_ms": 0,
+        "guard_ms": 0, "fastpath_ms": 0, "record_lookup_ms": 0,
+        "intent_router_ms": 0, "classifier_ms": 0,
+        "text2sql_ms": 0, "decomposer_ms": 0,
         "executor_ms": 0, "synthesizer_ms": 0, "narrate_ms": 0, "total_ms": 0,
     }
 
@@ -239,14 +241,19 @@ def run(
 
     # ══════════════════════════════════════════════════════════════════════
     # LAYER 1: Fast Path — pure regex, <50ms, NO LLM
+    # Disable via .env: FAST_PATH_ENABLED=false
     # ══════════════════════════════════════════════════════════════════════
-    with Timer("fast_path") as fp_timer:
-        try:
-            fp_result = fast_path.run(user_query, agent, apply_delay=True)
-        except Exception as exc:
-            LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
-            fp_result = None
-    metrics["fastpath_ms"] = round(fp_timer.elapsed_ms)
+    fp_result = None
+    if settings.fast_path_enabled:
+        with Timer("fast_path") as fp_timer:
+            try:
+                fp_result = fast_path.run(user_query, agent, apply_delay=True)
+            except Exception as exc:
+                LOGGER.warning("[RID:%s] Fast-path exception: %s", request_id, exc)
+                fp_result = None
+        metrics["fastpath_ms"] = round(fp_timer.elapsed_ms)
+    else:
+        LOGGER.info("[RID:%s] Fast-path DISABLED (FAST_PATH_ENABLED=false)", request_id)
 
     if fp_result is not None:
         LOGGER.info(
@@ -269,10 +276,45 @@ def run(
             memory.update(original_query, fp_result)
         return result
 
-    LOGGER.info("[RID:%s] ═══ Layer 1 MISS → Intent Router", request_id)
+    LOGGER.info("[RID:%s] ═══ Layer 1 MISS → Record Lookup", request_id)
 
     # ══════════════════════════════════════════════════════════════════════
-    # LAYER 1.5: Intent Router — LLM brain, understands ANY phrasing
+    # LAYER 1.5a: Record Lookup — SO/ELSN/ELS number patterns, no LLM
+    # Handles: "SO01241 line items", "ELSN/2026/018 details", "ELS042"
+    # ══════════════════════════════════════════════════════════════════════
+    with Timer("record_lookup") as rl_timer:
+        try:
+            rl_result = record_lookup.run(user_query, agent)
+        except Exception as exc:
+            LOGGER.warning("[RID:%s] RecordLookup exception: %s", request_id, exc)
+            rl_result = None
+    metrics["record_lookup_ms"] = round(rl_timer.elapsed_ms)
+
+    if rl_result is not None:
+        LOGGER.info(
+            "[RID:%s] ═══ Layer 1.5a HIT (record-lookup) | %.0fms | tables=%s",
+            request_id, rl_timer.elapsed_ms, rl_result.get("tables_used"),
+        )
+        with Timer("narrate") as nar_timer:
+            narrated = _narrate(original_query, rl_result)
+        metrics["narrate_ms"] = round(nar_timer.elapsed_ms)
+        metrics["total_ms"]   = round((time.perf_counter() - started) * 1000)
+        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
+        result = _build_response(
+            narrated,
+            rl_result.get("tables_used", []),
+            rl_result.get("sql_queries", []),
+            rl_result.get("confidence", 0.98),
+            started, layer="record_lookup", metrics=metrics,
+        )
+        if memory:
+            memory.update(original_query, rl_result)
+        return result
+
+    LOGGER.info("[RID:%s] ═══ Record Lookup MISS → Intent Router", request_id)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # LAYER 1.5b: Intent Router — LLM brain, understands ANY phrasing
     # "tell me all deals" = "show deals" = "give me deals" → same SQL
     # ══════════════════════════════════════════════════════════════════════
     with Timer("intent_router") as ir_timer:

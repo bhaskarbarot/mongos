@@ -116,8 +116,12 @@ if [ -n "$OLD_SYNC_PIDS" ]; then
   sleep 1
 fi
 
+# Use Node.js 20 (required by mongodb driver — node 12/18 lack stable crypto)
+NODE20="$HOME/.nvm/versions/node/v20.20.0/bin/node"
+NODE_BIN="${NODE20:-node}"
+
 # Redirect all sync output to file only — not to terminal.
-node "$ROOT/automation/sync.js" >> "$ROOT/logs/automation_log.txt" 2>&1 &
+"$NODE_BIN" "$ROOT/automation/sync.js" >> "$ROOT/logs/automation_log.txt" 2>&1 &
 SYNC_PID=$!
 sleep 3
 
