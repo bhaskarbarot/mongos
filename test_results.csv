@@ -1,0 +1,376 @@
+query_num,variation,query_text,status,response_ms,layer,response_preview
+1,V1,How many departments,PASS,309,SIMPLE,## Executive Summary  The organization has a total of **4** departments. This indicates a relatively small and manageable number of departments. With 
+1,V2,Count total departments,PASS,396,SIMPLE,## Executive Summary  The organization has a total of **4** departments. This indicates a relatively small and manageable number of departments. With 
+1,V3,What is the total number of departments,PASS,932,SIMPLE,## Executive Summary  The organization has a total of **4** departments. This indicates a relatively small and manageable number of departments. With 
+2,V1,Give me names of departments,PASS,378,SIMPLE,"## Executive Summary  The organization has **4 departments** listed, including Business Analyst, accounts team, Lead Generation, and outreach team. Th"
+2,V2,List all department names,PASS,432,SIMPLE,"## Executive Summary  The company has **4 departments** in total. The departments are: Business Analyst, accounts team, Lead Generation, and outreach "
+2,V3,Show me all departments,PASS,359,SIMPLE,"## Executive Summary  The organization has **4 departments** in total. The departments are: Business Analyst, accounts team, Lead Generation, and outr"
+3,V1,Give me who have pending task?,PASS,367,SIMPLE,"## Executive Summary  Ketul Trivedi has the most pending tasks with **51** tasks, significantly more than the other users. A total of **70** tasks are"
+3,V2,Who has pending tasks,PASS,384,SIMPLE,"## Executive Summary  Ketul Trivedi has the most pending tasks with **51** tasks, significantly more than the other users. A total of **70** pending t"
+3,V3,Show pending tasks grouped by user,PASS,509,SIMPLE,"## Executive Summary  Kartik Trivedi has the most pending tasks with **4** records, indicating a potential workload imbalance. The majority of pending"
+4,V1,Share ke kartik's task status,PASS,19,SIMPLE,No tasks found for Ke Kartik.  --- _Source: `createtasks` · Live database query_
+4,V2,Show kartik's task list,PASS,448,SIMPLE,"## Executive Summary  Kartik has **73 tasks** pending, primarily consisting of New Lead Follow-up tasks with a Medium priority. These tasks are assign"
+4,V3,What tasks does kartik have,PASS,493,SIMPLE,"## Executive Summary  Kartik has **7 tasks**, primarily related to new lead follow-ups. Most tasks (**4 pending**) are not yet completed, indicating a"
+5,V1,Share me yesh bhide pending task list,PASS,15,SIMPLE,No pending tasks found for Yesh Bhide.  --- _Source: `createtasks` · Live database query_
+5,V2,Pending tasks by yash bhide,PASS,15,SIMPLE,No pending tasks found for Yash Bhide.  --- _Source: `createtasks` · Live database query_
+5,V3,Tasks assigned to yash bhide,PASS,19,SIMPLE,No tasks found for Yash Bhide.  --- _Source: `createtasks` · Live database query_
+6,V1,Give me deals with categories,PASS,429,SIMPLE,"## Executive Summary  **175 deals** are currently in the system, with **3** deals associated with the company Elsner. The majority of deals are in the"
+6,V2,Show deals grouped by category,PASS,818,SIMPLE,"## Executive Summary  The majority of deals are categorized as Unknown, with **32 deals**. No single category dominates, as the top 4 categories - Unk"
+6,V3,Deals breakdown by type,PASS,747,SIMPLE,"## Executive Summary  The majority of deals are not clearly categorized, with **32 deals** classified as Unknown. Cross-sell and Upsell deals account "
+7,V1,Share me deals with stages,PASS,874,SIMPLE,"## Executive Summary  **175 deals** are in various stages, with **15** deals in ""Analysis - To be Quoted"" and **1** deal in ""Contract Under Review"". T"
+7,V2,Deals by stage,PASS,502,SIMPLE,"## Executive Summary  **42 deals** are in the ""Analysis - To be Quoted"" stage, indicating a significant pipeline for potential conversion. The total v"
+7,V3,Show deal pipeline stages,PASS,478,SIMPLE,"## Executive Summary  The deal pipeline has **175 deals** across various stages. The majority of deals are in the ""Analysis - To be Quoted"" stage. **3"
+8,V1,Give me all deals with year wise stages status count,PASS,544,SIMPLE,"## Executive Summary  There are **175 deals** across various stages. The majority of deals are in the ""Analysis - To be Quoted"" stage, indicating a hi"
+8,V2,Yearly deal stage breakdown,PASS,638,SIMPLE,"## Executive Summary  In 2025, **33 deals** were in the Analysis - To be Quoted stage, indicating a significant pipeline. The year also saw **23 deals"
+8,V3,Deals by year and stage count,PASS,375,SIMPLE,"## Executive Summary  Most deals are in the **Analysis - To be Quoted** stage. Out of **175 deals**, a significant number are at this stage. The total"
+9,V1,Share me revenue of september 2027,PASS,402,SIMPLE,"## Executive Summary  The revenue for September 2027 is **$0**, indicating no sales or invoiced revenue for that month. This suggests a potential issu"
+9,V2,What was revenue in September 2027,PASS,386,SIMPLE,## Executive Summary  The company generated **$0** in revenue in September 2027. This indicates a complete absence of sales or invoiced revenue for th
+9,V3,Revenue generated in Sept 2027,PASS,536,SIMPLE,"## Executive Summary  No revenue was generated in 2027, with **$0** recorded for the entire year. This includes September 2027, which also shows **0**"
+10,V1,Share me revenue of march 2025,PASS,363,SIMPLE,## Executive Summary  The company did not generate any revenue in March 2025. **$0** in total revenue was recorded for that month. This indicates a po
+10,V2,Revenue in March 2025,PASS,376,SIMPLE,## Executive Summary  The company generated **$0** in revenue in March 2025. This indicates a significant shortfall in expected income. With no revenu
+10,V3,Total revenue for March 2025,PASS,326,SIMPLE,"## Executive Summary  The total revenue for March 2025 is **$0**, indicating no sales or invoices were generated during this period. This suggests a p"
+11,V1,Give me list of customers which have pending invoices,PASS,603,SIMPLE,"## Executive Summary  There are **102 pending invoices** totaling **$150,016.63**, all of which are overdue. The majority of these invoices are in dra"
+11,V2,Which companies have unpaid invoices,PASS,428,SIMPLE,"## Executive Summary  There are **102 unpaid invoices** totaling **$150,016.63**, with all invoices overdue. The largest overdue invoices belong to Ne"
+11,V3,Customers with outstanding invoices,PASS,400,SIMPLE,"## Executive Summary  There are **102 outstanding invoices** totaling **$150,016.63**, with all invoices overdue. The majority of these invoices are i"
+12,V1,Give me summary of deals,PASS,17,SIMPLE,No contact or user found matching **deals**.
+12,V2,Deals summary report,PASS,512,SIMPLE,"## Executive Summary  There are **175 deals** in the system, with a total of **4 deals** in the ""Analysis - To be Quoted"" stage. The total value of th"
+12,V3,Overview of all deals,PASS,635,SIMPLE,"## Executive Summary  The total number of deals is **176**. The majority of deals are still in the early stages, with **100** deals in either ""Analysi"
+13,V1,Share me top 10 invoices by that amount,PASS,590,SIMPLE,"## Executive Summary  The top invoices by amount are largely overdue, with **170 out of 171 invoices** past their due date. The total amount due is **"
+13,V2,Top 10 invoices by amount,PASS,633,SIMPLE,"## Executive Summary  The top invoices by amount are largely overdue, with **170 out of 171 invoices** past due. The total amount due is **USD 422,501"
+13,V3,Highest 10 invoices by value,PASS,400,SIMPLE,"## Executive Summary  The highest value invoices are largely overdue, with **USD 422,501.04** total across 171 invoices. The top invoices by value are"
+14,V1,Share me paid invoices by that amount and top 10 only,PASS,378,SIMPLE,"## Executive Summary  The top paid invoices by amount reveal a total of **37 paid invoices**, with a combined value of **USD 121,744.19**. The largest"
+14,V2,Top 10 paid invoices by amount,PASS,462,SIMPLE,"## Executive Summary  The top paid invoices are largely overdue, with **36 out of 37** invoices past their due date. The total amount paid across thes"
+14,V3,Show me highest 10 paid invoices,PASS,504,SIMPLE,"## Executive Summary  The top 10 paid invoices total **$121,744.19**, with **36** of them being overdue. The largest paid invoice is **$104.82** from "
+15,V1,I want all details of pankaj,PASS,20,SIMPLE,No contact or user found matching **pankaj**.
+15,V2,Full details of pankaj,PASS,20,SIMPLE,No contact or user found matching **pankaj**.
+15,V3,Show me pankaj's profile,PASS,950,SIMPLE,"## Executive Summary  Pankaj Sakariya is a new lead at Elsner, with a profile created on **April 22, 2026**. He can be reached at **pankaj@elsner.com*"
+16,V1,I need to find details of negotiable deals with that total amount and count,PASS,22,SIMPLE,No contact or user found matching **negotiable deals**.
+16,V2,Show negotiation stage deals with values,PASS,37,SIMPLE,No **Negotiation** deals found.  --- _Source: `deals` · Live database query_
+16,V3,Deals in negotiation stage with amounts,PASS,544,SIMPLE,"## Executive Summary  There are **175 deals** in various stages, with many in the negotiation stage, such as ""Analysis - To be Quoted"" and ""Contract U"
+17,V1,Who you are?,FAIL,0,SIMPLE,"I am the **CRM AI Assistant** — your intelligent business data analyst.  I can answer questions about your live CRM data, including:  • **Deals** — pi"
+17,V2,What are you?,FAIL,0,SIMPLE,"I am the **CRM AI Assistant** — your intelligent business data analyst.  I can answer questions about your live CRM data, including:  • **Deals** — pi"
+17,V3,Tell me about yourself,FAIL,0,SIMPLE,"I am the **CRM AI Assistant** — your intelligent business data analyst.  I can answer questions about your live CRM data, including:  • **Deals** — pi"
+18,V1,Give me kpi report,PASS,5020,SIMPLE,"## Executive Summary  Revenue is down **100.0%** month-over-month, with only **$1.05** in revenue. The pipeline is severely impacted with **$0.00** in"
+18,V2,Show KPI dashboard,PASS,9542,SIMPLE,"## Executive Summary  Revenue this month has plummeted to **USD 1.05**, a **-100.0%** decrease from last month, indicating a critical issue. However, "
+18,V3,Business KPI summary,PASS,37321,SIMPLE,"## Executive Summary  Revenue this month is a mere **USD 1.05**, representing a severe decline in sales with a **-100.0%** Month-over-Month and **-93."
+19,V1,Share me all contacts list,PASS,360,SIMPLE,"## Executive Summary  The contact list contains **159 contacts** with various details. Many contacts have incomplete information, with several missing"
+19,V2,Show all contacts,PASS,535,SIMPLE,"## Executive Summary  There are **159 contacts** in the system, with many entries missing crucial information such as job titles and statuses. The dat"
+19,V3,List every contact,PASS,1152,SIMPLE,"## Executive Summary  There are **159 contacts** in the system, with many having incomplete information. A significant number of contacts lack job tit"
+20,V1,I want last 5 contacts,PASS,410,SIMPLE,"## Executive Summary  There are **159 contacts** in total, but only the last 5 contacts are relevant. The last 5 contacts are: Jordan Mullins, Ketul, "
+20,V2,Recent 5 contacts,PASS,468,SIMPLE,"## Executive Summary  There are **159 contacts** in the recent 5 contacts list. Most contacts have incomplete information, with many missing job title"
+20,V3,Show latest 5 contacts,PASS,375,SIMPLE,"## Executive Summary  There is **1 contact** in the latest data, a Lead named TestUser with a Ref of 9999999999. The contact is marked as New and was "
+21,V1,I have to see last 5 contacts details with summary,PASS,515,SIMPLE,"## Executive Summary  There are **159 contacts** in total. The last 5 contacts have incomplete information, with most fields missing. The contacts hav"
+21,V2,Summary of last 5 contacts,PASS,14,SIMPLE,No contact or user found matching **last**.
+21,V3,Give details of recent 5 contacts,PASS,7,SIMPLE,No contact or user found matching **recent**.
+22,V1,Compare last year revenue and current year and give me summary,PASS,382,SIMPLE,"## Executive Summary  Revenue for the current year is **$51,581.72** behind last year's total. With **$58,296.40** already earned, the current year's "
+22,V2,Revenue comparison this year vs last year,PASS,380,SIMPLE,"## Executive Summary  Revenue for this year is **$51,581.72** less than last year's total. With **$51,581.72** already recorded, current year revenue "
+22,V3,Year over year revenue analysis,PASS,526,SIMPLE,"## Executive Summary  Total revenue for all time is **$121,744.19**. This figure provides a baseline for year-over-year analysis. To gain deeper insig"
+23,V1,Give me open deals and that ratio of closed deals,PASS,523,SIMPLE,"## Executive Summary  There are **175 open deals**, indicating a substantial amount of ongoing business opportunities. The ratio of open to closed dea"
+23,V2,Open vs closed deal ratio,PASS,762,SIMPLE,## Executive Summary  The open vs closed deal ratio indicates that **42 deals** are still in an open stage. A significant **74%** of deals are not yet
+23,V3,What percentage of deals are open versus closed,PASS,576,SIMPLE,"## Executive Summary  **58%** of deals are open, while **42%** are closed. The data indicates that most deals are still in the analysis or review stag"
+24,V1,I need to see invoice 1st give me details,PASS,425,SIMPLE,"## Executive Summary  There are **171 total invoices**, with **170 overdue**, totaling **USD 422,501.04**. The majority of invoices are overdue, with "
+24,V2,Show first invoice details,PASS,359,SIMPLE,"## Executive Summary  The majority of invoices, **170**, are overdue, indicating potential cash flow issues. The total amount due is **USD 422,501.04*"
+24,V3,Give me the earliest invoice,PASS,415,SIMPLE,"## Executive Summary  The earliest invoice is **ELSN/2025/116** with a due date of **December 19, 2024**, and an amount of **$1.10**. This invoice is "
+25,V1,Give me 1st invoice details,PASS,1046,SIMPLE,"## Executive Summary  The majority of invoices (**170**) are overdue, indicating potential cash flow issues. The total amount due is **USD 422,501.04*"
+25,V2,First invoice full details,PASS,1083,SIMPLE,"## Executive Summary  There are **171 total invoices**, with **170 overdue**, totaling **USD 422,501.04**. The majority of invoices are overdue, indic"
+25,V3,Show the oldest invoice,PASS,434,SIMPLE,"## Executive Summary  The oldest invoice is **510 days overdue**, with invoice number ELSN/2025/116. This invoice, for **USD 1.1**, was due on Decembe"
+26,V1,Give me that invoices only that are paid and currency is INR only,PASS,10,SIMPLE,No paid invoices found.  --- _Source: `invoices` · Live database query_
+26,V2,Paid INR invoices,PASS,538,SIMPLE,"## Executive Summary  The company has **37** paid invoices, with **36** of them being overdue. The total amount of these paid invoices is **$121,744.1"
+26,V3,Show all paid invoices in Indian rupee,PASS,357,SIMPLE,"## Executive Summary  There are **37 paid invoices**, with **36** of them being overdue, totaling **USD $121,744.19**. The majority of these invoices "
+27,V1,Give me USD currency invoices list only with total,PASS,549,SIMPLE,"## Executive Summary  The total value of USD invoices is **$28,175.64**, with all 12 invoices being overdue. The majority of these invoices belong to "
+27,V2,All invoices in US dollars,PASS,425,SIMPLE,"## Executive Summary  The total value of all invoices in US dollars is **$28,175.64**, with all 12 invoices being overdue. The majority of these invoi"
+27,V3,Show USD invoices with total amount,PASS,426,SIMPLE,"## Executive Summary  The total value of USD invoices is **$28,175.64**, with **12** overdue invoices. Energy Solutions has multiple overdue invoices,"
+28,V1,Show me unpaid invoices with that currency,PASS,810,SIMPLE,"## Executive Summary  There are **102 overdue unpaid invoices** totaling **$150,016.63** in USD. All overdue invoices are in draft status except one w"
+28,V2,List outstanding invoices with currencies,PASS,377,SIMPLE,"## Executive Summary  There are **102 outstanding invoices**, totaling **$150,016.63**, with all overdue. The majority are in draft status, indicating"
+28,V3,Unpaid bills grouped by currency,PASS,532,SIMPLE,"## Executive Summary  The total value of unpaid invoices is **$150,016.63**, with all 102 invoices being overdue. The majority of invoices are in USD,"
+29,V1,What tasks are pending for the users,PASS,438,SIMPLE,"## Executive Summary  Kartik Trivedi has the most pending tasks with **4** records, all related to new lead follow-ups. The tasks are due by **2025-08"
+29,V2,Show all pending tasks by user,PASS,728,SIMPLE,"## Executive Summary  Kartik Trivedi has the most pending tasks with **4** records, all related to new lead follow-ups. This suggests an imbalance in "
+29,V3,Pending tasks per team member,PASS,481,SIMPLE,"## Executive Summary  Kartik Trivedi has the most pending tasks with **4** tasks, indicating a potential workload imbalance. This suggests that Kartik"
+30,V1,What tasks are pending for the sales team,PASS,359,SIMPLE,"## Executive Summary  The sales team has **70 pending tasks**, primarily consisting of new lead follow-ups. These tasks are largely assigned to Ketul "
+30,V2,Sales team pending tasks,PASS,536,SIMPLE,"## Executive Summary  The sales team has **70 pending tasks**, primarily consisting of new lead follow-ups. Ketul Trivedi is assigned to multiple task"
+30,V3,Pending work items for sales department,PASS,445,SIMPLE,"## Executive Summary  The sales department has **70 pending tasks**, primarily focused on new lead follow-ups. Ketul Trivedi is assigned to multiple t"
+31,V1,Pending tasks,PASS,339,SIMPLE,"## Executive Summary  There are **70 pending tasks**, indicating a significant backlog. Ketul Trivedi has multiple pending tasks, suggesting an uneven"
+31,V2,Show pending tasks,PASS,706,SIMPLE,"## Executive Summary  There are **70 pending tasks**, primarily concentrated on new lead follow-ups. Ketul Trivedi is assigned multiple tasks, indicat"
+31,V3,All tasks that are pending,PASS,355,SIMPLE,"## Executive Summary  There are **70 pending tasks** in the system, indicating a significant backlog. Ketul Trivedi is assigned to multiple pending ta"
+32,V1,Which customers have not given business in 3 months,PASS,342,SIMPLE,"## Executive Summary  No customers have gone without giving business for 3 months, as **all** companies have transacted within this timeframe. This in"
+32,V2,Inactive customers last 3 months,PASS,342,SIMPLE,"## Executive Summary  There are **139 companies** that have been inactive over the last 3 months. The majority of these companies are from India, with"
+32,V3,Companies with no business in past 3 months,PASS,468,SIMPLE,"## Executive Summary  There are **no companies** with no business in the past 3 months. All companies have been active, indicating a high level of ong"
+33,V1,Show me the top 10 customers by revenue,PASS,328,SIMPLE,## Executive Summary  The top 10 customers by revenue cannot be determined due to insufficient data. **No revenue data is available** for the 139 comp
+33,V2,Top 10 clients by revenue,PASS,2518,SIMPLE,"## Executive Summary  The top 10 clients by revenue list is not directly derivable from the provided company data; however, we can see that **139 comp"
+33,V3,Highest revenue generating customers,PASS,2462,SIMPLE,"## Executive Summary  India has the highest concentration of companies, with **5** companies listed. The majority of companies, **4**, are from India."
+34,V1,Give me closed won deals,PASS,2519,SIMPLE,"## Executive Summary  The sales team successfully closed **26 deals**, generating a total of **$3,745.13** in revenue. The majority of these deals wer"
+34,V2,Show all won deals,PASS,38,SIMPLE,No **Closed Won** deals found.  --- _Source: `deals` · Live database query_
+34,V3,List closed won opportunities,PASS,16,SIMPLE,No **Closed Won** deals found.  --- _Source: `deals` · Live database query_
+35,V1,Give me all deals,PASS,442,SIMPLE,"## Executive Summary  There are **175 deals** in the system, indicating a substantial sales pipeline. The deals are in various stages, with some under"
+35,V2,List every deal,PASS,511,SIMPLE,"## Executive Summary  There are **175 deals** in the system, with a total of 5 deals listed in the sample data provided. The deals are in various stag"
+35,V3,Show all deals in CRM,PASS,648,SIMPLE,"## Executive Summary  There are **175 deals** in the CRM system, indicating a substantial pipeline of potential business opportunities. The deals are "
+36,V1,How many deals are there,PASS,402,SIMPLE,"## Executive Summary  There are **175 deals** in the system, indicating a substantial sales pipeline. The deals are in various stages, with some under"
+36,V2,Count total deals,PASS,411,SIMPLE,## Executive Summary  The total number of deals is **175**. This indicates a substantial volume of deals in the system. No immediate insight into deal
+36,V3,Total number of deals,PASS,684,SIMPLE,"## Executive Summary  The total number of deals is **175**. This indicates a substantial pipeline of opportunities. The deal amounts vary widely, from"
+37,V1,Who is ketul,PASS,2627,SIMPLE,## Executive Summary  Ketul Trivedi is a registered user with the email demo@weekmate.com. The search results confirm **1 user** matching the query. T
+37,V2,Find ketul,PASS,417,SIMPLE,"## Executive Summary  Six companies are associated with the name ""Ketul"". **Four companies** have an email address, and **two companies** are from Ind"
+37,V3,Search for ketul,PASS,2734,SIMPLE,"## Executive Summary  Six companies matching 'ketul' were found, with **4** having a specified country, primarily **India**. Most companies (**4**) ha"
+38,V1,Give me details of ketul,PASS,18,SIMPLE,No contact or user found matching **ketul**.
+38,V2,Show ketul's full profile,PASS,2814,SIMPLE,"## Executive Summary  Ketul's profile was created on **May 12, 2026**. His email address is ketultrivedi5@gmail.com. No additional business insights c"
+38,V3,Complete information about ketul,PASS,18,SIMPLE,No contact or user found matching **ketul**.
+39,V1,Invoice by status,PASS,757,SIMPLE,"## Executive Summary  **170 overdue invoices** account for nearly all of the 171 total invoices, indicating a significant issue with timely payments. "
+39,V2,Invoices grouped by status,PASS,2855,SIMPLE,"## Executive Summary  Most invoices (**170**) are overdue, indicating potential cash flow issues. The total amount due is **USD 422,501.04**, with onl"
+39,V3,Show invoice breakdown by payment status,PASS,342,SIMPLE,"## Executive Summary  Most invoices (**170**) are overdue, indicating potential cash flow issues. The total invoice amount is **USD 422,501.04**, with"
+40,V1,List new leads from this week,PASS,2615,SIMPLE,"## Executive Summary  There are **159 new leads** from this week. The leads have incomplete information, with many missing job titles and other detail"
+40,V2,New contacts this week,PASS,3007,SIMPLE,"## Executive Summary  **159 new contacts** were added this week, indicating a significant influx of potential leads. The high number of new contacts w"
+40,V3,Leads added this week,PASS,696,SIMPLE,"## Executive Summary  **159 contacts** were added this week, indicating a significant influx of potential leads. This large number presents an opportu"
+41,V1,New leads this month,PASS,3037,SIMPLE,"## Executive Summary  There are **159 new leads** this month. The leads have incomplete information, with many missing job titles and other details. T"
+41,V2,Contacts created this month,PASS,626,SIMPLE,## Executive Summary  **159 contacts** have been created this month. This indicates a significant influx of new leads or potential customers. The high
+41,V3,Leads from current month,PASS,588,SIMPLE,"## Executive Summary  There are **159 contacts** listed as leads for the current month. The majority of these contacts have incomplete information, wi"
+42,V1,Last 5 contacts details,PASS,2489,SIMPLE,"## Executive Summary  There are **159 contacts** in the system, but details are incomplete for most. Many contacts lack job titles, statuses, and stag"
+42,V2,Recent 5 contacts with details,PASS,2506,SIMPLE,"## Executive Summary  There are **159 contacts** in the recent list, but details are incomplete for most. Many contacts have missing information, incl"
+42,V3,Show me details of last 5 contacts,PASS,43,SIMPLE,No contact or user found matching **last**.
+43,V1,Show me the total sales for last month,PASS,873,SIMPLE,"## Executive Summary  The total sales for last month were **$2,161.10**. This revenue figure indicates a specific monthly sales performance. With only"
+43,V2,Last month total sales,PASS,423,SIMPLE,"## Executive Summary  The total sales for last month were **$2,161.10**. This revenue figure indicates a specific monthly sales performance. With only"
+43,V3,Revenue generated last month,PASS,377,SIMPLE,"## Executive Summary  The company generated **$2,161.10** in revenue last month. This figure represents the total revenue for April 2026. With a singl"
+44,V1,Total revenue this financial year,PASS,394,SIMPLE,"## Executive Summary  The total revenue for the current financial year **FY 2026-27** stands at **$2,414.83**. This figure represents the overall reve"
+44,V2,Revenue for current year,PASS,351,SIMPLE,"## Executive Summary  Total revenue for the current year is not directly available, but **$121,744.19** represents total revenue for all time. This su"
+44,V3,What is our total revenue this year,PASS,367,SIMPLE,"## Executive Summary  Our total revenue for this year stands at **$70,162.47**. The bulk of this revenue was generated in March, with **$66,673.11**. "
+45,V1,Total revenue generated in 2025,PASS,328,SIMPLE,"## Executive Summary  The total revenue generated in 2025 is **$51,581.72**. This figure represents the overall revenue for the year. No other insight"
+45,V2,2025 revenue total,PASS,2782,SIMPLE,"## Executive Summary  The total revenue for 2025 is **$51,581.72**. This key financial figure indicates the overall income generated during the year. "
+45,V3,How much revenue did we make in 2025,PASS,2427,SIMPLE,"## Executive Summary  The company generated **$51,581.72** in revenue in 2025. This figure represents the total revenue for the year. Revenue for 2025"
+46,V1,Total revenue of 2025 for Lead,PASS,2607,SIMPLE,"## Executive Summary  No revenue data is available, but **159 contacts** are listed for Lead. The data lacks specific revenue information for 2025. As"
+46,V2,Lead revenue in 2025,PASS,2610,SIMPLE,"## Executive Summary  There are **159 contacts** in the system, but no revenue data is available to provide insights on lead revenue in 2025. The cont"
+46,V3,Revenue from leads in 2025,PASS,2451,SIMPLE,"## Executive Summary  There are **159 contacts** in the system, but no revenue data is available to calculate revenue from leads in 2025. The data onl"
+47,V1,Pending invoices,PASS,2549,SIMPLE,"## Executive Summary  There are **102 pending invoices**, all of which are overdue, totaling **USD 150,016.63**. The average days overdue for these in"
+47,V2,Invoices pending payment,PASS,2683,SIMPLE,"## Executive Summary  There are **102 overdue invoices** pending payment, totaling **USD 150,016.63**. The majority of these invoices are significantl"
+47,V3,Show all unpaid invoices,PASS,2591,SIMPLE,"## Executive Summary  The company has **102 unpaid invoices** totaling **$150,016.63**, with all invoices overdue. The oldest invoice is **510 days ov"
+48,V1,Overdue payments,PASS,2619,SIMPLE,"## Executive Summary  Data Analytics Corp accounts for **$45,042.86** of the total **$150,016.63** outstanding overdue payments from 30 companies. Thi"
+48,V2,Show overdue invoice aging,PASS,2598,SIMPLE,"## Executive Summary  Data Analytics Corp accounts for **$45,042.86** of the total **$150,016.63** outstanding overdue invoices from 30 companies. The"
+48,V3,Which payments are past due,PASS,2776,SIMPLE,"## Executive Summary  There are **102 overdue invoices** totaling **USD 150,016.63**. The oldest overdue invoices are **510 days overdue**, indicating"
+49,V1,Total collection,PASS,2728,SIMPLE,"## Executive Summary  The company's total revenue collection for all time stands at **$121,744.19**. This figure represents the cumulative sum of all "
+49,V2,Total amount collected,PASS,5234,SIMPLE,"## Executive Summary  The company has collected a total of **$1,004,013.78** in revenue from all invoices issued to date. This key figure represents t"
+49,V3,How much have we collected in total,PASS,5110,SIMPLE,"## Executive Summary  The company has collected a total of **$1,004,013.78** in revenue to date. This represents the cumulative total of all invoices "
+50,V1,Overdue invoice aging and outstanding amount by company,PASS,2542,SIMPLE,"## Executive Summary  Data Analytics Corp has the largest outstanding amount with **$45,042.86**, and the oldest due date of **2025-07-10**. The total"
+50,V2,Invoice aging by company,PASS,2600,SIMPLE,"## Executive Summary  The majority of invoices, **170 out of 171**, are overdue, indicating a significant issue with timely payments. The total amount"
+50,V3,Outstanding overdue amounts per company,PASS,2991,SIMPLE,"## Executive Summary  There are **139 companies** in the dataset, spanning various industries and countries, including India, Albania, and the United "
+51,V1,Sales pipeline by stage,PASS,8,SIMPLE,No open pipeline deals found.  --- _Source: `deals` · Live database query_
+51,V2,Pipeline distribution by stage,PASS,765,SIMPLE,"## Executive Summary  The majority of deals are in the Analysis - To be Quoted stage, with **38 deals** valued at **$5,897,253**, accounting for **95."
+51,V3,Show deal pipeline breakdown by stage,PASS,820,SIMPLE,"## Executive Summary  The deal pipeline is predominantly comprised of deals in the Analysis - To be Quoted stage, with **38 deals** valued at **$5,897"
+52,V1,Show pipeline distribution by stage,PASS,436,SIMPLE,"## Executive Summary  The majority of deals are in the Analysis - To be Quoted stage, with **38 deals** valued at **$5,897,253**, accounting for **95."
+52,V2,Deal pipeline stages summary,PASS,497,SIMPLE,"## Executive Summary  The majority of deals are in the Analysis - To be Quoted stage, with **38 deals** valued at **$5,897,253**, accounting for **95."
+52,V3,Deals grouped by pipeline stage,PASS,506,SIMPLE,"## Executive Summary  Most deals are stuck in the Analysis - To be Quoted stage with **38 deals** valued at **$5,897,253**, accounting for **95.6%** o"
+53,V1,Which deals are stuck in the proposal stage,PASS,886,SIMPLE,"## Executive Summary  **42 deals** are stuck in the proposal stage, specifically in ""Analysis - To be Quoted"" or ""Contract Under Review"". These deals "
+53,V2,Deals in proposal stage,PASS,824,SIMPLE,"## Executive Summary  There are **175 deals** currently in various stages, with the majority in the ""Analysis - To be Quoted"" stage. The total potenti"
+53,V3,Show quotation sent deals,PASS,613,SIMPLE,"## Executive Summary  There are **7 deals** in the system, with **3** in the ""Analysis - To be Quoted"" stage. The total potential value of these deals"
+54,V1,Opportunities lost in July,PASS,23,SIMPLE,No **Closed Lost** deals found.  --- _Source: `deals` · Live database query_
+54,V2,Lost deals in July,PASS,36,SIMPLE,No **Closed Lost** deals found.  --- _Source: `deals` · Live database query_
+54,V3,Deals closed lost in July,PASS,35,SIMPLE,No **Closed Lost** deals found.  --- _Source: `deals` · Live database query_
+55,V1,Lost deals last quarter,PASS,34,SIMPLE,No **Closed Lost** deals found.  --- _Source: `deals` · Live database query_
+55,V2,Closed lost deals last quarter,PASS,655,SIMPLE,"## Executive Summary  There were **32 Closed Lost deals** last quarter, with a total value of **$711.82**. The majority of these deals, **3 out of 5**"
+55,V3,How many deals did we lose last quarter,PASS,935,SIMPLE,"## Executive Summary  We lost **175 deals** last quarter. The total value of these lost deals is not explicitly calculable from the provided data, but"
+56,V1,Which sales rep closed the most deals this quarter,PASS,629,SIMPLE,"## Executive Summary  The sales rep closed **87 deals** in Q3 2025, the highest number of deals in a single quarter. This quarter also generated the h"
+56,V2,Top performing sales rep this quarter,PASS,546,SIMPLE,"## Executive Summary  The top performing quarter for sales revenue was Q3 2025, generating **$306,747.71**. This quarter also had the highest number o"
+56,V3,Who closed most deals this quarter,PASS,3208,SIMPLE,## Executive Summary  Ketul Trivedi closed the most deals this quarter with **5 deals**. This indicates a significant contribution from Ketul Trivedi 
+57,V1,Which leads have not been contacted in 7 days,PASS,808,SIMPLE,"## Executive Summary  **159 contacts** have not been contacted in 7 days, indicating a significant backlog. The list includes leads with missing infor"
+57,V2,Leads not contacted in a week,PASS,408,SIMPLE,## Executive Summary  There are **159 contacts** that have not been contacted in a week. This large number of untouched leads indicates a potential ga
+57,V3,Contacts without activity in 7 days,PASS,2775,SIMPLE,## Executive Summary  There are **159 contacts** without activity in the last 7 days. This large number of inactive contacts may indicate a need to re
+58,V1,Conversion rate from lead to customer,PASS,2591,SIMPLE,"## Executive Summary  The conversion rate from lead to customer is **0.0%**, indicating that no leads were converted to customers. Despite **26** clos"
+58,V2,What is our lead conversion rate,PASS,580,SIMPLE,"## Executive Summary  The lead conversion rate from contact to deal is **110.1%**, indicating that on average, more than one deal is created per conta"
+58,V3,How many leads become customers,PASS,2808,SIMPLE,"## Executive Summary  Only **0 leads** can be confirmed as becoming customers due to incomplete data on  **159 contacts**. Key fields like Job Title, "
+59,V1,Any follow-ups overdue this week,PASS,362,SIMPLE,"## Executive Summary  There are **69 overdue tasks** requiring follow-up this week, indicating a significant backlog. Ketul Trivedi is assigned to mul"
+59,V2,Overdue tasks this week,PASS,12,SIMPLE,No overdue tasks found.  --- _Source: `createtasks` · Live database query_
+59,V3,Follow-ups past due this week,PASS,49,SIMPLE,No overdue tasks found for Follow.  --- _Source: `createtasks` · Live database query_
+60,V1,Top performing sales owners in last 6 months with monthly trend,PASS,632,SIMPLE,## Executive Summary  The top performing sales owners have secured **3 confirmed deals** out of **20 sales orders** in the last 6 months. The total va
+60,V2,Best sales reps last 6 months,PASS,860,SIMPLE,## Executive Summary  Top sales performers over the last 6 months have secured **10 confirm orders**. The total value of these confirmed orders is **$
+60,V3,Sales owner performance last 6 months,PASS,17,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+61,V1,Funnel performance and conversion to closed won by owner,PASS,687,SIMPLE,"## Executive Summary  The sales funnel shows **26** deals closed won out of **159** total contacts, indicating a **14.9%** win rate. Despite **175** d"
+61,V2,Sales funnel performance by owner,PASS,576,SIMPLE,"## Executive Summary  The sales funnel has **159** total contacts, but **175** deals were created, indicating duplicate deals. Only **26** deals were "
+61,V3,Pipeline conversion by sales rep,PASS,556,SIMPLE,"## Executive Summary  Sales reps have **10** deals in 'Confirm' status and **10** in 'Draft' status. The total value of confirmed deals is **$17,599**"
+62,V1,High activity companies with weak payment conversion,PASS,584,SIMPLE,"## Executive Summary  Several high-activity companies struggle with weak payment conversion, indicating potential cash flow issues. **6 out of 20 comp"
+62,V2,Companies with many invoices but low payment rate,PASS,537,SIMPLE,"## Executive Summary  Most companies have a high number of overdue invoices, indicating potential cash flow issues. **170 overdue invoices** out of **"
+62,V3,Active clients with poor payment history,PASS,2584,SIMPLE,"## Executive Summary  The majority of active clients have a poor payment history, with **170 overdue invoices** totaling **$422,501.04**. A significan"
+63,V1,"Best product and project type combinations by value, average deal size, and win rate",PASS,30,SIMPLE,No data found in **products** grouped by product_type.  --- _Source: `products` · Live database query_
+63,V2,Top product combinations by deal value,PASS,700,SIMPLE,"## Executive Summary  The top product combinations by deal value are not clearly defined, but **$10,694.86** is the total value of the top three deals"
+63,V3,Which product types have best win rates,PASS,12,SIMPLE,No data found in **products** grouped by product_type.  --- _Source: `products` · Live database query_
+64,V1,Type of deals,PASS,2970,SIMPLE,## Executive Summary  The majority of deals are currently in the Analysis - To be Quoted stage with **38 deals**. This indicates that a significant nu
+64,V2,Show deal types,PASS,2505,SIMPLE,"## Executive Summary  Most deals are in the **Analysis - To be Quoted** stage, indicating a bottleneck in the sales process. **175 deals** are current"
+64,V3,Deals grouped by type,PASS,2687,SIMPLE,"## Executive Summary  The majority of deals are of unknown type, totaling **32 deals**. However, no single type dominates the landscape. The top 3 dea"
+65,V1,I want last 5 contacts by date,PASS,2627,SIMPLE,"## Executive Summary  There are **159 contacts** in total. The last 5 contacts by date are not explicitly clear, but the list appears to be truncated."
+65,V2,5 most recent contacts,PASS,716,SIMPLE,"## Executive Summary  There are **159 contacts** in total, with the 5 most recent contacts showing incomplete data. Many contacts have missing informa"
+65,V3,Show last 5 contacts added,PASS,2571,SIMPLE,"## Executive Summary  The last 5 contacts added show a diverse range of individuals. **5 contacts** were added recently, with many missing key details"
+66,V1,Total revenue generated till date,PASS,454,SIMPLE,"## Executive Summary  The company has generated **$121,744.19** in total revenue till date. This key financial metric indicates the overall sales perf"
+66,V2,All time total revenue,PASS,2966,SIMPLE,"## Executive Summary  The company's all-time total revenue is **$121,744.19**, indicating a substantial accumulation of income. This key figure highli"
+66,V3,Revenue from beginning to now,PASS,521,SIMPLE,"## Executive Summary  The company's total revenue for all time is **$121,744.19**. This key figure represents the cumulative revenue since the company"
+67,V1,Give me todays status,PASS,11,SIMPLE,No data found in **bills** grouped by status.  --- _Source: `bills` · Live database query_
+67,V2,Today's business status,PASS,571,SIMPLE,"## Executive Summary  There are **139 companies** in the current business database. The majority of these companies lack a specified status, indicatin"
+67,V3,What happened today in CRM,PASS,605,SIMPLE,No activityevents found matching your criteria.  --- _Source: `activityevents` · Live database query_
+68,V1,Give me yesterdays status,PASS,35,SIMPLE,No data found in **bills** grouped by status.  --- _Source: `bills` · Live database query_
+68,V2,Yesterday's business summary,PASS,346,SIMPLE,"## Executive Summary  There are **139 companies** in the database, spanning various industries and countries. The majority of companies have no specif"
+68,V3,CRM activity from yesterday,PASS,318,SIMPLE,No activities found matching your criteria.  --- _Source: `activities` · Live database query_
+69,V1,Get companies by region,PASS,964,SIMPLE,"## Executive Summary  The largest region accounts for **50 companies**, nearly a third of the **139 total companies**. The top region dominates, with "
+69,V2,Companies grouped by region,PASS,981,SIMPLE,"## Executive Summary  The largest region accounts for **50 companies**, nearly a third of the total **139 companies**. The top region dominates, with "
+69,V3,Show companies per region,PASS,364,SIMPLE,"## Executive Summary  The company distribution by region reveals that the top region, **50 companies**, accounts for approximately **36%** of the tota"
+70,V1,Get companies list by region,PASS,625,SIMPLE,"## Executive Summary  The company distribution by region reveals that the largest share of companies, **50**, are located in the region '67b7284d1c7f0"
+70,V2,List all companies by region,PASS,497,SIMPLE,"## Executive Summary  The company distribution by region reveals that the largest share of companies, **50**, are located in the region with ID 67b728"
+70,V3,Companies sorted by region,PASS,2484,SIMPLE,"## Executive Summary  The largest region accounts for **50 companies**, nearly a third of the total **139 companies**. The top region has a significan"
+71,V1,Get target vs achieved for all users,PASS,19,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+71,V2,Sales target achievement by user,PASS,12,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+71,V3,Target vs actual for each sales rep,PASS,25,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+72,V1,List of all the companies,PASS,1057,SIMPLE,"## Executive Summary  There are **146** companies in total. The list includes various companies at different stages, with **100** companies shown in t"
+72,V2,Show all companies,PASS,422,SIMPLE,"## Executive Summary  There are **146** companies in total. The majority, **100**, are categorized as customers. This indicates that a significant por"
+72,V3,Give me every company,PASS,399,SIMPLE,"## Executive Summary  There are **139 companies** in the database, spanning various industries and countries. The companies are located in multiple co"
+73,V1,Cybersecurity Expert details of this company,PASS,22,SIMPLE,No contact or user found matching **this company**.
+73,V2,Details of Cybersecurity Experts company,PASS,20,SIMPLE,No contact or user found matching **Cybersecurity Experts**.
+73,V3,Show Cybersecurity Expert company profile,PASS,477,SIMPLE,"## Executive Summary  There are **139 companies** listed as Cybersecurity Experts, spanning various industries and countries. The majority of listed c"
+74,V1,Summarise cyber security experts,PASS,7432,COMPLEX,"There are **159 contacts** with a job title related to 'Cyber Security Expert'. However, it appears that the job title is missing or incomplete for al"
+74,V2,Cybersecurity Experts company summary,PASS,660,SIMPLE,"## Executive Summary  There are **139 companies** listed as Cybersecurity Experts. The companies operate across various industries, including Logistic"
+74,V3,Give me summary of cybersecurity experts,PASS,23,SIMPLE,No contact or user found matching **cybersecurity experts**.
+75,V1,Give me summary of the company,PASS,18,SIMPLE,No contact or user found matching **the company**.
+75,V2,Company overview summary,PASS,342,SIMPLE,"## Executive Summary  There are **139 companies** in our database, spanning various industries and countries. The majority of companies have incomplet"
+75,V3,Show business summary,PASS,338,SIMPLE,"## Executive Summary  There are **139 companies** in the database, spanning various industries and countries. The majority of companies lack a specifi"
+76,V1,Total no of contacts,PASS,521,SIMPLE,## Executive Summary  The total number of contacts is **166**. This key metric provides a foundational understanding of the customer base. With a subs
+76,V2,How many contacts do we have,PASS,780,SIMPLE,"## Executive Summary  We have a total of **159 contacts** in our database. This large number indicates a significant potential customer base. However,"
+76,V3,Count all contacts,PASS,377,SIMPLE,"## Executive Summary  There are **159 contacts** in the database. This count includes various fields such as Name, Email, and Job Title, but some of t"
+77,V1,Get draft sales order,PASS,392,SIMPLE,"## Executive Summary  There are **10 draft sales orders** currently in the system. The total value of these draft orders is **$31,212.40**, with the l"
+77,V2,Show draft sales orders,PASS,347,SIMPLE,"## Executive Summary  There are **20 draft sales orders** with a total value of **$31,222.40**. The largest draft order is worth **$15,000**, with **3"
+77,V3,List all draft status orders,PASS,11,SIMPLE,No data found in **bills** grouped by status.  --- _Source: `bills` · Live database query_
+78,V1,Get companies by source,PASS,435,SIMPLE,"## Executive Summary  The company data reveals that there are **139** companies in total, sourced from various origins. The top source, 681068a4e1154b"
+78,V2,Companies grouped by source,PASS,2484,SIMPLE,"## Executive Summary  The majority of companies come from a few key sources, with the top source generating **22** companies. Most sources have a rela"
+78,V3,Show company source breakdown,PASS,2679,SIMPLE,"## Executive Summary  The company source breakdown reveals that **139 companies** are listed, with a significant presence of Indian companies. The maj"
+79,V1,Get contacts by job title,PASS,3044,SIMPLE,"## Executive Summary  **159 contacts** have been retrieved, but a significant portion of them have missing job title information. **0** contacts have "
+79,V2,List contacts grouped by job title,PASS,1161,SIMPLE,"## Executive Summary  Most contacts have unknown job titles, totaling **37**. The data reveals a highly diverse set of job titles, with **105** differ"
+79,V3,Contacts breakdown by designation,PASS,722,SIMPLE,"## Executive Summary  Most contacts have unknown designations, totaling **37**. The remaining contacts have diverse job titles, with no single title d"
+80,V1,Get revenue summary for last 6 months,PASS,19,SIMPLE,No contact or user found matching **last**.
+80,V2,Last 6 months revenue summary,PASS,583,SIMPLE,"## Executive Summary  The company generated **$72,634.98** in revenue over the last 6 months. Revenue was predominantly earned in March 2026, with **$"
+80,V3,Revenue breakdown for past 6 months,PASS,2466,SIMPLE,"## Executive Summary  The company generated **$72,634.98** in revenue over the past 6 months. Revenue was largely concentrated in March 2026, which ac"
+81,V1,Get top products for this period,PASS,2580,SIMPLE,"## Executive Summary  Most products were offered in April 2025, with **6 products** listed on April 25 alone. The top products include various support"
+81,V2,Best selling products this period,PASS,5341,SIMPLE,"## Executive Summary  The top-selling product this period is not explicitly clear, but **$642,000** and **$214,000** are the largest paid amounts. No "
+81,V3,Which products are top performing,PASS,4369,SIMPLE,"## Executive Summary  The top-performing products are not explicitly clear from the provided data, as it only lists products with their respective dat"
+82,V1,Get all payment methods,PASS,550,SIMPLE,"## Executive Summary  Most invoices are overdue, with **170** out of **171** invoices past due. The total amount due is **$422,501.04**. The majority "
+82,V2,List all payment methods,PASS,2680,SIMPLE,"## Executive Summary  Most invoices are overdue, with **170** out of **171** invoices past their due date. The total amount due is **USD 422,501.04**,"
+82,V3,Show available payment methods,PASS,3120,SIMPLE,"## Executive Summary  Most invoices are overdue, with **170 out of 171** invoices past their due date. The total amount due is **USD 422,501.04**, ind"
+83,V1,Get all industries,PASS,2957,SIMPLE,"## Executive Summary  There are **139 companies** across various industries. The companies have diverse statuses, including Qualified, Contacted, and "
+83,V2,List all industries,PASS,5089,SIMPLE,"## Executive Summary  There are **139 companies** listed across various industries. The majority of companies have a status, with some marked as ""Cont"
+83,V3,Show all industry types,PASS,25,SIMPLE,No data found in **commonnotes** grouped by type.  --- _Source: `commonnotes` · Live database query_
+84,V1,Get company management settings,PASS,721,SIMPLE,"## Executive Summary  There are **139 companies** in the management settings. The majority of these companies are located in **India**, with at least "
+84,V2,Company system settings,PASS,694,SIMPLE,"## Executive Summary  Ketul 5, an E-commerce & Retail company based in India, is currently in the Customer lifecycle stage. The company was **created "
+84,V3,Management configuration settings,PASS,307,SIMPLE,No billapproverconfigs found matching your criteria.  --- _Source: `billapproverconfigs` · Live database query_
+85,V1,Get file upload limit,PASS,550,SIMPLE,"## Executive Summary  The file upload limit is stored in the application configuration, specifically under **App Settings → Storage**. This informatio"
+85,V2,What is the file upload limit,PASS,287,SIMPLE,"## Executive Summary  The file upload limit is stored in the application configuration, specifically under **App Settings → Storage**. This informatio"
+85,V3,File size upload limit setting,PASS,2884,SIMPLE,"## Executive Summary  The file size upload limit setting is not stored in the CRM database, but rather in the **application configuration**. Specifica"
+86,V1,Get meetings for today,PASS,11,SIMPLE,No meetings found for **today**.  --- _Source: `meetings` · Live database query_
+86,V2,What meetings are scheduled today,PASS,16,SIMPLE,No meetings found for **today**.  --- _Source: `meetings` · Live database query_
+86,V3,Today's meeting list,PASS,10,SIMPLE,No meetings found for **today**.  --- _Source: `meetings` · Live database query_
+87,V1,Get meetings for 2026-05-12,PASS,12,SIMPLE,No meetings found for **2026-05-12**.  --- _Source: `meetings` · Live database query_
+87,V2,Meetings on 2026-05-12,PASS,6,SIMPLE,No meetings found for **2026-05-12**.  --- _Source: `meetings` · Live database query_
+87,V3,What meetings happened on May 12 2026,PASS,3,SIMPLE,No meetings found for **all**.  --- _Source: `meetings` · Live database query_
+88,V1,Get SMTP configuration details,PASS,351,SIMPLE,"## Executive Summary  SMTP configuration details are not stored in the CRM database, but rather in the application configuration. The details can be f"
+88,V2,SMTP email settings,PASS,341,SIMPLE,"## Executive Summary  SMTP email settings are stored in the application configuration, not in the CRM database. The settings can be found in **App Set"
+88,V3,Email server configuration,PASS,345,SIMPLE,No companies found matching **'Email server configuration'**.  --- _Source: `companies` · Live database query_
+89,V1,Show invoices overdue,PASS,421,SIMPLE,"## Executive Summary  Total outstanding invoices overdue for 30 companies amount to **$150,016.63**. The top 3 companies with the highest outstanding "
+89,V2,List overdue invoices,PASS,2748,SIMPLE,"## Executive Summary  Data Analytics Corp has the largest outstanding amount with **$45,042.86** in overdue invoices, with the oldest due date being 2"
+89,V3,Which invoices are past due date,PASS,2917,SIMPLE,"## Executive Summary  There are **102 overdue invoices** totaling **$150,016.63**. The oldest overdue invoice is **510 days** past due. This indicates"
+90,V1,Get all details of accounts with country name,PASS,19,SIMPLE,No contact or user found matching **accounts with**.
+90,V2,Companies list with country,PASS,332,SIMPLE,## Executive Summary  There are **146** companies in the list. This total count provides a foundation for further analysis. The number of companies ca
+90,V3,Show all accounts and their country,PASS,2537,SIMPLE,"## Executive Summary  India is the most represented country with **5 companies**, indicating a potential key market. The data shows a diverse range of"
+91,V1,Get all details of accounts with annual revenue greater than amount,PASS,17,SIMPLE,No contact or user found matching **accounts with**.
+91,V2,Companies with high annual revenue,PASS,936,SIMPLE,"## Executive Summary  The company's total revenue for all time stands at **$121,744.19**, indicating a substantial financial performance. This figure "
+91,V3,Show accounts by annual revenue,PASS,495,SIMPLE,## Executive Summary  The company dataset contains **139 companies** across various industries and countries. The majority of companies are based in I
+92,V1,Share me ketul's pending task list,PASS,2763,SIMPLE,"## Executive Summary  Ketul has **51 pending tasks**, primarily related to new lead follow-ups. Most of these tasks are classified as medium priority "
+92,V2,Ketul's pending tasks,PASS,2575,SIMPLE,"## Executive Summary  Ketul has **51 pending tasks**, primarily related to new lead follow-ups. Most of these tasks are of medium priority and have du"
+92,V3,Show pending tasks of ketul,PASS,24,SIMPLE,No pending tasks found for Ketul.  --- _Source: `createtasks` · Live database query_
+93,V1,Pending tasks by ketul,PASS,741,SIMPLE,"## Executive Summary  Ketul has **51 pending tasks**, primarily related to new lead follow-ups. Most of these tasks are of medium priority and have du"
+93,V2,Ketul pending work items,PASS,465,SIMPLE,"## Executive Summary  Ketul has **51 pending tasks**, primarily related to new lead follow-ups. Most of these tasks are of medium priority and have du"
+93,V3,Which tasks are pending for ketul,PASS,360,SIMPLE,"## Executive Summary  Ketul has **51 pending tasks**, primarily related to new lead follow-ups. Most of these tasks are of medium priority and have du"
+94,V1,What tasks does ketul have,PASS,615,SIMPLE,"## Executive Summary  Ketul has **52 tasks** assigned to her, all of which appear to be related to new lead follow-ups. The tasks have a medium priori"
+94,V2,Show all of ketul's tasks,PASS,809,SIMPLE,"## Executive Summary  Ketul has **52 tasks** pending, primarily consisting of New Lead Follow-up tasks with a Medium priority. Most tasks are due in e"
+94,V3,Ketul task list,PASS,474,SIMPLE,"## Executive Summary  Ketul has **52 tasks** pending, primarily related to new lead follow-ups. Most tasks have a medium priority and are assigned to "
+95,V1,Tasks assigned to yash bhide,PASS,18,SIMPLE,No tasks found for Yash Bhide.  --- _Source: `createtasks` · Live database query_
+95,V2,Yash bhide's task assignments,PASS,17,SIMPLE,No tasks found for Yash Bhide.  --- _Source: `createtasks` · Live database query_
+95,V3,Show yash bhide tasks,PASS,13,SIMPLE,No tasks found for Yash Bhide.  --- _Source: `createtasks` · Live database query_
+96,V1,Who has pending tasks,PASS,358,SIMPLE,"## Executive Summary  Ketul Trivedi has the most pending tasks with **51** tasks, significantly more than the other users. A total of **70** pending t"
+96,V2,Which users have pending tasks,PASS,364,SIMPLE,"## Executive Summary  Kartik Trivedi has **4 pending tasks**, all related to new lead follow-ups. These tasks are of medium priority and due on **2025"
+96,V3,Pending tasks by team member,PASS,350,SIMPLE,"## Executive Summary  Kartik Trivedi has the most pending tasks with **4** identical tasks, indicating a potential duplication issue. This suggests th"
+97,V1,Pending tasks per user,PASS,2632,SIMPLE,"## Executive Summary  Ketul Trivedi has the highest number of pending tasks with **51 tasks**, significantly more than the other users. This accounts "
+97,V2,Task count by user,PASS,2558,SIMPLE,"## Executive Summary  Ketul Trivedi has the highest task count with **4 tasks**, all with a 'Pending' status and 'Medium' priority. This suggests an u"
+97,V3,How many tasks per person,PASS,2495,SIMPLE,"## Executive Summary  Ketul Trivedi has the highest task load with **4 tasks**. On average, there are approximately **18.25 tasks per person** if we a"
+98,V1,Invoices not yet paid,PASS,2459,SIMPLE,"## Executive Summary  There are **102 overdue unpaid invoices** totaling **$150,016.63**. The average overdue period is around 365 days, indicating a "
+98,V2,Unpaid invoice list,PASS,2613,SIMPLE,"## Executive Summary  There are **102 overdue unpaid invoices** totaling **$150,016.63**. The oldest overdue invoice is **510 days** past due from ""Ne"
+98,V3,Show invoices awaiting payment,PASS,2538,SIMPLE,"## Executive Summary  There are **102 overdue invoices** awaiting payment, totaling **$150,016.63**. The oldest overdue invoice is **510 days** past d"
+99,V1,Show pending payment invoices,PASS,2818,SIMPLE,"## Executive Summary  There are **102 overdue invoices** pending payment, totaling **$150,016.63**. The majority of these invoices are overdue by seve"
+99,V2,Invoices with pending payment status,PASS,3337,SIMPLE,"## Executive Summary  There are **102 overdue invoices** with pending payment status, totaling **USD 150,016.63**. The majority of these invoices are "
+99,V3,Invoices that need payment,PASS,731,SIMPLE,"## Executive Summary  There are **170 overdue invoices** out of **171 total invoices**, totaling **USD 422,501.04** in pending payments. The majority "
+100,V1,Which payments are past due,PASS,459,SIMPLE,"## Executive Summary  There are **102 overdue invoices** totaling **USD 150,016.63**. The oldest overdue invoices are **510 days overdue**, indicating"
+100,V2,Past due payment list,PASS,2486,SIMPLE,"## Executive Summary  There are **102 overdue invoices** totaling **$150,016.63** that require immediate attention. The oldest overdue invoice is **51"
+100,V3,Show all overdue payments,PASS,2564,SIMPLE,"## Executive Summary  The total outstanding amount for overdue payments across 30 companies is **$150,016.63**. Data Analytics Corp has the largest ou"
+101,V1,Invoices due next month,PASS,4,SIMPLE,No unpaid invoices found.  --- _Source: `invoices` · Live database query_
+101,V2,What invoices are due next month,PASS,40,SIMPLE,No unpaid invoices found.  --- _Source: `invoices` · Live database query_
+101,V3,Upcoming invoice due dates,PASS,662,SIMPLE,"## Executive Summary  There are **102 overdue unpaid invoices** totaling **$150,016.63**. The oldest overdue invoice is **510 days** past due from New"
+102,V1,Open deals,PASS,501,SIMPLE,"## Executive Summary  There are **117 open deals** currently in the system, indicating a significant amount of ongoing business activity. The total va"
+102,V2,Show all open opportunities,PASS,24,SIMPLE,No **open** deals found.  --- _Source: `deals` · Live database query_
+102,V3,Active deals in progress,PASS,1036,SIMPLE,"## Executive Summary  There are **117 open deals** currently in progress, with a total of **$8,499.20** worth of potential business (**3179.7 + 5299.5"
+103,V1,Deals by ketul,PASS,413,SIMPLE,"## Executive Summary  Ketul Trivedi has **62 deals**, indicating a substantial workload. The total value of these deals is not fully quantifiable due "
+103,V2,Ketul's deal list,PASS,600,SIMPLE,"## Executive Summary  Ketul has **62 deals** in his list, indicating a substantial pipeline. The total potential value of these deals is not fully cap"
+103,V3,Show all deals owned by ketul,PASS,440,SIMPLE,"## Executive Summary  Ketul owns **62 deals**, indicating a substantial workload. The total value of these deals is not immediately calculable, but th"
+104,V1,Deals by year and stage,PASS,716,SIMPLE,"## Executive Summary  Most deals are in the **Analysis - To be Quoted** stage. Out of **175 deals**, a significant portion are at this stage. The tota"
+104,V2,Yearly deal stage breakdown,PASS,482,SIMPLE,"## Executive Summary  In 2025, **33 deals** were in the Analysis - To be Quoted stage, indicating a significant pipeline. The year also saw **23 deals"
+104,V3,Annual deal distribution by stage,PASS,468,SIMPLE,"## Executive Summary  Most deals are in the **Analysis - To be Quoted** stage, indicating a bottleneck in the sales process. **60%** of deals (or **10"
+105,V1,Contacts breakdown by designation,PASS,2897,SIMPLE,"## Executive Summary  Most contacts have unknown designations, totaling **37**. The remaining contacts have diverse job titles, with no single title d"
+105,V2,Contacts by job title,PASS,2770,SIMPLE,"## Executive Summary  **159 contacts** have been recorded, but a significant portion lack crucial information, including job titles. **0 job titles** "
+105,V3,Show contacts grouped by their designation,PASS,805,SIMPLE,"## Executive Summary  The majority of contacts, **37**, have an unknown job title, indicating incomplete data. There are **105** different job titles "
+106,V1,Funnel performance,PASS,1835,SIMPLE,"## Executive Summary  The CRM funnel performance indicates a concerning trend, with **175 deals created** from only **159 contacts**, suggesting data "
+106,V2,Sales funnel analysis,PASS,2027,SIMPLE,"## Executive Summary  The sales funnel analysis reveals a concerning trend: despite **175 deals** being created from **159 contacts**, only **26** wer"
+106,V3,Show overall funnel conversion rates,PASS,985,SIMPLE,"## Executive Summary  The sales funnel conversion rate from contact to closed won deal is **14.9%**, indicating a significant drop-off in the process."
+107,V1,High activity companies with weak payment,PASS,611,SIMPLE,"## Executive Summary  Several high-activity companies show concerning payment patterns. **6 out of 20 companies** have a payment rate of 0%, indicatin"
+107,V2,Active clients with poor payment rate,PASS,2952,SIMPLE,"## Executive Summary  Most active clients have a poor payment rate, with **170 overdue invoices** out of **171 total invoices**. The total overdue amo"
+107,V3,Companies active but payment conversion low,PASS,892,SIMPLE,"## Executive Summary  Many active companies have a low payment conversion rate, indicating potential issues with their financial health or our collect"
+108,V1,Give me summary of kartik trivedi,PASS,14,SIMPLE,No contact or user found matching **kartik trivedi**.
+108,V2,Kartik trivedi profile,PASS,470,SIMPLE,No contacts found matching **'Kartik Trivedi'**.  --- _Source: `contacts` · Live database query_
+108,V3,Show kartik trivedi's details,PASS,548,SIMPLE,No contacts found matching **'Kartik Trivedi'**.  --- _Source: `contacts` · Live database query_
+109,V1,SO01241 line items,PASS,2577,SIMPLE,"## Executive Summary  The sales order SO01241 for Automation Systems2, confirmed by Ketul Trivedi, totals **1,626.40 KRW** (USD **1.10**). The order c"
+109,V2,Show line items of SO01241,PASS,485,SIMPLE,No sales found matching **'SO01241'**.  --- _Source: `sales` · Live database query_
+109,V3,Sales order SO01241 products,PASS,442,SIMPLE,"## Executive Summary  The sales order data reveals that **50% of orders are in Draft status**. The total amount of confirmed orders is **$11,599**, in"
+110,V1,Status of this SO00080,PASS,416,SIMPLE,"## Executive Summary  Sales Order SO00080 for Hansen, Kutch and Swift Solutions has a **confirmed** status with a total value of **KRW 187.62** (or **"
+110,V2,SO00080 current status,PASS,19,SIMPLE,No data found in **bills** grouped by status.  --- _Source: `bills` · Live database query_
+110,V3,What is the status of sales order SO00080,PASS,577,SIMPLE,"## Executive Summary  The sales order SO00080 is not found in the provided data. A total of **20 sales orders** are listed, but SO00080 is not among t"
+111,V1,SO00080 details,PASS,477,SIMPLE,"## Executive Summary  The sales order SO00080 for Hansen, Kutch and Swift Solutions, confirmed by Ketul Trivedi, totals **KRW 187.62** or **USD 0.13**"
+111,V2,Show details of SO00080,PASS,27,SIMPLE,No contact or user found matching **SO**.
+111,V3,Sales order SO00080 complete info,PASS,373,SIMPLE,"## Executive Summary  Of the **20 sales orders**, **50% are in Draft status**. The total value of confirmed orders is **$11,599**, with the largest co"
+112,V1,Find ELSN/2026/020,PASS,602,SIMPLE,"## Executive Summary  One invoice, ELSN/2026/020, was found with a confirmed status and a value of **USD 0.66**. The invoice is due on 2026-02-27. Giv"
+112,V2,Show invoice ELSN/2026/020,PASS,2533,SIMPLE,"## Executive Summary  Invoice ELSN/2026/020 is not present in the provided data, but **170 out of 171 invoices are overdue**. The total amount due is "
+112,V3,Look up invoice ELSN2026020,PASS,41,SIMPLE,"No records found matching **'invoice ELSN2026020'**. Try a more specific term.  --- _Source: `activities`, `activityevents`, `activitylogs` · Live dat"
+113,V1,Search Automation Systems,PASS,426,SIMPLE,"## Executive Summary  Three companies matched the search query ""Automation Systems"". **3 companies** were found across various industries, including R"
+113,V2,Find company Automation Systems,PASS,31,SIMPLE,"No record found for **company automation systems**.  --- _Source: `users`, `contacts`, `companies` · Live database query_"
+113,V3,Look up Automation Systems company,PASS,33,SIMPLE,"No records found matching **'Automation Systems company'**. Try a more specific term.  --- _Source: `activities`, `activityevents`, `activitylogs` · L"
+114,V1,Overdue invoice aging,PASS,18324,SIMPLE,"## Executive Summary  Overdue invoices total **$15  ---  **Overdue Invoice Aging — 30 companies, Total Outstanding: 150,016.63:**  | Company | Invoice"
+114,V2,Invoice aging by company,PASS,17805,SIMPLE,"## Executive Summary  The company faces significant overdue invoices,  ---  **Invoices — 171 total (170 overdue), Total: USD 422,501.04:**  | Invoice "
+114,V3,Outstanding overdue invoices per company,PASS,7770,SIMPLE,"## Executive Summary  Data Analytics Corp has the largest outstanding overdue invoices with **$45,042.86**, significantly higher than other companies."
+115,V1,Top 5 customers by revenue,PASS,18283,SIMPLE,## Executive Summary  The provided data lists **139  ---  **139 companies:**  | Company | Email | Industry | Status | Country | | --- | --- | --- | --
+115,V2,Highest 5 revenue generating clients,PASS,17760,SIMPLE,"## Executive Summary  The provided data lists company details but does not include any revenue figures or transaction history. Therefore, it is  ---  "
+115,V3,Best 5 customers by total billing,PASS,18307,SIMPLE,"## Executive Summary  The provided data details **  ---  **Invoices — 171 total (170 overdue), Total: USD 422,501.04:**  | Invoice # | Status | Amount"
+116,V1,Pipeline by stage,PASS,13426,SIMPLE,"## Executive Summary  The majority of deals are in the Analysis - To be Quoted stage, with **38 deals** valued at **$5,897,253**, accounting for **95."
+116,V2,Deal pipeline distribution,PASS,17685,SIMPLE,## Executive Summary  The deal pipeline is heavily front  ---  **Pipeline Summary (Open Deals):**  | Stage | Deals | Value | Share % | | --- | --- | -
+116,V3,Show deals by stage in pipeline,PASS,17866,SIMPLE,## Executive Summary  The pipeline contains **175 total  ---  **Total deals: 175**  **Deals** by stage:  | Stage | Count | | --- | --- | | Analysis - 
+117,V1,How many open deals,PASS,17940,SIMPLE,## Executive Summary  There are currently **11  ---  **117 open deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | 
+117,V2,Count of active deals,PASS,17169,SIMPLE,## Executive Summary  There are currently **117  ---  **117 open deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- |
+117,V3,Number of deals currently open,PASS,74,SIMPLE,No **open** deals found.  --- _Source: `deals` · Live database query_
+118,V1,What is our win rate this year,FAIL,0,error,"HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=40)"
+118,V2,Win rate for current year,FAIL,0,error,"HTTPConnectionPool(host='localhost', port=8000): Read timed out. (read timeout=40)"
+118,V3,Deal win percentage this year,PASS,543,SIMPLE,## Executive Summary  The deal win percentage this year is **0%** as none of the  **175 deals** have a closed stage. All deals are in early stages lik
+119,V1,Compare revenue this month vs last month,PASS,18028,SIMPLE,"## Executive Summary  Revenue for last month (April 2  ---  Total revenue for **last month**: **2,161.10**  **Monthly Breakdown:** | Month | Revenue |"
+119,V2,Month over month revenue comparison,PASS,718,SIMPLE,"## Executive Summary  Total revenue for all time is **$121,744.19**. This cumulative figure indicates the overall financial performance but doesn't pr"
+119,V3,This month vs last month revenue,PASS,17901,SIMPLE,"## Executive Summary  Revenue data for the current  ---  Total revenue for **last month**: **2,161.10**  **Monthly Breakdown:** | Month | Revenue | | "
+120,V1,Which deals are at risk of being lost,PASS,14,SIMPLE,No **Closed Lost** deals found.  --- _Source: `deals` · Live database query_
+120,V2,At-risk deals,PASS,1,SIMPLE,"Your query seems a bit vague. Could you be more specific? For example:  • ""How many **open deals** do we have?"" • ""Show **revenue this month**"" • ""Lis"
+120,V3,Deals likely to be lost,PASS,18008,SIMPLE,## Executive Summary  **32 Closed Lost deals** have  ---  **32 Closed Lost deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner
+121,V1,Revenue by company this year,PASS,15741,SIMPLE,**139 companies:**  | Company | Email | Industry | Status | Country | | --- | --- | --- | --- | --- | | 16-04-2026 | 16april@mailinator.com | Logistic
+121,V2,Company-wise revenue this year,PASS,572,SIMPLE,"## Executive Summary  There are **139 companies** in the dataset, spanning various industries and countries. The companies are in different stages, wi"
+121,V3,Which companies generated most revenue this year,PASS,15885,SIMPLE,"Total revenue for **this year**: **70,162.47**  **Monthly Breakdown:** | Month | Revenue | | --- | --- | | Jan 2026 | 0.04 | | Feb 2026 | 1,074.49 | |"
+122,V1,Deals owned by ketul and their status,PASS,15871,SIMPLE,**175 deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi |  TEST | Co
+122,V2,Ketul's deals and current status,PASS,16013,SIMPLE,**62 deals by Ketul:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi |  T
+122,V3,All deals by ketul with stage info,PASS,15942,SIMPLE,**175 deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi |  TEST | Co
+123,V1,Average deal size by stage,PASS,14983,SIMPLE,**175 deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi |  TEST | Co
+123,V2,Mean deal value per stage,PASS,382,SIMPLE,## Executive Summary  The sales pipeline has **175** deals across various stages. The majority of deals are in the Analysis - To be Quoted stage with 
+123,V3,Average deal amount for each pipeline stage,PASS,15846,SIMPLE,"**Pipeline Summary (Open Deals):**  | Stage | Deals | Value | Share % | | --- | --- | --- | --- | | Analysis - To be Quoted | 38 | 5,897,253 | 95.6% |"
+124,V1,Target vs achieved for this month,PASS,20,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+124,V2,This month target achievement,PASS,13,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+124,V3,Sales target vs actual for current month,PASS,12,SIMPLE,"No target data found for all time.  --- _Source: `targets`, `users` · Live database query_"
+125,V1,Which contacts have no deals,PASS,16007,SIMPLE,**175 deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi |  TEST | Co
+125,V2,Contacts without any deals,PASS,16053,SIMPLE,**175 deals:**  | Deal Name | Stage | Amount (USD) | Close Date | Company | Owner | | --- | --- | --- | --- | --- | --- | | Ketul Trivedi |  TEST | Co
+125,V3,Leads that have no associated deals,PASS,5683,SIMPLE,"## Executive Summary  There are **175 deals** in the system, indicating a substantial sales pipeline. Notably, the total value of these deals is not p"

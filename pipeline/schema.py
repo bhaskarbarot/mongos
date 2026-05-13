@@ -69,8 +69,8 @@ _REVENUE_TABLE_KEYWORDS = [
     "invoice", "order", "sale", "payment", "transaction", "billing", "revenue",
 ]
 _CLEAN_REVENUE_FIELDS = [
-    "grand_total", "grandtotal_in_usd", "grand_total_in_usd",
-    "total", "amount", "totalAmount",
+    "grandtotal_in_usd", "grand_total_in_usd",  # USD fields first (cross-currency safe)
+    "grand_total", "total", "amount", "totalAmount",
 ]
 
 # Entity aliases — maps common query words to actual table names

@@ -800,13 +800,18 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
     if not doc_date_field:
         doc_date_field = next((f for f in fields if "date" in f.lower()), None)
 
+    # Revenue = PAID invoices only (money actually received)
+    paid_filter = "payment_status = 'paid'" if table == "invoices" else ""
+
     if time_cond and doc_date_field:
-        # Replace updated_at with NULLIF(field,'')::timestamptz
         doc_date_expr = f"NULLIF(\"{doc_date_field}\",'')::timestamptz"
         date_condition = time_cond["condition"].replace("updated_at", doc_date_expr)
-        where = f"WHERE {date_condition}"
-    elif time_cond:
-        where = f"WHERE {time_cond['condition']}"
+        filters = [f"({date_condition})"]
+        if paid_filter:
+            filters.insert(0, paid_filter)
+        where = "WHERE " + " AND ".join(filters)
+    elif paid_filter:
+        where = f"WHERE {paid_filter}"
     else:
         where = ""
 
@@ -2813,19 +2818,15 @@ def _fp_pipeline_summary(agent, user_query: str) -> Optional[Dict]:
     amount_field = next((f for f in fields if f.lower() in ["grand_total_in_usd", "grand_total"]), None)
     deleted_field = next((f for f in fields if f.lower() == "deleted"), None)
 
-    where_parts = []
-    if deleted_field:
-        where_parts.append(f"COALESCE(\"{deleted_field}\",'false') != 'true'")
-    if won_field:
-        where_parts.append(f"\"{won_field}\" IS NULL")
-    if lost_field:
-        where_parts.append(f"\"{lost_field}\" IS NULL")
-    where = "WHERE " + " AND ".join(f"({p})" for p in where_parts) if where_parts else ""
+    # Filter: only OPEN deals (not won, not lost) using stage — most reliable
+    where_parts = [
+        "(deleted = false OR deleted IS NULL)",
+        "stage NOT IN ('Closed Won', 'Closed Lost')",
+    ]
+    where = "WHERE " + " AND ".join(where_parts)
 
-    value_expr = (
-        f"NULLIF(\"{amount_field}\",'')::numeric"
-        if amount_field else "0"
-    )
+    # amount_field is already NUMERIC — no cast needed
+    value_expr = f'"{amount_field}"' if amount_field else "0"
     sql = f"""SELECT
   COALESCE(\"{stage_field}\", 'Unknown') AS stage,
   COUNT(*)::int AS deal_count,
@@ -3619,6 +3620,9 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
     Routes explicitly to the `sales` table — prevents _fp_revenue from mishandling them.
     """
     text = normalize_text(user_query)
+    # Let _fp_count handle "how many" queries for sales
+    if any(kw in text for kw in ["how many", "count", "number of", "total number"]):
+        return None
     # Only trigger on explicit "sales order" phrase or "give me sales" without revenue intent
     if not (re.search(r"\bsales\s+order", text) or
             (re.search(r"\bsales\b", text) and
@@ -3641,9 +3645,7 @@ def _fp_sales(agent, user_query: str) -> Optional[Dict]:
     select_parts = []
     if num_field:    select_parts.append(f"\"{num_field}\" AS sales_number")
     if status_field: select_parts.append(f"\"{status_field}\" AS status")
-    if amount_field: select_parts.append(
-        f"NULLIF(\"{amount_field}\",'')::numeric AS amount"
-    )
+    if amount_field: select_parts.append(f'"{amount_field}" AS amount')
     if date_field:   select_parts.append(f"\"{date_field}\" AS date")
     if not select_parts:
         return None
