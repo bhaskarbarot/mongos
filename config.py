@@ -34,9 +34,13 @@ class Settings:
     # Groq — fastest cloud inference, high RPD
     # 8b-instant: 14,400 RPD, 6K TPM  → classify + decompose (small prompts)
     # 70b-versatile: 14,400 RPD, 12K TPM → synthesize (large output, best quality)
-    groq_api_key: str        = os.getenv("GROQ_API_KEY", "")
-    groq_classify_model: str = os.getenv("GROQ_CLASSIFY_MODEL",  "llama-3.1-8b-instant")
-    groq_decompose_model: str= os.getenv("GROQ_DECOMPOSE_MODEL", "llama-3.1-8b-instant")
+    groq_api_key: str        = os.getenv("GROQ_API_KEY",   "")
+    groq_api_key_2: str      = os.getenv("GROQ_API_KEY_2", "")   # account 2 — 2× TPM budget
+    groq_api_key_3: str      = os.getenv("GROQ_API_KEY_3", "")   # account 3 — 3× TPM budget = 36K TPM on 70b
+    groq_classify_model: str = os.getenv("GROQ_CLASSIFY_MODEL",  "meta-llama/llama-4-scout-17b-16e-instruct")
+    groq_decompose_model: str= os.getenv("GROQ_DECOMPOSE_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    # Both SQL and synthesis use 70b — 2 accounts × 12K TPM = 24K TPM → supports 3 qpm easily
+    groq_sql_model: str      = os.getenv("GROQ_SQL_MODEL",       "llama-3.3-70b-versatile")
     groq_synthesis_model: str= os.getenv("GROQ_SYNTHESIS_MODEL", "llama-3.3-70b-versatile")
 
     # Gemini — 250K TPM free, good for large context synthesis

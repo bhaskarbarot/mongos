@@ -15,14 +15,11 @@ Architecture:
     app.py
       └─ agent.py          ← you are here (setup + delegation)
            └─ pipeline/
-                ├─ main.py        (orchestrator)
-                ├─ fast_path.py   (rule-based, <300ms)
-                ├─ classifier.py  (SIMPLE / COMPLEX)
-                ├─ text2sql.py    (Ollama NL→SQL)
-                ├─ decomposer.py  (Groq/Ollama query splitting)
-                ├─ executor.py    (parallel sub-query runner)
-                ├─ synthesizer.py (Groq/Ollama final answer)
+                ├─ main.py        (orchestrator: guard → sql_agent)
+                ├─ sql_agent.py   (LLM SQL generation + synthesis)
                 ├─ schema.py      (registry, SQL runner, caching)
+                ├─ chat_memory.py (conversation memory)
+                ├─ llm.py         (Groq → Gemini → OR → Ollama fallback)
                 └─ utils.py       (shared helpers)
 """
 

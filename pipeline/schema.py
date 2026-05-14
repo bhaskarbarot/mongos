@@ -46,6 +46,7 @@ _TABLE_NAMES_CACHE:    List[str]                = []
 _TABLE_FIELDS_CACHE:   Dict[str, List[str]]     = {}
 _SCHEMA_LINKS:         Dict[str, Dict[str, str]] = {}
 _TEXT2SQL_SCHEMA_CACHE: str                      = ""
+_DB_METADATA_CACHE:    str                      = ""
 _SCHEMA_TIMESTAMP:     float                    = 0.0
 _SCHEMA_TTL_SECONDS:   int                      = 600  # 10 min cache TTL
 
@@ -225,10 +226,11 @@ REGISTRY = SchemaRegistry()
 
 def invalidate_all_caches() -> None:
     """Clear all schema caches — call after DB schema changes (e.g. column migration)."""
-    global _TABLE_FIELDS_CACHE, _SCHEMA_LINKS, _TEXT2SQL_SCHEMA_CACHE
+    global _TABLE_FIELDS_CACHE, _SCHEMA_LINKS, _TEXT2SQL_SCHEMA_CACHE, _DB_METADATA_CACHE
     _TABLE_FIELDS_CACHE.clear()
     _SCHEMA_LINKS = {}
     _TEXT2SQL_SCHEMA_CACHE = ""
+    _DB_METADATA_CACHE = ""
     REGISTRY.invalidate()
     LOGGER.info("Schema: all caches invalidated")
 
@@ -763,3 +765,162 @@ def resolve_entity_table(
             return tm[target]
 
     return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LIVE DATABASE METADATA — actual enum values + row counts from PostgreSQL
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Columns where we query DISTINCT values (key enum/categorical fields per table)
+_ENUM_COLUMNS: Dict[str, List[str]] = {
+    "deals":       ["stage", "currency", "type"],
+    "invoices":    ["payment_status", "currency", "approval_status"],
+    "contacts":    ["lifecycleStage", "leadStatus", "jobTitle"],
+    "companies":   ["lifecycleStage", "leadStatus", "industry", "country"],
+    "createtasks": ["status", "priority"],
+    "users":       ["department", "role"],
+    "sales":       ["status", "currency"],
+    "targets":     ["month", "year"],
+    "outreaches":  ["status"],
+    "meetings":    ["status", "type"],
+    "sources":     ["name"],
+    "regions":     ["name"],
+    "departments": ["name"],
+    "technologies":["name"],
+    "products":    ["name", "type"],
+}
+
+# Soft-delete column per table
+_SOFT_DELETE_FILTER: Dict[str, str] = {
+    "outreaches": '"isDeleted" = false OR "isDeleted" IS NULL',
+}
+_DEFAULT_SOFT_DELETE = "deleted = false OR deleted IS NULL"
+
+
+def build_db_metadata(agent) -> str:
+    """Query the live PostgreSQL database to build a rich metadata string.
+
+    Collects:
+      • Exact distinct values for all key categorical/enum columns
+      • Live row counts per table (with soft-delete filter applied)
+      • Table descriptions / purpose mapping
+
+    Result is cached for _SCHEMA_TTL_SECONDS (10 min) — same TTL as schema cache.
+    This metadata is injected into the LLM system prompt so it never has to
+    guess enum values (e.g. stage='Closed Won' not 'closed_won').
+    """
+    global _DB_METADATA_CACHE
+
+    if _DB_METADATA_CACHE and not _is_cache_stale():
+        return _DB_METADATA_CACHE
+
+    with _CACHE_LOCK:
+        if _DB_METADATA_CACHE and not _is_cache_stale():
+            return _DB_METADATA_CACHE
+
+        table_names = get_table_names(agent)
+        table_lower = {t.lower(): t for t in table_names}
+        lines: List[str] = ["━━━ LIVE DATABASE METADATA (actual values from your PostgreSQL) ━━━", ""]
+
+        # ── Table descriptions ──────────────────────────────────────────────
+        _TABLE_DESC: Dict[str, str] = {
+            "deals":         "Sales pipeline — deals/opportunities being tracked",
+            "invoices":      "Customer invoices and billing records (REVENUE source)",
+            "contacts":      "Individual people / leads / prospects",
+            "companies":     "Company accounts / customers / clients",
+            "users":         "CRM system users — sales reps, managers, staff",
+            "createtasks":   "Tasks, follow-ups, to-dos assigned to users",
+            "sales":         "Sales orders (SO numbers)",
+            "targets":       "Monthly sales targets per user",
+            "meetings":      "Meetings and appointments",
+            "outreaches":    "Outreach campaigns and lead activities",
+            "departments":   "Organizational departments",
+            "regions":       "Geographic regions / territories",
+            "products":      "Product catalog",
+            "sources":       "Lead / contact source list (marketing channels)",
+            "technologies":  "Technology stack options",
+            "taxes":         "Tax configurations",
+            "payments":      "Payment records",
+            "activities":    "Activity / interaction logs",
+            "notes":         "Notes attached to records",
+        }
+
+        lines.append("TABLE PURPOSES:")
+        for tbl in sorted(table_names):
+            desc = _TABLE_DESC.get(tbl.lower(), "")
+            if desc:
+                lines.append(f"  {tbl}: {desc}")
+        lines.append("")
+
+        # ── Row counts ──────────────────────────────────────────────────────
+        lines.append("RECORD COUNTS (after soft-delete filter):")
+        for tbl in sorted(table_names):
+            sd = _SOFT_DELETE_FILTER.get(tbl.lower(), _DEFAULT_SOFT_DELETE)
+            try:
+                res = run_sql(agent, f'SELECT COUNT(*)::int FROM "{tbl}" WHERE ({sd})')
+                count = res.rows[0][0] if res.ok() and res.rows else "?"
+            except Exception:
+                count = "?"
+            lines.append(f"  {tbl}: {count} records")
+        lines.append("")
+
+        # ── Actual enum values per table ────────────────────────────────────
+        lines.append("EXACT FIELD VALUES (use these in WHERE clauses — exact case matters):")
+        lines.append("")
+
+        for tbl_lower, columns in _ENUM_COLUMNS.items():
+            tbl = table_lower.get(tbl_lower)
+            if not tbl:
+                continue
+
+            tbl_fields = get_document_fields(agent, tbl)
+            tbl_fields_lower = {f.lower(): f for f in tbl_fields}
+            tbl_lines: List[str] = []
+
+            for col in columns:
+                # Resolve exact column name (case-insensitive)
+                actual_col = tbl_fields_lower.get(col.lower())
+                if not actual_col:
+                    continue
+
+                sd = _SOFT_DELETE_FILTER.get(tbl_lower, _DEFAULT_SOFT_DELETE)
+                try:
+                    res = run_sql(
+                        agent,
+                        f'SELECT DISTINCT "{actual_col}"::text FROM "{tbl}"'
+                        f' WHERE ({sd})'
+                        f' AND "{actual_col}" IS NOT NULL'
+                        f" AND \"{actual_col}\"::text != ''"
+                        f' ORDER BY 1 LIMIT 25',
+                    )
+                    if res.ok() and res.rows:
+                        vals = [str(r[0]) for r in res.rows if r[0] is not None]
+                        if vals:
+                            tbl_lines.append(
+                                f'    {actual_col}: {" | ".join(repr(v) for v in vals)}'
+                            )
+                except Exception as exc:
+                    LOGGER.debug("Metadata: enum query failed %s.%s: %s", tbl, actual_col, exc)
+
+            if tbl_lines:
+                lines.append(f"  Table: {tbl}")
+                lines.extend(tbl_lines)
+                lines.append("")
+
+        # ── Key column names (critical for correct SQL) ─────────────────────
+        lines.append("CRITICAL COLUMN NAME REMINDERS:")
+        lines.append("  • companies display name column: \"companyName\"  (NOT 'name')")
+        lines.append("  • contacts name: TRIM(\"firstName\" || ' ' || \"lastName\")")
+        lines.append("  • tasks name column: \"Task\"  (capital T, NOT 'task' or 'title')")
+        lines.append("  • invoices revenue field: grandtotal_in_usd  (no _ before 'in')")
+        lines.append("  • deals value field:       grand_total_in_usd  (with _ before 'in')")
+        lines.append("  • targets month: 0-indexed integer (Jan=0, Feb=1, ... Dec=11)")
+        lines.append("  • outreaches soft-delete: use \"isDeleted\" NOT 'deleted'")
+        lines.append("  • tasks owner: \"createdBy\" field (links to users._id)")
+        lines.append("  • deals owner: \"owner\" field (links to users._id)")
+        lines.append("  • invoices owner: \"invoiceOwner\" field (links to users._id)")
+
+        result = "\n".join(lines)
+        _DB_METADATA_CACHE = result
+        LOGGER.info("Schema: DB metadata built (%d chars)", len(result))
+        return result

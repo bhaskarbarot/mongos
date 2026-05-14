@@ -17,7 +17,7 @@ NOTE: Text2SQL models (debopam 3B, Arctic 7B) are NOT touched here.
 Public API:
     call(task, system_prompt, user_prompt, max_tokens) -> Optional[str]
 
-Tasks: "classify" | "decompose" | "synthesize"
+Tasks: "classify" | "decompose" | "synthesize" | "sql"
 """
 from __future__ import annotations
 
@@ -51,9 +51,13 @@ _OR_HEADERS = {
 # PROVIDER CALLERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20) -> Optional[str]:
-    """Call Groq API. On 429 rate-limit, waits and retries once before returning None."""
-    if not settings.groq_api_key:
+def _groq(model: str, system: str, user: str, max_tokens: int,
+          timeout: int = 20, api_key: str = "") -> Optional[str]:
+    """Call Groq API with an explicit key (defaults to settings.groq_api_key).
+    On 429 returns None immediately — caller should try the next key/provider.
+    """
+    key = api_key or settings.groq_api_key
+    if not key:
         return None
     payload = {
         "model":       model,
@@ -69,7 +73,7 @@ def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20
         req = urllib.request.Request(
             "https://api.groq.com/openai/v1/chat/completions",
             data=json.dumps(payload).encode(),
-            headers={**_GROQ_HEADERS, "Authorization": f"Bearer {settings.groq_api_key}"},
+            headers={**_GROQ_HEADERS, "Authorization": f"Bearer {key}"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -82,24 +86,9 @@ def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20
         return _do_request()
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            # Parse retry-after from Groq headers (usually 5-60s).
-            # Cap at 15s — if it's longer, fall through to Gemini instead.
-            retry_after = int(e.headers.get("retry-after") or e.headers.get("x-ratelimit-reset-requests") or 8)
-            retry_after = min(retry_after, 15)
-            LOGGER.warning(
-                "Groq [%s] 429 rate-limit — waiting %ds then retrying once",
-                model, retry_after,
-            )
-            time.sleep(retry_after)
-            try:
-                return _do_request()
-            except urllib.error.HTTPError as e2:
-                body2 = e2.read().decode()[:200]
-                LOGGER.warning("Groq [%s] retry HTTP %d: %s", model, e2.code, body2)
-                return None
-            except Exception as exc2:
-                LOGGER.warning("Groq [%s] retry error: %s", model, exc2)
-                return None
+            # On rate-limit: return None immediately so caller tries next key/provider
+            LOGGER.warning("Groq [%s] 429 rate-limit — falling through to next provider", model)
+            return None
         body = e.read().decode()[:200]
         LOGGER.warning("Groq [%s] HTTP %d: %s", model, e.code, body)
         return None
@@ -243,38 +232,73 @@ def call(
     def _label(model: str) -> str:
         return model.split("/")[-1].replace("-instruct", "").replace(":free", "")[:18]
 
+    # Capture all 3 keys once (avoid closure-over-loop-variable bugs)
+    _k1 = settings.groq_api_key
+    _k2 = settings.groq_api_key_2
+    _k3 = settings.groq_api_key_3
+
     if task == "classify":
         steps = [
-            ("Groq-" + _label(settings.groq_classify_model),
-             lambda: _groq(settings.groq_classify_model,    system, user, max_tokens, timeout=20)),
-            ("Gemini-2.5-flash",
+            ("Groq1-" + _label(settings.groq_classify_model),
+             lambda: _groq(settings.groq_classify_model, system, user, max_tokens, timeout=20, api_key=_k1)),
+            ("Groq2-" + _label(settings.groq_classify_model),
+             lambda: _groq(settings.groq_classify_model, system, user, max_tokens, timeout=20, api_key=_k2)),
+            ("Groq3-" + _label(settings.groq_classify_model),
+             lambda: _groq(settings.groq_classify_model, system, user, max_tokens, timeout=20, api_key=_k3)),
+            ("Gemini-flash",
              lambda: _gemini(settings.gemini_classify_model, system, user, max_tokens, timeout=20)),
-            ("Ollama-1.5b",
+            ("Ollama-qwen3b",
              lambda: _ollama(settings.ollama_classify_model, system, user, max_tokens, timeout=30)),
         ]
 
     elif task == "decompose":
         steps = [
-            ("Groq-" + _label(settings.groq_decompose_model),
-             lambda: _groq(settings.groq_decompose_model,        system, user, max_tokens, timeout=20)),
-            ("Gemini-2.5-flash",
-             lambda: _gemini(settings.gemini_decompose_model,     system, user, max_tokens, timeout=25)),
-            ("OR-Llama3.3-70b",
+            ("Groq1-" + _label(settings.groq_decompose_model),
+             lambda: _groq(settings.groq_decompose_model, system, user, max_tokens, timeout=20, api_key=_k1)),
+            ("Groq2-" + _label(settings.groq_decompose_model),
+             lambda: _groq(settings.groq_decompose_model, system, user, max_tokens, timeout=20, api_key=_k2)),
+            ("Groq3-" + _label(settings.groq_decompose_model),
+             lambda: _groq(settings.groq_decompose_model, system, user, max_tokens, timeout=20, api_key=_k3)),
+            ("Gemini-flash",
+             lambda: _gemini(settings.gemini_decompose_model, system, user, max_tokens, timeout=25)),
+            ("OR-" + _label(settings.openrouter_decompose_model),
              lambda: _openrouter(settings.openrouter_decompose_model, system, user, max_tokens, timeout=30)),
-            ("Ollama-7b",
-             lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=60)),
+            ("Ollama-llama8b",
+             lambda: _ollama(settings.ollama_reasoning_model, system, user, max_tokens, timeout=120)),
         ]
 
     elif task == "synthesize":
+        # 3 Groq accounts × 12K TPM = 36K TPM → comfortably handles 3 qpm ✓
         steps = [
-            ("Groq-" + _label(settings.groq_synthesis_model),
-             lambda: _groq(settings.groq_synthesis_model,        system, user, max_tokens, timeout=30)),
-            ("Gemini-2.5-flash",
-             lambda: _gemini(settings.gemini_synthesis_model,     system, user, max_tokens, timeout=30)),
-            ("OR-Hermes3-405b",
-             lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=45)),
-            ("Ollama-7b",
-             lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=90)),
+            ("Groq1-70b",
+             lambda: _groq(settings.groq_synthesis_model, system, user, max_tokens, timeout=30, api_key=_k1)),
+            ("Groq2-70b",
+             lambda: _groq(settings.groq_synthesis_model, system, user, max_tokens, timeout=30, api_key=_k2)),
+            ("Groq3-70b",
+             lambda: _groq(settings.groq_synthesis_model, system, user, max_tokens, timeout=30, api_key=_k3)),
+            ("Gemini-flash",
+             lambda: _gemini(settings.gemini_synthesis_model, system, user, max_tokens, timeout=30)),
+            ("OR-" + _label(settings.openrouter_synthesis_model),
+             lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=40)),
+            ("Ollama-llama8b",
+             lambda: _ollama(settings.ollama_reasoning_model, system, user, max_tokens, timeout=180)),
+        ]
+
+    elif task == "sql":
+        # 3 accounts × 12K TPM = 36K TPM for 70b SQL — max accuracy, zero rate-limit at 3 qpm ✓
+        steps = [
+            ("Groq1-70b",
+             lambda: _groq(settings.groq_sql_model, system, user, max_tokens, timeout=25, api_key=_k1)),
+            ("Groq2-70b",
+             lambda: _groq(settings.groq_sql_model, system, user, max_tokens, timeout=25, api_key=_k2)),
+            ("Groq3-70b",
+             lambda: _groq(settings.groq_sql_model, system, user, max_tokens, timeout=25, api_key=_k3)),
+            ("Gemini-flash",
+             lambda: _gemini(settings.gemini_synthesis_model, system, user, max_tokens, timeout=25)),
+            ("OR-" + _label(settings.openrouter_synthesis_model),
+             lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=35)),
+            ("Ollama-llama8b",
+             lambda: _ollama(settings.ollama_reasoning_model, system, user, max_tokens, timeout=180)),
         ]
 
     else:

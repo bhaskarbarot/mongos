@@ -84,11 +84,9 @@ def main() -> None:
 
         layer = result.get("layer", "")
         layer_badge = {
-            "fast_path":     "⚡ fast-path",
-            "intent_router": "🧠 intent-router",
-            "text2sql":      "🔧 text2sql",
-            "complex":       "🔀 complex",
-            "guard":         "🛡 guard",
+            "sql_agent": "🤖 LLM SQL Agent",
+            "guard":     "🛡 guard",
+            "fallback":  "⚠️ fallback",
         }.get(layer, layer)
 
         st.caption(
