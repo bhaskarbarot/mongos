@@ -825,10 +825,21 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
     explicit_count_only = bool(re.search(r"\b(count|how many|number of|count of)\b", text)) and not has_total_word
     include_list = (wants_all or (has_total_word and not explicit_count_only) or wants_list) and not explicit_count_only
     if include_list and total > 0:
-        name_expr = REGISTRY.display_name_expr(table, fields)
+        # Smart limit: show all when ≤ 200 rows, cap at 100 when > 200
+        _list_limit  = "" if total <= 200 else "LIMIT 100"
+        # Full name for contacts (firstName + lastName)
+        tl_name = table.lower()
+        fl_name = {f.lower(): f for f in fields}
+        if tl_name == "contacts":
+            _fn = fl_name.get("firstname", fl_name.get("first_name", "firstName"))
+            _ln = fl_name.get("lastname",  fl_name.get("last_name",  "lastName"))
+            name_expr = (f"NULLIF(TRIM(CONCAT(COALESCE(document->>'{_fn}',''),"
+                         f"' ',COALESCE(document->>'{_ln}',''))),'')")
+        else:
+            name_expr = REGISTRY.display_name_expr(table, fields)
         list_sql  = (
             f'SELECT {name_expr} AS name FROM "{table}" {where} '
-            f'ORDER BY updated_at DESC LIMIT 100'
+            f'ORDER BY updated_at DESC {_list_limit}'
         ).strip()
         _list_res = run_sql(agent, list_sql)
         list_rows = _list_res.rows
@@ -1917,29 +1928,59 @@ def _fp_name_of_entity(agent, user_query: str) -> Optional[Dict]:
         return None
 
     fields    = get_document_fields(agent, target_table)
-    name_expr = REGISTRY.display_name_expr(target_table, fields)
-    sql       = (
+
+    # Build a full-name expression — for contacts always combine firstName + lastName
+    tl = target_table.lower()
+    fl = {f.lower(): f for f in fields}
+
+    if tl == "contacts":
+        first = fl.get("firstname", fl.get("first_name", "firstName"))
+        last  = fl.get("lastname",  fl.get("last_name",  "lastName"))
+        name_expr = (
+            f"NULLIF(TRIM(CONCAT("
+            f"COALESCE(document->>'{first}',''),' ',"
+            f"COALESCE(document->>'{last}',''))),'')"
+        )
+    else:
+        name_expr = REGISTRY.display_name_expr(target_table, fields)
+
+    # Smart limit: show ALL if total ≤ 200, cap at 100 only when > 200
+    count_sql = (
+        f'SELECT COUNT(DISTINCT {name_expr}) FROM "{target_table}" '
+        f"WHERE COALESCE(document->>'deleted','false') != 'true'"
+    )
+    _cnt = run_sql(agent, count_sql)
+    total_count = int(_cnt.rows[0][0]) if not _cnt.error and _cnt.rows else 0
+    limit_clause = "" if total_count <= 200 else "LIMIT 100"
+
+    sql = (
         f'SELECT DISTINCT {name_expr} AS name '
         f'FROM "{target_table}" '
         f"WHERE COALESCE(document->>'deleted','false') != 'true' "
-        f'ORDER BY name LIMIT 100'
-    )
+        f"AND {name_expr} IS NOT NULL "
+        f'ORDER BY name {limit_clause}'
+    ).strip()
+
     _res = run_sql(agent, sql)
     if _res.error or not _res.rows:
         return None
 
-    names = [str(r[0]).strip() for r in _res.rows if r[0]]
+    names = [str(r[0]).strip() for r in _res.rows if r[0] and str(r[0]).strip()]
     if not names:
         return None
 
-    lines = "\n".join(f"- {n}" for n in names)
+    shown   = len(names)
+    heading = (f"**{target_table.title()} — showing {shown} of {total_count}:**"
+               if total_count > 200 else
+               f"**{target_table.title()} ({shown} total):**")
+    lines   = "\n".join(f"- {n}" for n in names)
     return {
-        "answer":      f"**{target_table.title()} ({len(names)} total):**\n\n{lines}",
+        "answer":      f"{heading}\n\n{lines}",
         "tables_used": [target_table],
         "confidence":  0.95,
-        "sql_queries": [sql],
+        "sql_queries": [count_sql, sql],
         "_entity":     target_table,
-        "_count":      len(names),
+        "_count":      total_count,
     }
 
 
