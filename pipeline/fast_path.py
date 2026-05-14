@@ -438,14 +438,18 @@ def _classify_route(text: str) -> str:
     # ── Funnel by owner — before targets (both use "performance") ───────────────
     if re.search(r"\bfunnel\b", t) and re.search(r"\b(owner|rep|by|person|sales)\b", t):
         return "funnel_by_owner"
-    if re.search(r"\b(targets?|performance|achievement|achieved|growth potential|kpi|score)\b", t):
+    if (re.search(r"\b(targets?|performance|achievement|achieved|growth potential|kpi|score)\b", t)
+            and not re.search(r"\bdetails?\s+of\b|\bdetails?\s+about\b|\binfo\s+(of|about)\b|\bprofile\s+of\b", t)):
         return "targets"
     if re.search(r"\boutreach\b|\binterested leads?\b|\btouch(es)?\b|\bunassigned csv\b|\bdataset\b", t):
         return "outreach"
     if re.search(
-        r"\ball (technolog|source|industr|tax|region|categor|lead status|lifecycle|deal stage|payment method)\b"
-        r"|\bget all (technolog|source|industr|tax|region)\b"
-        r"|\b(list|show) (all )?(technolog|source|tax|region)\b", t,
+        r"\ball (technolog|source|industr|tax|region|categor|lead status|lead type|lifecycle|deal stage|payment method)\b"
+        r"|\bget all (technolog|source|industr|tax|region|lead.?types?|lead.?status)\b"
+        r"|\b(list|show) (all )?(technolog|source|tax|region|lead.?types?|lead.?status)\b"
+        r"|\bwhat\s+are\s+(tax|technolog|source|region|lead|categor|industr)\w*\b"
+        r"|\bgive\s+me\s+(list\s+of\s+)?(lead.?types?|lead.?status|taxes?|technolog|source|region)\b"
+        r"|\blist\s+of\s+(lead.?types?|lead.?status|taxes?)\b", t,
     ):
         return "lookup_list"
     if re.search(r"\bSO\d+\b", text, re.I) or re.search(
@@ -528,6 +532,22 @@ def _classify_route(text: str) -> str:
             and re.search(r"\binvoices?\b", t)):
         return "customers_pending_inv"
 
+    # ── Company detail lookup — must come BEFORE person_summary ─────────────────
+    # "details of Watsica - Hudson Solutions" / "details of Startup Accelerator company"
+    # Signals: explicit "company/account" keyword, OR business suffixes, OR dash-separated name
+    _CO_BUSINESS_SUFFIX = re.compile(
+        r"\b(inc|ltd|llc|solutions?|technologies?|services?|systems?|group|"
+        r"enterprise|corp|corporation|co\.|pvt|limited|associates?|consulting)\b",
+        re.I,
+    )
+    if (re.search(r"\bdetails?\s+of\b|\bdetails?\s+about\b|\binfo\s+(of|about)\b|\bprofile\s+of\b", t)
+            and not re.search(r"[A-Z]{2,}/\d{4}/\d+", text)
+            and not re.search(r"\binvoice\b|\bbill\b", t)
+            and (re.search(r"\bcompan\w+\b|\borganiz\w+\b|\baccoun\w+\b", t)
+                 or _CO_BUSINESS_SUFFIX.search(text)
+                 or re.search(r"[A-Za-z]+\s*[-&]\s*[A-Za-z]", text))):   # "Watsica - Hudson"
+        return "company_detail"
+
     # ── Person summary/profile ───────────────────────────────────────────────────
     if (re.search(r"\b(summary|details?|profile|overview)\b", t)
             and _extract_person_name(text) is not None):
@@ -594,9 +614,10 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
     coalesce_expr = build_revenue_coalesce(fields)
 
     # ── Use the document's own date field, NOT updated_at ────────────────────
-    # updated_at = sync timestamp (all rows share the same date → wrong filter)
-    # We must filter on the actual business date stored in the JSONB document.
+    # Priority: payment_date (actual payment) > invoice_date > sales_date > …
+    # payment_date is the real money-received date; invoice_date is when issued.
     _DATE_FIELD_PRIORITY = [
+        "payment_date",    # actual payment date — most accurate for revenue reporting
         "invoice_date", "sales_date", "due_date", "closeDate",
         "close_date", "createdAt", "date", "order_date",
     ]
@@ -744,6 +765,10 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
         (r"\blow.{0,2}priorit",     "priority",       "=",       "'Low'",                    "low priority"),
     ]
 
+    # filter_parts must be defined BEFORE the _stage_of_m check below uses it
+    filter_parts: List[str] = []
+    filter_label = ""
+
     # Also try "by stage of X" / "with status X" explicit-value extraction
     # e.g. "how many invoices by stage of approved" → approved
     _stage_of_m = re.search(
@@ -764,9 +789,6 @@ def _fp_count(agent, user_query: str) -> Optional[Dict]:
                     filter_parts.append(f"LOWER(document->>'{_actual}') = '{_stage_val}'")
                     filter_label = _stage_val
                     break
-
-    filter_parts: List[str] = []
-    filter_label = ""
     for pattern, field_kw, op, val, label in _ATTR_FILTER_MAP:
         if not re.search(pattern, text):
             continue
@@ -1147,7 +1169,13 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
         vals = ["—" if v is None else str(v) for v in row]
         lines.append("| " + " | ".join(vals) + " |")
 
-    summary = f"**Total {label} deals: {fmt_number(total_count)}**\n\n" if wants_open else ""
+    # Always show the true total so the LLM synthesiser uses the right number.
+    # If count query != rows returned (e.g. LIMIT or null-rows), show both.
+    if total_count == len(rows):
+        count_str = fmt_number(total_count)
+    else:
+        count_str = f"{fmt_number(len(rows))} shown of {fmt_number(total_count)} total"
+    summary = f"**{label.title()} deals: {count_str}**\n\n"
     return {
         "answer":      summary + f"**{label.title()} Deals ({len(rows)} shown):**\n\n" + "\n".join(lines),
         "tables_used": [table],
@@ -1421,7 +1449,9 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
                 )
 
     # ── Time filter using document date field (NOT updated_at) ────────────────
+    # payment_date (actual payment received) is the most accurate for invoice revenue.
     _DATE_FIELD_PRIORITY = [
+        "payment_date",
         "invoice_date", "sales_date", "due_date", "closeDate",
         "close_date", "createdAt", "date", "order_date",
     ]
@@ -1606,11 +1636,13 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
 
     time_label = f" ({time_cond['label']})" if time_cond else ""
     label      = f"top {limit}" if top_match else str(len(rows))
-    summary = (
-        f"**Total {table}: {fmt_number(total_count)}**\n\n"
-        if (re.search(r"\ball\b", text) or wants_details)
-        else ""
-    )
+    # Always include the true total so the LLM synthesiser never guesses.
+    # Show "X shown of Y total" when the list is capped below the real total.
+    if total_count == len(rows):
+        total_str = fmt_number(total_count)
+    else:
+        total_str = f"showing {fmt_number(len(rows))} of {fmt_number(total_count)} total"
+    summary = f"**Total {table}: {total_str}**\n\n"
     return {
         "answer":      summary + f"**{label} {table}**{time_label}:\n\n" + "\n".join(lines),
         "tables_used": [table],
@@ -2003,30 +2035,51 @@ def _fp_search(agent, user_query: str) -> Optional[Dict]:
         sql = f"""SELECT document->>'name', document->>'email', document->>'department'
 FROM "users"
 WHERE document->>'name' ILIKE '%{term}%'
-  AND COALESCE(document->>'isActive','true') != 'false' LIMIT 5"""
+  AND COALESCE(document->>'isActive','true') != 'false' LIMIT 10"""
         _r = run_sql(agent, sql)
         rows = _r.rows
         if rows:
             tables_used.append("users")
             sql_queries.append(sql)
             for r in rows:
-                results.append(f"**User**: {r[0] or '—'} | Email: {r[1] or '—'}")
+                results.append(
+                    f"**User**: {r[0] or '—'} | Email: {r[1] or '—'} | Dept: {r[2] or '—'}"
+                )
 
-    if "contacts" in table_names and not results:
-        # SAFE: term sanitized via sanitize_sql_value()
+    # Always search contacts too — a person may be a contact, not a user.
+    # Also handle "Rohan Pandey" split across firstName + lastName fields.
+    if "contacts" in table_names:
+        _words = term.split()
+        _extra_cond = ""
+        if len(_words) >= 2:
+            # "Rohan Pandey" → firstName ILIKE '%Rohan%' AND lastName ILIKE '%Pandey%'
+            _fw = sanitize_sql_value(_words[0])
+            _lw = sanitize_sql_value(_words[-1])
+            # SAFE: both sanitized via sanitize_sql_value()
+            _extra_cond = (
+                f" OR (document->>'firstName' ILIKE '%{_fw}%' "
+                f"AND document->>'lastName' ILIKE '%{_lw}%')"
+            )
+        # SAFE: term, _fw, _lw sanitized via sanitize_sql_value()
         sql = f"""SELECT TRIM(CONCAT(COALESCE(document->>'firstName',''),' ',COALESCE(document->>'lastName',''))) AS name,
   document->>'email', document->>'jobTitle', document->>'phoneNumber'
 FROM "contacts"
 WHERE (document->>'firstName' ILIKE '%{term}%' OR document->>'lastName' ILIKE '%{term}%'
-       OR document->>'email' ILIKE '%{term}%') LIMIT 5"""
+       OR document->>'email' ILIKE '%{term}%'{_extra_cond})
+  AND COALESCE(document->>'deleted','false') != 'true' LIMIT 10"""
         _r = run_sql(agent, sql)
         rows = _r.rows
         if rows:
-            tables_used.append("contacts")
+            if "contacts" not in tables_used:
+                tables_used.append("contacts")
             sql_queries.append(sql)
             for r in rows:
+                # Skip blank names (first+last both empty)
+                name = (r[0] or "").strip()
+                if not name:
+                    continue
                 results.append(
-                    f"**Contact**: {r[0] or '—'} | Email: {r[1] or '—'} | Title: {r[2] or '—'}"
+                    f"**Contact**: {name} | Email: {r[1] or '—'} | Title: {r[2] or '—'} | Phone: {r[3] or '—'}"
                 )
 
     if "companies" in table_names and not results:
@@ -2064,16 +2117,17 @@ def _fp_lookup_list(agent, user_query: str) -> Optional[Dict]:
     text        = normalize_text(user_query)
     table_names = get_table_names(agent)
     LOOKUP_MAP  = [
-        (r"\btechnolog",    "technologies",       "name"),
-        (r"\bsource",       "sources",            "sourceName"),
-        (r"\btax\b",        "taxes",              "name"),
-        (r"\bregion",       "regions",            "regionName"),
-        (r"\blead.?status", "lead_statuses",      "name"),
-        (r"\blifecycle",    "lifecycle_stages",   "name"),
-        (r"\bdeal.?stage",  "dealstagesettings",  "dealStageName"),
-        (r"\bcategor",      "categories",         "categoryName"),
-        (r"\bpayment.?method", "payments",        "payment_name"),
-        (r"\bindustr",      "companies",          "industry"),
+        (r"\btechnolog",        "technologies",       "name"),
+        (r"\bsource",           "sources",            "sourceName"),
+        (r"\btax(es)?\b",       "taxes",              "name"),
+        (r"\bregion",           "regions",            "regionName"),
+        (r"\blead.?type",       "lead_types",         "name"),
+        (r"\blead.?status",     "lead_statuses",      "name"),
+        (r"\blifecycle",        "lifecycle_stages",   "name"),
+        (r"\bdeal.?stage",      "dealstagesettings",  "dealStageName"),
+        (r"\bcategor",          "categories",         "categoryName"),
+        (r"\bpayment.?method",  "payments",           "payment_name"),
+        (r"\bindustr",          "companies",          "industry"),
     ]
     matched_table, matched_field = None, None
     for pattern, t_name, field in LOOKUP_MAP:
@@ -2146,7 +2200,8 @@ def _fp_quarterly(agent, user_query: str) -> Optional[Dict]:
     coalesce_expr = build_revenue_coalesce(fields)
 
     # Use document date field — NOT updated_at (sync timestamp, not invoice date)
-    _DATE_FIELD_PRIORITY = ["invoice_date", "sales_date", "due_date", "closeDate", "close_date", "date"]
+    # payment_date = actual payment received; higher priority than invoice_date
+    _DATE_FIELD_PRIORITY = ["payment_date", "invoice_date", "sales_date", "due_date", "closeDate", "close_date", "date"]
     fl = {f.lower(): f for f in fields}
     doc_date_field = next((fl[d] for d in _DATE_FIELD_PRIORITY if d in fl), None)
     if not doc_date_field:
@@ -3780,6 +3835,93 @@ def _fp_sales_order_detail(agent, user_query: str) -> Optional[Dict]:
     }
 
 
+def _fp_invoice_lookup(agent, user_query: str) -> Optional[Dict]:
+    """Handle invoice detail lookup by invoice number: ELSN/2025/1, INV/2024/5, etc."""
+    m = re.search(r'\b([A-Za-z]{2,}/\d{4}/\d+)\b', user_query)
+    if not m:
+        return None
+    inv_num = m.group(1).upper()
+
+    table_names = get_table_names(agent)
+    inv_table   = next((t for t in table_names if t.lower() == "invoices"), None)
+    if not inv_table:
+        return None
+
+    fields    = get_document_fields(agent, inv_table)
+    num_field = next(
+        (f for f in fields if "invoice_number" in f.lower()
+         or f.lower().replace("_", "") == "invoicenumber"),
+        "invoice_number",
+    )
+    safe_num  = sanitize_sql_value(inv_num)
+
+    # Priority fields to display
+    _PRIORITY = [
+        "invoice_number", "companyName", "company", "invoice_date", "due_date",
+        "payment_date", "payment_status", "approval_status",
+        "grand_total", "grandtotal_in_usd", "subtotal", "currency",
+        "payment_mode", "tax_amount", "discount_amount", "payment_fee_amount",
+        "invoiceFor", "notes",
+    ]
+    fl = {f.lower(): f for f in fields}
+    select_parts = []
+    for pf in _PRIORITY:
+        actual = fl.get(pf.lower())
+        if actual:
+            select_parts.append(f"document->>'{actual}' AS \"{pf.lower()[:30]}\"")
+
+    if not select_parts:
+        return None
+
+    sql = (
+        f'SELECT {", ".join(select_parts)}, document->\'payment_history\' AS payment_history '
+        f'FROM "{inv_table}" '
+        f"WHERE document->>'{num_field}' ILIKE '%{safe_num}%' LIMIT 1"
+    )
+    _res = run_sql(agent, sql)
+    if _res.error or not _res.rows:
+        return {
+            "answer":      f"No invoice found matching **{inv_num}**.",
+            "tables_used": [inv_table],
+            "confidence":  0.9,
+            "sql_queries": [sql],
+        }
+
+    row      = _res.rows[0]
+    col_names = [p.split(" AS ")[-1].strip('"') for p in select_parts] + ["payment_history"]
+    lines = []
+    ph_raw = None
+    for col, val in zip(col_names, row):
+        if col == "payment_history":
+            ph_raw = val
+            continue
+        if val and str(val).strip():
+            lines.append(f"**{col.replace('_', ' ').title()}:** {val}")
+
+    # Parse payment_history JSONB array
+    if ph_raw:
+        import json as _json
+        try:
+            ph_list = _json.loads(str(ph_raw)) if isinstance(ph_raw, str) else ph_raw
+            if isinstance(ph_list, list) and ph_list:
+                lines.append("\n**Payment History:**")
+                for ph in ph_list:
+                    if isinstance(ph, dict):
+                        lines.append(
+                            f"- Date: {ph.get('payment_date', '—')} | "
+                            f"Amount: {fmt_number(coerce_number(ph.get('payment_amount', 0)))}"
+                        )
+        except Exception:
+            pass
+
+    return {
+        "answer":      f"**Invoice: {inv_num}**\n\n" + "\n\n".join(lines),
+        "tables_used": [inv_table],
+        "confidence":  0.97,
+        "sql_queries": [sql],
+    }
+
+
 def _fp_system_config(agent, user_query: str) -> Optional[Dict]:
     text = normalize_text(user_query)
     if not re.search(r"\bsmtp\b|\bfile upload\b|\bupload limit\b|\bsystem config\b", text):
@@ -3795,6 +3937,145 @@ def _fp_system_config(agent, user_query: str) -> Optional[Dict]:
         "tables_used": [],
         "confidence":  0.99,
         "sql_queries": [],
+    }
+
+
+def _fp_company_detail(agent, user_query: str) -> Optional[Dict]:
+    """Handle 'give me details of Watsica - Hudson Solutions' / 'details of Startup Accelerator company'.
+
+    Extracts the company name from the query and returns full company details
+    plus related deal and invoice summaries.
+    """
+    # Extract company name from various patterns
+    name_m = None
+    for pat in [
+        r"\bdetails?\s+of\s+(.+?)\s+(?:company|account|organization)\s*\??$",
+        r"\bdetails?\s+of\s+(.+?)\s*\??$",
+        r"\bdetails?\s+about\s+(.+?)\s*\??$",
+        r"\binfo\s+(?:of|about)\s+(.+?)\s*\??$",
+        r"\bprofile\s+of\s+(.+?)\s*\??$",
+    ]:
+        name_m = re.search(pat, user_query, re.I)
+        if name_m:
+            break
+    if not name_m:
+        return None
+
+    company_name = sanitize_sql_value(name_m.group(1).strip().rstrip("?.").strip())
+    if len(company_name) < 2:
+        return None
+
+    table_names = get_table_names(agent)
+    co_table    = next(
+        (t for t in table_names if t.lower() in ["companies", "company", "accounts"]),
+        None,
+    )
+    if not co_table:
+        return None
+
+    fields = get_document_fields(agent, co_table)
+    fl     = {f.lower(): f for f in fields}
+
+    # Build WHERE — search across companyName and name fields
+    name_conds = []
+    for candidate in ["companyname", "name"]:
+        if candidate in fl:
+            name_conds.append(f"document->>'{fl[candidate]}' ILIKE '%{company_name}%'")
+    if not name_conds:
+        return None
+    where = (
+        f"WHERE ({' OR '.join(name_conds)}) "
+        f"AND COALESCE(document->>'deleted','false') != 'true'"
+    )
+
+    # Select priority fields
+    _PRIORITY = [
+        "companyName", "name", "email", "phone", "phoneNumber",
+        "websiteUrl", "website", "industry", "lifecycleStage",
+        "leadStatus", "region", "country", "address",
+        "description", "createdAt",
+    ]
+    select_parts = []
+    for pf in _PRIORITY:
+        actual = fl.get(pf.lower())
+        if actual:
+            select_parts.append(f"document->>'{actual}' AS \"{pf.lower()[:25]}\"")
+    # Always include _id for sub-queries
+    select_parts.append("document->>'_id' AS _co_id")
+    if not select_parts:
+        return None
+
+    sql = f'SELECT {", ".join(select_parts)} FROM "{co_table}" {where} LIMIT 1'
+    _res = run_sql(agent, sql)
+    if _res.error or not _res.rows:
+        return {
+            "answer":      f"No company found matching **{company_name}**.",
+            "tables_used": [co_table],
+            "confidence":  0.85,
+            "sql_queries": [sql],
+        }
+
+    row      = _res.rows[0]
+    col_names = [p.split(" AS ")[-1].strip('"') for p in select_parts]
+    co_id    = None
+    lines    = []
+    sql_queries = [sql]
+    for col, val in zip(col_names, row):
+        if col == "_co_id":
+            co_id = val
+            continue
+        if val and str(val).strip():
+            lines.append(f"**{col.replace('_', ' ').title()}:** {val}")
+
+    # Related deals summary
+    deal_table = next((t for t in table_names if t.lower() == "deals"), None)
+    inv_table  = next((t for t in table_names if t.lower() == "invoices"), None)
+
+    if co_id:
+        safe_id = sanitize_sql_value(co_id)
+        if deal_table:
+            d_sql = (
+                f"SELECT COUNT(*)::int, "
+                f"COUNT(CASE WHEN document->>'stage'='Closed Won' THEN 1 END)::int, "
+                f"COUNT(CASE WHEN document->>'stage' NOT IN ('Closed Won','Closed Lost') THEN 1 END)::int "
+                f'FROM "{deal_table}" '
+                f"WHERE document->>'company' = '{safe_id}' "
+                f"AND COALESCE(document->>'deleted','false') != 'true'"
+            )
+            _d = run_sql(agent, d_sql)
+            sql_queries.append(d_sql)
+            if not _d.error and _d.rows:
+                dr = _d.rows[0]
+                lines.append(
+                    f"**Deals:** {dr[0] or 0} total | "
+                    f"{dr[2] or 0} open | {dr[1] or 0} won"
+                )
+
+        if inv_table:
+            i_sql = (
+                f"SELECT COUNT(*)::int, "
+                f"COALESCE(SUM(NULLIF(document->>'grand_total','')::numeric),0), "
+                f"COUNT(CASE WHEN LOWER(COALESCE(document->>'payment_status',''))='paid' THEN 1 END)::int "
+                f'FROM "{inv_table}" '
+                f"WHERE document->>'company' = '{safe_id}' "
+                f"AND COALESCE(document->>'deleted','false') != 'true'"
+            )
+            _i = run_sql(agent, i_sql)
+            sql_queries.append(i_sql)
+            if not _i.error and _i.rows:
+                ir = _i.rows[0]
+                lines.append(
+                    f"**Invoices:** {ir[0] or 0} total | "
+                    f"{ir[2] or 0} paid | "
+                    f"Total Amount: {fmt_number(coerce_number(ir[1]))}"
+                )
+
+    tbl = [co_table] + ([deal_table] if deal_table else []) + ([inv_table] if inv_table else [])
+    return {
+        "answer":      f"**Company Details: {company_name}**\n\n" + "\n\n".join(lines),
+        "tables_used": tbl,
+        "confidence":  0.96,
+        "sql_queries": sql_queries,
     }
 
 
@@ -5115,7 +5396,7 @@ _SPECIALIZED: Dict[str, Any] = {
     "user_task_map":            _fp_user_task_map,
     "invoice_status_filter":    _fp_invoice_status,
     "active_customers":         _fp_active_customers,
-    # New routes
+    # Existing routes
     "who_has_tasks":            _fp_who_has_tasks,
     "person_tasks":             _fp_person_tasks,
     "person_summary":           _fp_person_summary,
@@ -5128,6 +5409,9 @@ _SPECIALIZED: Dict[str, Any] = {
     "deals_ratio":              _fp_deals_ratio,
     "meetings":                 _fp_meetings,
     "sales_order_detail":       _fp_sales_order_detail,
+    # New routes added in this enhancement
+    "invoice_lookup":           _fp_invoice_lookup,
+    "company_detail":           _fp_company_detail,
 }
 
 # General handlers tried in priority order when no specialized route matched

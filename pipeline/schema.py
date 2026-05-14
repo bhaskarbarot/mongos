@@ -26,6 +26,7 @@ Public API:
 from __future__ import annotations
 
 import ast
+import json
 import logging
 import re
 import threading
@@ -252,23 +253,104 @@ class SqlResult:
 # SQL EXECUTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
-    """Execute raw SQL via the LangChain sql_db_query tool.
+def _run_sql_direct(sql: str) -> Optional["SqlResult"]:
+    """Execute SQL directly via psycopg2, bypassing LangChain entirely.
 
-    Features:
-      • Finds sql_db_query tool from agent's tool list
-      • Handles Decimal('...') strings in output (LangChain quirk)
-      • Retries once on transient errors (connection reset, timeout)
-      • Never raises — always returns SqlResult (success or failure)
+    This is the RELIABLE fallback path. LangChain's sql_db_query tool
+    serialises results to a Python repr string and then TRUNCATES it
+    at max_string_length (default 10 000 chars). Any row containing a
+    large JSONB `document` column exceeds that limit, so the string is
+    cut mid-token and ast.literal_eval() fails — silently returning
+    empty rows even though the DB returned real data.
+
+    Direct psycopg2 fetches native Python objects (dicts, lists, etc.)
+    so no string serialisation / truncation / ast.literal_eval() happens.
+    """
+    try:
+        from config import settings
+        import psycopg2
+        import psycopg2.extras  # enables dict/JSON cursor
+
+        conn = psycopg2.connect(
+            host=settings.postgres_host,
+            port=settings.postgres_port,
+            user=settings.postgres_user,
+            password=settings.postgres_password,
+            dbname=settings.postgres_db,
+            connect_timeout=8,
+        )
+        conn.set_session(readonly=True, autocommit=True)
+
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+
+        conn.close()
+
+        # Normalise: convert each value to JSON-safe Python primitives.
+        # psycopg2 returns JSONB as Python dicts — convert to string for
+        # uniform downstream handling (format_rows_as_markdown_table etc.)
+        def _norm(v):
+            if v is None:
+                return None
+            if isinstance(v, dict):
+                return json.dumps(v, default=str)
+            # psycopg2 Decimal → float for display
+            try:
+                from decimal import Decimal
+                if isinstance(v, Decimal):
+                    return float(v)
+            except ImportError:
+                pass
+            import datetime
+            if isinstance(v, (datetime.datetime, datetime.date)):
+                return v.isoformat()
+            return v
+
+        normalised = [tuple(_norm(v) for v in row) for row in rows]
+        return SqlResult(rows=normalised)
+
+    except Exception as exc:
+        LOGGER.debug("Direct psycopg2 fallback error: %s", exc)
+        return None  # caller decides what to do
+
+
+def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
+    """Execute raw SQL, with direct psycopg2 as the primary path.
+
+    Strategy (in order):
+      1. Direct psycopg2 — bypasses LangChain serialisation/truncation bug.
+         This is the PRIMARY path. It never truncates and never silently
+         drops rows because of ast.literal_eval() failures.
+      2. LangChain sql_db_query tool — kept as the legacy fallback.
+
+    The LangChain tool has a critical silent-failure bug:
+      • tool.run() serialises the result to a Python repr string
+      • LangChain truncates that string at max_string_length (10 000 chars)
+      • Any row with a large JSONB `document` column exceeds the limit
+      • The truncated string causes ast.literal_eval() to raise SyntaxError
+      • The original code caught that silently and returned rows=[]
+      → "No data found" for queries that DID return real data
 
     Args:
-        agent:       LangChain AgentExecutor with sql_db_query tool
+        agent:       LangChain AgentExecutor (used for LangChain fallback only)
         sql:         Raw SQL string to execute
-        max_retries: Number of retry attempts on transient failure
+        max_retries: Retry attempts on transient failure
 
     Returns:
         SqlResult — callers check .ok() / .error to distinguish empty vs failed.
     """
+    # ── PRIMARY: direct psycopg2 ──────────────────────────────────────────────
+    direct = _run_sql_direct(sql)
+    if direct is not None:
+        LOGGER.debug(
+            "run_sql(direct): %d rows | sql=%.100s",
+            len(direct.rows), sql,
+        )
+        return direct
+
+    # ── FALLBACK: LangChain sql_db_query tool ─────────────────────────────────
+    LOGGER.warning("Direct psycopg2 unavailable — falling back to LangChain tool")
     tool = next(
         (t for t in getattr(agent, "tools", [])
          if getattr(t, "name", "") == "sql_db_query"),
@@ -288,10 +370,7 @@ def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
 
             if isinstance(raw, str):
                 # LangChain serialises Python objects into the result string.
-                # We normalise the three most common non-literal forms:
-                #   Decimal('123.45')        → '123.45'
-                #   datetime.date(Y, M, D)   → 'YYYY-MM-DD'
-                #   datetime.datetime(...)   → 'YYYY-MM-DD HH:MM:SS'
+                # Normalise the most common non-literal forms before eval.
                 sanitized = re.sub(r"Decimal\('([^']+)'\)", r"'\1'", raw)
                 sanitized = re.sub(
                     r"datetime\.datetime\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)(?:,\s*\d+)?\)",
@@ -308,7 +387,16 @@ def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
                     parsed = ast.literal_eval(sanitized)
                     return SqlResult(rows=parsed if isinstance(parsed, list) else [])
                 except (ValueError, SyntaxError) as exc:
-                    LOGGER.debug("SQL result parse failed (attempt %d): %s", attempt, exc)
+                    # Log at WARNING — this is a data-loss event, not debug noise
+                    LOGGER.warning(
+                        "LangChain result parse failed (truncation likely): %s | "
+                        "raw_len=%d | sql=%.100s",
+                        exc, len(raw), sql,
+                    )
+                    # Try treating the raw string as an error message from the DB
+                    if raw.strip().lower().startswith("error"):
+                        return SqlResult(error=raw.strip())
+                    # Result truncated — return empty rather than crash
                     return SqlResult(rows=[])
 
             return SqlResult(rows=[])

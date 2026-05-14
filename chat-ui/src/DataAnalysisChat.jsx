@@ -811,7 +811,7 @@ export default function DataAnalysisChat() {
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [apiUrl, setApiUrl] = useState(DEFAULT_API);
-  const [backendUp, setBackendUp] = useState(false);
+  const [backendUp, setBackendUp] = useState(null); // null=connecting, true=online, false=offline
   const [redisOn, setRedisOn] = useState(false);
   const [sources, setSources] = useState({});
   const [learnings, setLearnings] = useState({});
@@ -1230,8 +1230,10 @@ export default function DataAnalysisChat() {
         </button>
         <div className="chat-header__title">
           Elsner ECRM Chatbot
-          <span className={`chat-status-badge chat-status-badge--${backendUp ? "online" : "offline"}`}>
-            {backendUp ? "Online" : "Offline"}
+          <span className={`chat-status-badge chat-status-badge--${
+            backendUp === null ? "connecting" : backendUp ? "online" : "offline"
+          }`}>
+            {backendUp === null ? "Connecting…" : backendUp ? "Online" : "Offline"}
           </span>
         </div>
         <button className="btn-new-chat" onClick={clearChat}>New Chat</button>

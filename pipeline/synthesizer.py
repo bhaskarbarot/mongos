@@ -203,13 +203,18 @@ def _get_format_instructions(response_format: str) -> str:
     }
 
     default = (
-        "OUTPUT FORMAT: Professional CRM Response\n"
-        "- Start with a 1-2 sentence summary of the key finding\n"
-        "- Present data in the clearest format (table for multi-row, inline for single values)\n"
-        "- Bold important numbers and KPIs\n"
-        "- If comparing periods or entities, highlight the delta\n"
-        "- Keep response focused and actionable\n"
-        "- Include 2-3 line executive summary for complex multi-part answers"
+        "OUTPUT FORMAT: Professional CRM Business Response\n"
+        "- Open with 1-2 sentences stating the KEY FINDING in business language\n"
+        "- Bold ALL important numbers: **176 deals**, **$2.4M revenue**, **42%**\n"
+        "- Present data in the clearest format:\n"
+        "  • Single number → bold value + 1 sentence of context\n"
+        "  • List of names → bullet list with count in header\n"
+        "  • Multi-field data → markdown table with totals row\n"
+        "- If the result is a count or total, follow with a brief insight\n"
+        "- Highlight the most significant item, trend, or outlier\n"
+        "- Keep response concise and actionable — no filler text\n"
+        "- Do NOT repeat the user's question back to them\n"
+        "- Do NOT say 'Based on the data' or similar preambles"
     )
 
     return instructions.get(response_format, default)
@@ -380,10 +385,10 @@ def narrate_response(
     tables_used: List[str],
 ) -> str:
     """
-    Wrap a raw fast-path / text2sql / intent-router answer with an executive summary.
+    Wrap a raw fast-path / text2sql answer with a professional business summary.
 
     Called for ALL SIMPLE-path results so every response includes a plain-English
-    explanation, not just a table or a bare number.
+    explanation — not just a bare number or raw table.
 
     Uses the classify chain (Groq 8b → Gemini → Ollama 1.5b) — fast (~300ms).
     On any failure the raw_answer is returned unchanged, so this is never blocking.
@@ -394,43 +399,55 @@ def narrate_response(
         tables_used:    DB tables that were queried
 
     Returns:
-        Executive summary paragraph + original data, or raw_answer on failure.
+        Professional summary + original data, or raw_answer on failure.
     """
-    # Don't narrate error / no-data / already-summarised responses
+    # Skip error / already-narrated / very short non-data answers
     skip_signals = [
-        "no data found", "no records", "data unavailable", "timed out",
-        "unable to", "encountered an error", "no ", "executive summary",
+        "no data found", "no records found", "data unavailable", "timed out",
+        "unable to retrieve", "encountered an error", "executive summary",
+        "i could not", "i wasn't able",
     ]
     ans_lower = raw_answer.lower().strip()
-    if len(ans_lower) < 15 or any(ans_lower.startswith(s) for s in skip_signals):
+
+    # Already has a summary header — don't double-narrate
+    if ans_lower.startswith("## executive summary"):
         return raw_answer
-    if ans_lower.startswith("executive summary"):
+
+    # Skip genuine error/unavailable messages
+    if any(ans_lower.startswith(s) for s in skip_signals):
+        return raw_answer
+
+    # Don't skip short count answers — "**176**" is valid data that needs narration
+    # Only skip if truly empty or only whitespace
+    if not ans_lower:
         return raw_answer
 
     table_hint = (
-        " (tables: " + ", ".join(tables_used) + ")" if tables_used else ""
+        " (source tables: " + ", ".join(tables_used) + ")" if tables_used else ""
     )
 
     system = (
-        "You are a senior CRM business analyst. Given a user query and the raw data result, "
-        "write ONE executive summary paragraph (2-4 sentences) that:\n"
-        "1. States the key finding in plain business language\n"
-        "2. Highlights the most important number or pattern using **bold**\n"
-        "3. Gives a brief business insight when it is obvious from the data\n\n"
-        "STRICT RULES:\n"
-        "- Start directly — no 'Here is', 'Based on', or 'The data shows' preamble\n"
-        "- Bold all key numbers: **42 deals**, **$58,296.40**, **15%**\n"
-        "- Maximum 70 words\n"
-        "- Only use the data provided — NEVER invent facts or numbers\n"
-        "- End with the exact marker: <<<END_SUMMARY>>>"
+        "You are a senior CRM business analyst. Given a user query and raw database result, "
+        "write a professional 2-3 sentence business summary.\n\n"
+        "RULES:\n"
+        "1. Start DIRECTLY with the finding — no preamble like 'Here is', 'Based on', 'The data shows'\n"
+        "2. Bold ALL key numbers, names, and percentages: **176 deals**, **$58,296**, **42%**\n"
+        "3. Use business language: 'pipeline', 'revenue', 'conversion', 'performance'\n"
+        "4. If the result is a COUNT (single number), say what it counts and add one insight\n"
+        "   Example: count=176 deals → 'Your CRM pipeline contains **176 deals** across all stages...'\n"
+        "5. If the result is a LIST or TABLE, summarise the total count and top pattern\n"
+        "6. If result shows 0 or 'no records', say clearly that none were found and why that might be\n"
+        "7. NEVER invent numbers, names, or dates not present in the data\n"
+        "8. Maximum 80 words. Be concise and actionable.\n"
+        "9. End with the exact marker: <<<END_SUMMARY>>>"
     )
     user = (
-        'Query: "' + original_query + '"' + table_hint + "\n"
-        "Data:\n" + raw_answer[:600] + "\n\n"
-        "Write the executive summary paragraph, then output <<<END_SUMMARY>>>:"
+        f'User asked: "{original_query}"{table_hint}\n'
+        f"Database returned:\n{raw_answer[:800]}\n\n"
+        "Write the 2-3 sentence professional summary, then output <<<END_SUMMARY>>>:"
     )
 
-    raw = llm_call("classify", system, user, max_tokens=180)
+    raw = llm_call("classify", system, user, max_tokens=160)
     if not raw:
         return raw_answer
 
@@ -439,16 +456,20 @@ def narrate_response(
     else:
         summary = raw.strip()
 
-    if not summary or len(summary) < 20:
+    if not summary or len(summary) < 15:
         return raw_answer
 
-    # Post-process: strip accidental preambles the model sometimes adds
+    # Strip accidental preambles
     summary = re.sub(
-        r"^(here is|based on|the data (shows|indicates)|according to)[^.]*\.\s*",
+        r"^(here is|based on|the data (shows|indicates)|according to|"
+        r"the query|the result|the database)[^.]*[.,]\s*",
         "", summary, flags=re.I,
     )
+    summary = summary.strip()
+    if not summary:
+        return raw_answer
 
-    return "## Executive Summary\n\n" + summary + "\n\n---\n\n" + raw_answer
+    return "## Summary\n\n" + summary + "\n\n---\n\n" + raw_answer
 
 
 def synthesize(

@@ -81,8 +81,9 @@
   border-radius: 10px;
   vertical-align: middle;
 }
-.chat-status-badge--online  { background: rgba(22,163,74,.08);   color: #16a34a; }
-.chat-status-badge--offline { background: rgba(220,38,38,.08);  color: #dc2626; }
+.chat-status-badge--online      { background: rgba(22,163,74,.08);   color: #16a34a; }
+.chat-status-badge--offline     { background: rgba(220,38,38,.08);  color: #dc2626; }
+.chat-status-badge--connecting  { background: rgba(234,179,8,.10);   color: #ca8a04; }
 .btn-new-chat {
   background: none;
   border: 1px solid var(--border);

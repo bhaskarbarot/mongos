@@ -36,7 +36,14 @@ def _non_empty_tables() -> list:
 
 def get_database() -> SQLDatabase:
     tables = _non_empty_tables()
-    kwargs = {"sample_rows_in_table_info": 2}
+    kwargs = {
+        "sample_rows_in_table_info": 2,
+        # Raise the result string limit so LangChain doesn't silently truncate
+        # rows that contain large JSONB `document` columns. Truncation causes
+        # ast.literal_eval() to fail, which was silently returning empty rows
+        # even when the DB had real data matching the query.
+        "max_string_length": 50_000,
+    }
     if tables:
         kwargs["include_tables"] = tables
     return SQLDatabase.from_uri(settings.postgres_uri, **kwargs)

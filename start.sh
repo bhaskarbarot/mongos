@@ -186,9 +186,9 @@ sleep 1
 python3 -m uvicorn api:app \
   --host 0.0.0.0 \
   --port 8000 \
-  --log-level warning \
-  >> "$ROOT/logs/backend.log" 2>&1 &
-BACKEND_PID=$!
+  --log-level info \
+  2>&1 | tee "$ROOT/logs/backend.log" &
+BACKEND_PID=${PIPESTATUS[0]}; BACKEND_PID=$!
 
 echo "      Waiting for backend…"
 READY=0
@@ -232,9 +232,9 @@ echo -e "${GREEN}║  🌐  Chat UI   →  http://localhost:5173                
 echo -e "${GREEN}║  ⚙️   API       →  http://localhost:8000                  ║${NC}"
 echo -e "${GREEN}║  📊  pgAdmin   →  http://localhost:5050                  ║${NC}"
 echo -e "${GREEN}║                                                          ║${NC}"
-echo -e "${GREEN}║  Logs (tail in logs/):                                   ║${NC}"
+echo -e "${GREEN}║  Backend logs → streaming below in terminal (+ backend.log)║${NC}"
+echo -e "${GREEN}║  Other logs (tail in logs/):                             ║${NC}"
 echo -e "${GREEN}║    automation_log.txt   MongoDB→PG sync                  ║${NC}"
-echo -e "${GREEN}║    backend.log          FastAPI                           ║${NC}"
 echo -e "${GREEN}║    frontend.log         React/Vite                       ║${NC}"
 echo -e "${GREEN}║    query.log            AI query log                     ║${NC}"
 echo -e "${GREEN}║                                                          ║${NC}"

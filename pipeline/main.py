@@ -320,22 +320,30 @@ def run(
         request_id, intent_type, cls_timer.elapsed_ms, intent_reason,
     )
 
-    # ── SIMPLE retry — use fallback model (Arctic-7B) alone with more time ─────
+    # ── SIMPLE retry — try Groq first, then Ollama fallback ─────────────────────
     if intent_type == "SIMPLE":
-        LOGGER.info("[RID:%s] ══ SIMPLE: Text2SQL retry with Arctic-7B", request_id)
+        LOGGER.info("[RID:%s] ══ SIMPLE: retry SQL generation", request_id)
         from pipeline.text2sql import (
             _build_fallback_prompt, _extract_sql, _validate_sql,
             _call_ollama_chat, _extract_tables_from_sql, _format_result,
+            _generate_sql_groq,
         )
         from pipeline.schema import run_sql, get_table_names as _gtn
         try:
             table_names_retry = _gtn(agent)
-            fsys, fuser = _build_fallback_prompt(user_query)
-            fraw = _call_ollama_chat(
-                settings.ollama_fallback_model, fsys, fuser,
-                timeout=settings.ollama_fallback_timeout, max_tokens=800,
-            )
-            fsql = _extract_sql(fraw) if fraw else None
+
+            # Groq retry first (fast)
+            fsql = _generate_sql_groq(user_query, table_names_retry)
+
+            # Fall through to Ollama if Groq failed
+            if not fsql:
+                fsys, fuser = _build_fallback_prompt(user_query)
+                fraw = _call_ollama_chat(
+                    settings.ollama_fallback_model, fsys, fuser,
+                    timeout=min(settings.ollama_fallback_timeout, 15),  # cap at 15s
+                    max_tokens=800,
+                )
+                fsql = _extract_sql(fraw) if fraw else None
             fok, ferr = _validate_sql(fsql, table_names_retry) if fsql else (False, "no SQL")
             if fok and fsql:
                 _res = run_sql(agent, fsql)

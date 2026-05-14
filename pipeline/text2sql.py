@@ -44,9 +44,10 @@ LOGGER = logging.getLogger("sql_chatbot")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 _MAX_SQL_RETRIES    = 1     # retry once with fallback model on failure
-_PARALLEL_TIMEOUT_S = 35    # max wait for the parallel pool
+_PARALLEL_TIMEOUT_S = 20    # max wait for the parallel pool (was 35)
 _MAX_RESULT_ROWS    = 500   # return all rows; user can add "top N" to limit
-_SQL_EXEC_TIMEOUT_S = 30    # SQL execution timeout
+_SQL_EXEC_TIMEOUT_S = 20    # SQL execution timeout (was 30)
+_GROQ_SQL_TIMEOUT   = 15    # Groq SQL generation timeout
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -315,6 +316,17 @@ STRICT OUTPUT RULES:
 2. Start directly with SELECT.
 3. Table names in double-quotes: FROM "deals", FROM "createtasks"
 4. JOIN key is always _id: LEFT JOIN "users" u ON u._id = d.owner
+5. NEVER use SELECT * — always list explicit columns. SELECT * includes the
+   large JSONB `document` column which breaks result parsing.
+   ✗  SELECT * FROM "invoices"
+   ✓  SELECT invoice_number, payment_status, grand_total, currency FROM "invoices"
+
+INVOICE NUMBER LOOKUP — CRITICAL:
+  invoice_number may be in the flat column OR in the document JSONB.
+  Always search BOTH:
+    WHERE invoice_number ILIKE '%ELSN/2025/1%'
+       OR document->>'invoice_number' ILIKE '%ELSN/2025/1%'
+  Use ILIKE (case-insensitive) not = (exact match).
 
 CRITICAL — MIXED-CASE COLUMNS:
   Many columns have mixed case (dealWonAt, companyName, firstName, etc.).
@@ -329,32 +341,68 @@ SOFT DELETE:
   Most tables: WHERE NOT deleted          (deleted is BOOLEAN)
   outreaches:  WHERE NOT "isDeleted"      (isDeleted is BOOLEAN)
 
-DATE FILTERING:
-  Date columns are TEXT — cast when comparing:
-    WHERE due_date::timestamptz < NOW()
-    WHERE start::timestamptz::date = CURRENT_DATE
-    WHERE invoice_date::timestamptz >= date_trunc('month', NOW())
+DATE FILTERING — CRITICAL RULES:
+  Date columns are TEXT — ALWAYS use NULLIF to avoid empty-string cast errors:
+    NULLIF(invoice_date, '')::timestamptz       ← correct
+    invoice_date::timestamptz                   ← FAILS on empty strings
+
+  For TODAY:
+    WHERE NULLIF(due_date,'')::date = CURRENT_DATE
+
+  For a SPECIFIC MONTH (e.g. "December 2025"):
+    WHERE DATE_TRUNC('month', NULLIF(due_date,'')::timestamptz) = DATE '2025-12-01'
+    ✗ NEVER: WHERE due_date::date = '2025-12-01'  ← checks one day only, WRONG
+
+  For THIS MONTH:
+    WHERE DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE)
+
+  For LAST MONTH:
+    WHERE DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+
+  For a YEAR (e.g. "2025"):
+    WHERE DATE_TRUNC('year', NULLIF(col,'')::timestamptz) = DATE '2025-01-01'
+
+  For BETWEEN dates:
+    WHERE NULLIF(col,'')::timestamptz BETWEEN '2025-01-01' AND '2025-12-31'
+
+NULL HANDLING — always wrap TEXT-to-number casts:
+  NULLIF(document->>'grand_total', '')::numeric   ← safe
+  (document->>'grand_total')::numeric             ← FAILS on NULL/empty rows
 
 NUMERIC COLUMNS (no casting needed — already numeric):
   grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, "targetInUSD"
 
 OPEN/WON/LOST DEALS — use JSONB (avoids mixed-case quoting):
-  Open:  document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL
-  Won:   document->>'dealWonAt' IS NOT NULL
-  Lost:  document->>'dealLostAt' IS NOT NULL
+  Open:  document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL AND NOT deleted
+  Won:   document->>'dealWonAt' IS NOT NULL AND NOT deleted
+  Lost:  document->>'dealLostAt' IS NOT NULL AND NOT deleted
+
+SALES TABLE STATUS VALUES — EXACT strings (case-sensitive):
+  status = 'Confirm'   ← confirmed/active sales orders
+  status = 'Draft'     ← drafts
+  status = 'Cancel'    ← cancelled
+  Revenue query: WHERE status = 'Confirm' AND NOT deleted
+
+INVOICE STATUS VALUES:
+  payment_status: 'paid','unpaid','cancelled','draft','partial_payment','approved','rejected'
+  approval_status: 'approved','rejected','pending','submitted'
 
 TASKS TABLE:
   Table name:    "createtasks"   (NOT "tasks")
-  Title column:  document->>'Task'   (capital T — use JSONB to avoid case issues)
-  Assignee:      document->>'createdBy' = users._id
+  Title column:  document->>'Task'   (capital T — use JSONB)
+  Assignee:      "createdBy" = users._id
 
 SELECT COLUMNS — always include a human-readable name first:
   deals:       d.name, d.stage, d.grand_total_in_usd
   invoices:    i.invoice_number, i.payment_status, i.grandtotal_in_usd
   companies:   document->>'companyName' (JSONB — mixed case)
-  contacts:    document->>'firstName', document->>'lastName' (JSONB — mixed case)
+  contacts:    document->>'firstName', document->>'lastName' (JSONB)
   users:       u.name, u.email
   createtasks: document->>'Task', t.status, t.priority
+
+AGGREGATION — always handle NULLs:
+  COALESCE(SUM(grand_total_in_usd), 0) AS total
+  COUNT(*) AS count   (never returns NULL)
 
 ONLY generate SELECT. Never UPDATE, DELETE, INSERT, DROP, CREATE."""
 
@@ -498,17 +546,106 @@ def _run_model(
     return sql
 
 
-def generate_sql(query: str, agent) -> Optional[str]:
-    """Generate SQL for a query using parallel primary + fallback models.
+def _generate_sql_groq(query: str, table_names: List[str]) -> Optional[str]:
+    """Generate SQL using Groq (fast cloud model, ~2s).
 
-    Strategy:
-      1. Fire PRIMARY (Qwen 3B) + FALLBACK (Arctic 7B) in parallel
-      2. Return the first valid SQL — prefer primary if both finish close together
-      3. If both fail → retry with FALLBACK model alone (more thorough)
+    This is the PRIMARY path — tried before Ollama because Groq is ~10x faster.
+    Falls back gracefully when Groq is unavailable or rate-limited.
+    """
+    try:
+        from config import settings
+        groq_keys = settings.groq_api_keys
+        if not groq_keys:
+            return None
+
+        import json as _json
+        import urllib.request as _ur
+        import urllib.error as _ue
+
+        # Compact schema (enough for SQL generation, avoids token waste)
+        compact_schema = _CREATE_TABLE_SCHEMA
+
+        sys_prompt = _SYSTEM_SQL_EXPERT
+        user_prompt = (
+            f"Database Schema:\n{compact_schema}\n\n"
+            f"Question: {query}\n\n"
+            "Write ONLY the SQL query (no explanation, no markdown):"
+        )
+
+        payload = {
+            "model":       settings.groq_sql_model,
+            "messages":    [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "temperature": 0,
+            "max_tokens":  600,
+        }
+
+        _GROQ_HEADERS = {
+            "Content-Type": "application/json",
+            "User-Agent":   "groq-python/0.9.0",
+            "Authorization": f"Bearer {groq_keys[0]}",
+        }
+
+        for key in groq_keys:
+            _GROQ_HEADERS["Authorization"] = f"Bearer {key}"
+            try:
+                req = _ur.Request(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    data=_json.dumps(payload).encode(),
+                    headers=_GROQ_HEADERS,
+                    method="POST",
+                )
+                with _ur.urlopen(req, timeout=_GROQ_SQL_TIMEOUT) as resp:
+                    data = _json.loads(resp.read())
+                    raw = data["choices"][0]["message"]["content"].strip()
+                    sql = _extract_sql(raw)
+                    if not sql:
+                        LOGGER.debug("Groq SQL: could not extract SQL from response")
+                        return None
+                    ok, err = _validate_sql(sql, table_names)
+                    if ok:
+                        LOGGER.info("Groq SQL generated (%d chars): %.80s", len(sql), sql)
+                        return sql
+                    LOGGER.debug("Groq SQL invalid: %s | sql=%.80s", err, sql)
+                    return None
+            except _ue.HTTPError as e:
+                if e.code == 429:
+                    LOGGER.warning("Groq SQL: 429 on key ...%s — trying next", key[-6:])
+                    continue
+                LOGGER.warning("Groq SQL HTTP %d", e.code)
+                return None
+            except Exception as exc:
+                LOGGER.debug("Groq SQL error: %s", exc)
+                return None
+
+        return None
+    except Exception as exc:
+        LOGGER.debug("Groq SQL path error: %s", exc)
+        return None
+
+
+def generate_sql(query: str, agent) -> Optional[str]:
+    """Generate SQL for a query.
+
+    Strategy (fastest first):
+      0. Groq cloud (llama-3.3-70b) — ~2s. PRIMARY path when API key available.
+      1. Ollama PRIMARY (Qwen 3B) + FALLBACK (Arctic 7B) in parallel — ~8-20s
+      2. Retry with FALLBACK model alone — up to 15s
 
     Returns validated SQL string, or None if all attempts fail.
     """
     table_names = get_table_names(agent)
+
+    # ── Step 0: Groq fast path (~2s) ─────────────────────────────────────────
+    with Timer("groq_sql") as groq_timer:
+        groq_sql = _generate_sql_groq(query, table_names)
+    if groq_sql:
+        LOGGER.info("SQL via Groq in %.0fms: %.80s", groq_timer.elapsed_ms, groq_sql)
+        return groq_sql
+
+    LOGGER.info("Groq SQL unavailable (%.0fms) → trying Ollama", groq_timer.elapsed_ms)
 
     primary_sys,  primary_user  = _build_primary_prompt(query)
     fallback_sys, fallback_user = _build_fallback_prompt(query)
@@ -661,27 +798,53 @@ def _extract_column_headers(sql: str) -> List[str]:
 
 
 def _format_result(rows: List[Any], sql: str, query: str) -> str:
-    """Format SQL result rows into user-friendly output."""
+    """Format SQL result rows into user-friendly output.
+
+    CRITICAL: NEVER return 'No data found' when rows actually exist.
+    Only return empty-result message when row count is genuinely 0.
+    """
+    # ── Truly empty result ────────────────────────────────────────────────────
     if not rows:
-        return "No data found for this query."
+        return "No records found for this query."
 
     first = rows[0]
-    if isinstance(first, (list, tuple)) and len(rows) == 1 and all(v is None for v in first):
-        return "No data found for this query."
-    if first is None:
-        return "No data found for this query."
 
-    # Single scalar value
+    # Single-row all-NULL result (e.g. COUNT(*) with no matches = 0, not NULL)
+    if isinstance(first, (list, tuple)) and len(rows) == 1 and all(v is None for v in first):
+        return "No records found for this query."
+
+    if first is None:
+        return "No records found for this query."
+
+    # ── Single scalar value (e.g. COUNT(*) = 176) ────────────────────────────
     if len(rows) == 1 and not isinstance(first, (list, tuple)):
-        return f"**{fmt_number(first)}**"
+        n = coerce_number(first)
+        if isinstance(n, (int, float)):
+            return f"**{fmt_number(n)}**"
+        return f"**{first}**"
 
     if len(rows) == 1 and isinstance(first, (list, tuple)) and len(first) == 1:
         val = first[0]
-        n   = coerce_number(val)
+        # Treat 0 as a valid count — not "no data"
+        if val is None:
+            return "No records found for this query."
+        n = coerce_number(val)
         if isinstance(n, (int, float)):
             return f"**{fmt_number(n)}**"
         return f"**{val}**"
 
+    # ── Multi-column single row (detail view) ─────────────────────────────────
+    if len(rows) == 1 and isinstance(first, (list, tuple)):
+        headers = _extract_column_headers(sql)
+        if headers and len(headers) == len(first):
+            lines = []
+            for h, v in zip(headers, first):
+                if v is not None and str(v).strip():
+                    lines.append(f"**{h.replace('_',' ').title()}:** {v}")
+            if lines:
+                return "\n\n".join(lines)
+
+    # ── Multi-row result ──────────────────────────────────────────────────────
     headers      = _extract_column_headers(sql)
     display_rows = rows[:_MAX_RESULT_ROWS]
 
@@ -692,11 +855,13 @@ def _format_result(rows: List[Any], sql: str, query: str) -> str:
         show_overflow=len(rows) > _MAX_RESULT_ROWS,
     )
 
+    total     = len(rows)
+    showing   = min(total, _MAX_RESULT_ROWS)
     count_str = (
-        f"**{len(rows)}**" if len(rows) <= _MAX_RESULT_ROWS
-        else f"**{_MAX_RESULT_ROWS}** of **{len(rows)}**"
+        f"**{total}**" if total == showing
+        else f"**{showing}** of **{total}** total"
     )
-    return f"Found {count_str} result(s):\n\n{table}"
+    return f"Found {count_str} record(s):\n\n{table}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -706,8 +871,11 @@ def _format_result(rows: List[Any], sql: str, query: str) -> str:
 def run(query: str, agent) -> Optional[Dict[str, Any]]:
     """Generate SQL → execute → return formatted result dict.
 
+    Includes auto-repair: if the first SQL fails at execution, we retry
+    once with the error message fed back to the fallback model.
+
     Returns result dict {answer, tables_used, confidence, sql_queries}
-    or None if SQL generation failed entirely.
+    or None if SQL generation AND repair both fail entirely.
     """
     with Timer("text2sql_total") as timer:
         LOGGER.info("Text2SQL: processing: %.60s", query)
@@ -718,19 +886,57 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
             return None
 
         _res = run_sql(agent, sql)
+
+        # ── Auto-repair: retry with error hint if execution failed ────────────
         if _res.error:
-            LOGGER.warning("Text2SQL exec failed: %s | SQL: %.80s", _res.error, sql)
-            return None
+            LOGGER.warning(
+                "Text2SQL exec failed (attempt 1/2): %s | SQL: %.120s",
+                _res.error, sql,
+            )
+            # Feed the error back to the fallback model and retry once
+            try:
+                table_names_r = get_table_names(agent)
+                fix_sys, fix_user = _build_fallback_prompt(query, sql, _res.error)
+                fix_raw = _call_ollama_chat(
+                    settings.ollama_fallback_model,
+                    fix_sys, fix_user,
+                    timeout=settings.ollama_fallback_timeout,
+                    max_tokens=800,
+                )
+                if fix_raw:
+                    fix_sql = _extract_sql(fix_raw)
+                    if fix_sql:
+                        ok2, _ = _validate_sql(fix_sql, table_names_r)
+                        if ok2:
+                            _res2 = run_sql(agent, fix_sql)
+                            if not _res2.error:
+                                LOGGER.info(
+                                    "Text2SQL auto-repair succeeded: %.80s", fix_sql
+                                )
+                                sql   = fix_sql
+                                _res  = _res2
+                            else:
+                                LOGGER.warning(
+                                    "Text2SQL repair also failed: %s", _res2.error
+                                )
+                                return None
+                        else:
+                            return None
+                    else:
+                        return None
+                else:
+                    return None
+            except Exception as exc:
+                LOGGER.warning("Text2SQL auto-repair error: %s", exc)
+                return None
 
         rows        = _res.rows
         tables_used = _extract_tables_from_sql(sql)
         body        = _format_result(rows, sql, query)
 
-        confidence = 0.90
-        if not rows or "No data found" in body:
-            confidence = 0.70
-        elif len(rows) == 1:
-            confidence = 0.92
+        # Confidence reflects execution quality, not row count.
+        # An empty valid result is still a confident answer (0.88).
+        confidence = 0.90 if rows else 0.88
 
     LOGGER.info(
         "Text2SQL: done %.0fms | rows=%d | tables=%s | sql=%.80s",
