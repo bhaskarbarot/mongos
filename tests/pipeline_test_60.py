@@ -210,6 +210,8 @@ def main():
     print(f"  Running {len(QUERIES)} queries (fast path DISABLED)")
     print("=" * 70)
 
+    QUERY_DELAY_S = 10.0  # pause between queries to avoid Groq TPM rate limits
+
     for i, query in enumerate(QUERIES, 1):
         print(f"\n[{i:02d}/{len(QUERIES)}] {query[:65]}")
         r = run_query(query)
@@ -229,6 +231,9 @@ def main():
         if r["status"] == "PASS":      passed  += 1
         elif r["status"] == "WARN_EMPTY": warned += 1
         else:                          failed  += 1
+
+        if i < len(QUERIES):
+            time.sleep(QUERY_DELAY_S)
 
     # Write CSV
     with open(out_path, "w", newline="", encoding="utf-8") as f:

@@ -811,7 +811,27 @@ def _generate_sql_groq(query: str, table_names: List[str]) -> Optional[str]:
             "Authorization": f"Bearer {groq_keys[0]}",
         }
 
-        for key in groq_keys:
+        import time as _time
+        import re as _re
+
+        def _parse_retry_after(exc: "_ue.HTTPError") -> float:
+            """Extract wait seconds from Groq 429 response headers/body."""
+            try:
+                # Try retry-after header first
+                ra = exc.headers.get("retry-after") or exc.headers.get("Retry-After")
+                if ra:
+                    return max(1.0, float(ra) + 0.5)
+                # Try parsing body: "Please try again in 5.1s"
+                body = exc.read().decode(errors="ignore")
+                m = _re.search(r"try again in ([\d.]+)s", body)
+                if m:
+                    return max(1.0, float(m.group(1)) + 0.5)
+            except Exception:
+                pass
+            return 10.0  # safe default
+
+        def _try_key(key: str):
+            """Returns (sql_or_sentinel, wait_seconds_if_rate_limited)."""
             _GROQ_HEADERS["Authorization"] = f"Bearer {key}"
             try:
                 req = _ur.Request(
@@ -826,22 +846,47 @@ def _generate_sql_groq(query: str, table_names: List[str]) -> Optional[str]:
                     sql = _extract_sql(raw)
                     if not sql:
                         LOGGER.debug("Groq SQL: could not extract SQL from response")
-                        return None
+                        return "INVALID", 0
                     ok, err = _validate_sql(sql, table_names)
                     if ok:
                         LOGGER.info("Groq SQL generated (%d chars): %.80s", len(sql), sql)
-                        return sql
+                        return sql, 0
                     LOGGER.debug("Groq SQL invalid: %s | sql=%.80s", err, sql)
-                    return None
+                    return "INVALID", 0
             except _ue.HTTPError as e:
                 if e.code == 429:
-                    LOGGER.warning("Groq SQL: 429 on key ...%s — trying next", key[-6:])
-                    continue
+                    wait = _parse_retry_after(e)
+                    LOGGER.warning("Groq SQL: 429 on key ...%s (retry in %.1fs)", key[-6:], wait)
+                    return "RATE_LIMIT", wait
                 LOGGER.warning("Groq SQL HTTP %d", e.code)
-                return None
+                return "ERROR", 0
             except Exception as exc:
                 LOGGER.debug("Groq SQL error: %s", exc)
-                return None
+                return "ERROR", 0
+
+        # Try each key; if rate-limited, track the max wait needed
+        max_wait = 0.0
+        all_rate_limited = True
+        for key in groq_keys:
+            result, wait = _try_key(key)
+            if result not in ("RATE_LIMIT", "INVALID", "ERROR"):
+                return result
+            if result != "RATE_LIMIT":
+                all_rate_limited = False
+            else:
+                max_wait = max(max_wait, wait)
+                _time.sleep(0.2)  # brief pause before next key
+
+        # All keys rate-limited → wait for the longest reset, then retry once
+        if all_rate_limited and max_wait > 0:
+            LOGGER.warning("Groq SQL: all keys rate-limited — waiting %.1fs", max_wait)
+            _time.sleep(max_wait)
+            for key in groq_keys:
+                result, wait = _try_key(key)
+                if result not in ("RATE_LIMIT", "INVALID", "ERROR"):
+                    return result
+                if result == "RATE_LIMIT":
+                    _time.sleep(0.2)
 
         return None
     except Exception as exc:
