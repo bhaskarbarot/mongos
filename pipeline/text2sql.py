@@ -59,201 +59,414 @@ _GROQ_SQL_TIMEOUT   = 15    # Groq SQL generation timeout
 # Both direct column access (deals.name) AND document->>'name' work — the DB
 # has flat columns AND a populated JSONB document column.
 
-_CREATE_TABLE_SCHEMA = """-- PostgreSQL CRM Database
--- PRIMARY KEY: _id TEXT on every table
--- JOINs: JOIN "users" u ON u._id = d.owner   (use _id flat column)
--- SOFT DELETE: WHERE NOT deleted   (boolean)  |  outreaches: WHERE NOT "isDeleted"
---
--- ⚠️ FIELD ACCESS RULE — VERY IMPORTANT:
---   Mixed-case fields (dealWonAt, companyName, firstName…) MUST use JSONB:
---     document->>'dealWonAt'      ← CORRECT (JSONB preserves case)
---     dealWonAt                   ← WRONG  (PostgreSQL lowercases → not found)
---   All-lowercase fields can use either: _id, deleted, stage, name, email, etc.
---   NUMERIC FIELDS: use direct column (already numeric, no cast needed):
---     grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, month, year
---   DATE TEXT FIELDS: cast with NULLIF to avoid empty-string error:
---     NULLIF(document->>'invoice_date','')::timestamptz
---     NULLIF(invoice_date,'')::timestamptz     (both work the same)
+_CREATE_TABLE_SCHEMA = """-- ══════════════════════════════════════════════════════════════════════
+-- PostgreSQL CRM Database — Full Schema
+-- ══════════════════════════════════════════════════════════════════════
+-- PRIMARY KEY  : _id TEXT (every table)
+-- SOFT DELETE  : WHERE NOT deleted   (most tables, BOOLEAN column)
+--                outreaches: WHERE NOT "isDeleted"
+-- JOIN KEY     : always use _id flat column
+-- ⚠️  JSONB RULE : mixed-case fields MUST use d.document->>'field'
+--                 In JOINs ALWAYS prefix with alias: d.document, i.document, etc.
+--                 NEVER write document->>'field' without table alias in a JOIN!
+-- NUMERIC COLS : grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal,
+--                grand_total, "targetInUSD", month, year — no cast needed
+-- DATE COLS    : stored as TEXT → cast: NULLIF(col,'')::timestamptz
+--                For month filter: DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE '2025-09-01'
+
+-- ─── CORE CRM TABLES ────────────────────────────────────────────────────────
 
 CREATE TABLE "deals" (
     _id TEXT PRIMARY KEY,
-    name TEXT,                  -- deal name (lowercase — use directly)
-    stage TEXT,                 -- 'Analysis - To be Quoted','Quotation Sent','Negotiation',
-                                -- 'Contract Under Review','On Hold','Closed Won','Closed Lost'
-    owner TEXT,                 -- references users._id
-    company TEXT,               -- references companies._id
-    grand_total_in_usd NUMERIC, -- deal value in USD (use directly, already numeric)
-    deleted BOOLEAN,            -- WHERE NOT deleted
-    -- MIXED-CASE columns — MUST use document->>:
-    -- document->>'closeDate'   TEXT date, cast: NULLIF(document->>'closeDate','')::timestamptz
-    -- document->>'dealWonAt'   NULL=not won / NOT NULL=won
-    -- document->>'dealLostAt'  NULL=not lost / NOT NULL=lost
-    -- document->>'createdAt'   TEXT date
-    document JSONB              -- always populated; use for mixed-case fields
+    name TEXT,              -- deal/project name
+    stage TEXT,             -- 'Analysis - To be Quoted' | 'Quotation Sent' | 'Negotiation'
+                            -- 'Contract Under Review' | 'On Hold' | 'Closed Won' | 'Closed Lost'
+    owner TEXT,             -- → users._id (sales rep who owns the deal)
+    company TEXT,           -- → companies._id
+    contact TEXT,           -- → contacts._id
+    deleted BOOLEAN,        -- WHERE NOT deleted
+    grand_total_in_usd NUMERIC, -- deal value in USD
+    grand_total NUMERIC,        -- deal value in base currency
+    currency TEXT,
+    type TEXT,              -- deal category/type e.g. 'Support','Dedicated','Project'
+    "closeDate" TEXT,       -- expected close date (TEXT → cast ::timestamptz)
+    "dealWonAt" TEXT,       -- NULL=not yet won; NOT NULL=won date
+    "dealLostAt" TEXT,      -- NULL=not yet lost; NOT NULL=lost date
+    "createdAt" TEXT,
+    document JSONB          -- ALL fields also accessible here
 );
--- ✓ Open deals:  WHERE document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL AND NOT deleted
--- ✓ Won deals:   WHERE document->>'dealWonAt' IS NOT NULL AND NOT deleted
--- ✓ Lost deals:  WHERE document->>'dealLostAt' IS NOT NULL AND NOT deleted
--- ✓ Close date:  WHERE NULLIF(document->>'closeDate','')::timestamptz < NOW()
+-- ✓ Open deals:  WHERE d."dealWonAt" IS NULL AND d."dealLostAt" IS NULL AND NOT d.deleted
+-- ✓ Won deals:   WHERE d."dealWonAt" IS NOT NULL AND NOT d.deleted
+-- ✓ Lost deals:  WHERE d."dealLostAt" IS NOT NULL AND NOT d.deleted
+-- ✓ With owner:  FROM "deals" d LEFT JOIN "users" u ON u._id = d.owner
+--   In JOIN use: d."dealWonAt", d.stage, d.deleted  (NOT just dealWonAt — AMBIGUOUS!)
+-- ✓ By category: WHERE d.type = 'Support'
 
 CREATE TABLE "invoices" (
     _id TEXT PRIMARY KEY,
-    invoice_number TEXT,        -- e.g. 'ELSN/2025/101'
-    payment_status TEXT,        -- 'paid','unpaid','cancelled','draft','partial_payment',
-                                -- 'approved','rejected','submitted','confirmed'
-    approval_status TEXT,       -- 'approved','rejected','pending','submitted'
-    grand_total NUMERIC,        -- invoice total in base currency
-    grandtotal_in_usd NUMERIC,  -- invoice total in USD (use this for revenue)
-    currency TEXT,
-    company TEXT,               -- references companies._id
-    invoice_date TEXT,          -- invoice date (TEXT, cast ::timestamptz)
-    due_date TEXT,              -- payment due date (TEXT, cast ::timestamptz)
-    payment_date TEXT,
+    invoice_number TEXT,    -- e.g. 'ELSN/2025/101' — search with ILIKE
+    payment_status TEXT,    -- 'paid' | 'unpaid' | 'confirmed' | 'draft' | 'cancelled'
+                            -- 'partial_payment' | 'approved' | 'rejected' | 'submitted'
+    approval_status TEXT,   -- 'approved' | 'rejected' | 'pending' | 'submitted'
+    grandtotal_in_usd NUMERIC, -- USD amount (use for revenue/comparison)
+    grand_total NUMERIC,    -- base currency amount
+    currency TEXT,          -- 'USD','INR','AUD','GBP', etc.
+    company TEXT,           -- → companies._id
+    invoice_date TEXT,      -- invoice creation date (TEXT → cast ::timestamptz)
+    due_date TEXT,          -- payment due date (TEXT → cast ::timestamptz)
+    payment_date TEXT,      -- actual payment received date (TEXT → cast ::timestamptz)
     deleted BOOLEAN,
-    createdBy TEXT,             -- references users._id
-    createdAt TEXT
+    "createdBy" TEXT,       -- → users._id
+    "companyName" TEXT,     -- company name snapshot (denormalised)
+    "invoiceFor" TEXT,      -- 'Elsner Technologies Pvt. Ltd.' etc.
+    "payment_mode" TEXT,    -- bank/payment method name
+    document JSONB
 );
--- Revenue = SUM(grandtotal_in_usd) WHERE payment_status='paid' AND NOT deleted
--- Overdue  = WHERE due_date::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')
+-- ✓ Revenue by period: SUM(grandtotal_in_usd) WHERE payment_status='paid'
+--   AND DATE_TRUNC('month', NULLIF(payment_date,'')::timestamptz) = DATE '2025-09-01'
+-- ✓ Overdue: WHERE NULLIF(due_date,'')::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')
+-- ✓ By currency: WHERE UPPER(currency) = 'INR'
+-- ✓ By invoice#: WHERE invoice_number ILIKE '%ELSN/2025/1%'
+-- ✓ With company name: LEFT JOIN "companies" c ON c._id = i.company
 
 CREATE TABLE "sales" (
     _id TEXT PRIMARY KEY,
-    sales_number TEXT,          -- e.g. 'S000080'
-    status TEXT,                -- 'Confirm','Draft','Cancel'
-    salesOwner TEXT,            -- references users._id
-    company TEXT,               -- references companies._id
+    sales_number TEXT,      -- e.g. 'S000080'
+    status TEXT,            -- 'Confirm' | 'Draft' | 'Cancel'
+    "salesOwner" TEXT,      -- → users._id
+    company TEXT,           -- → companies._id
+    grand_total_in_usd NUMERIC,
     grand_total NUMERIC,
-    grand_total_in_usd NUMERIC, -- use this for revenue calculations
     currency TEXT,
-    sales_date TEXT,            -- TEXT, cast ::timestamptz for date filtering
+    sales_date TEXT,        -- TEXT → cast ::timestamptz
     deleted BOOLEAN,
-    createdAt TEXT
+    document JSONB
 );
--- Confirmed sales revenue = SUM(grand_total_in_usd) WHERE status='Confirm' AND NOT deleted
+-- ✓ Revenue: SUM(grand_total_in_usd) WHERE status='Confirm' AND NOT deleted
+-- ✓ By rep: LEFT JOIN "users" u ON u._id = s."salesOwner"  → use s.grand_total_in_usd
 
 CREATE TABLE "companies" (
     _id TEXT PRIMARY KEY,
-    industry TEXT,      -- (lowercase — use directly)
+    "companyName" TEXT,         -- company display name
+    deleted BOOLEAN,
+    industry TEXT,
     email TEXT,
     country TEXT,
-    source TEXT,
-    deleted BOOLEAN,    -- WHERE NOT deleted
-    -- MIXED-CASE — use document->>'fieldName':
-    -- document->>'companyName'    company display name
-    -- document->>'lifecycleStage' 'Lead','Customer','Partner','Inactive Customer','Dead Customer'
-    -- document->>'leadStatus'
-    -- document->>'companyOwner'   references users._id
-    -- document->>'createdAt'
+    region TEXT,                -- → regions._id
+    "lifecycleStage" TEXT,      -- 'Lead' | 'Customer' | 'Partner' | 'Inactive Customer' | 'Dead Customer'
+    "leadStatus" TEXT,          -- 'New' | 'Open' | 'In Progress' | 'Unqualified' | 'Bad Timing' etc.
+    "companyOwner" TEXT,        -- → users._id (account manager)
+    "annualRevenue" TEXT,
+    "websiteUrl" TEXT,
+    "phoneNumber" TEXT,
+    source TEXT,                -- → sources._id
+    "clientHealth" TEXT,
+    "createdAt" TEXT,
+    "leadWonAt" TEXT,           -- date company became customer
+    "inActiveSince" TEXT,
     document JSONB
 );
--- ✓ Company name:    document->>'companyName'
--- ✓ Active companies: WHERE document->>'lifecycleStage' NOT IN ('Inactive Customer','Dead Customer') AND NOT deleted
+-- ✓ Active customers: WHERE c."lifecycleStage" NOT IN ('Inactive Customer','Dead Customer') AND NOT c.deleted
+-- ✓ Company name: c."companyName"  (flat column, no JSONB needed)
+-- ✓ With region: LEFT JOIN "regions" r ON r._id = c.region
+-- ✓ Vendors: this table stores all account types. Filter: WHERE c."userType"='vendor' if needed
 
 CREATE TABLE "contacts" (
     _id TEXT PRIMARY KEY,
+    "firstName" TEXT,
+    "lastName" TEXT,
     email TEXT,
-    company TEXT,           -- references companies._id
+    "jobTitle" TEXT,
+    "phoneNumber" TEXT,
+    "lifecycleStage" TEXT,  -- 'Lead' | 'Customer' | 'Partner' etc.
+    "leadStatus" TEXT,
+    "contactOwner" TEXT,    -- → users._id
+    company TEXT,           -- → companies._id
     deleted BOOLEAN,
-    -- MIXED-CASE — use document->>'fieldName':
-    -- document->>'firstName', document->>'lastName'
-    -- document->>'jobTitle', document->>'phoneNumber'
-    -- document->>'lifecycleStage', document->>'leadStatus'
-    -- document->>'contactOwner'   references users._id
+    source TEXT,
+    "createdAt" TEXT,
     document JSONB
 );
--- ✓ Full name: document->>'firstName' || ' ' || document->>'lastName'
+-- ✓ Full name: TRIM(CONCAT(COALESCE(c."firstName",''),' ',COALESCE(c."lastName",'')))
+-- ✓ Search by name: WHERE c."firstName" ILIKE '%kartik%' OR c."lastName" ILIKE '%kartik%'
+-- ✓ With company: LEFT JOIN "companies" co ON co._id = c.company
 
 CREATE TABLE "users" (
     _id TEXT PRIMARY KEY,
-    name TEXT,                  -- full name
+    name TEXT,          -- full name e.g. 'Ketul Trivedi'
     email TEXT,
-    department TEXT,            -- references departments._id
-    "isActive" BOOLEAN,
+    department TEXT,    -- → departments._id
+    "isActive" BOOLEAN, -- WHERE "isActive" = true  for active users
     "isAdmin" BOOLEAN,
-    "createdAt" TEXT
+    "isSuperAdmin" BOOLEAN,
+    "createdAt" TEXT,
+    document JSONB
 );
 
-CREATE TABLE "createtasks" (    -- NOTE: table name is 'createtasks' NOT 'tasks'
+CREATE TABLE "createtasks" (   -- ⚠️ table is 'createtasks' NOT 'tasks'
     _id TEXT PRIMARY KEY,
-    "Task" TEXT,                -- task title (capital T)
-    status TEXT,                -- 'Pending','Completed','Open'
-    priority TEXT,              -- 'Low','Medium','High'
-    "createdBy" TEXT,           -- references users._id (task owner/assignee)
-    due_date TEXT,              -- TEXT, cast ::timestamptz for date filtering
-    company TEXT,               -- references companies._id
+    "Task" TEXT,        -- task title (capital T — use flat column or document->>'Task')
+    status TEXT,        -- 'Pending' | 'Completed' | 'Open'
+    priority TEXT,      -- 'Low' | 'Medium' | 'High'
+    "createdBy" TEXT,   -- → users._id (task assignee/owner)
+    due_date TEXT,      -- TEXT → cast ::timestamptz
+    company TEXT,       -- → companies._id
+    "companyId" TEXT,   -- same as company
+    "dealsId" TEXT,     -- → deals._id (if task linked to a deal)
+    "invoiceId" TEXT,   -- → invoices._id
     deleted BOOLEAN,
-    "createdAt" TEXT
+    "createdAt" TEXT,
+    document JSONB
 );
--- Pending tasks: WHERE status='Pending' AND NOT deleted
--- Overdue tasks: WHERE due_date::timestamptz < NOW() AND status!='Completed' AND NOT deleted
+-- ✓ Pending: WHERE t.status='Pending' AND NOT t.deleted
+-- ✓ Overdue: WHERE NULLIF(t.due_date,'')::timestamptz < NOW() AND t.status!='Completed' AND NOT t.deleted
+-- ✓ By user: LEFT JOIN "users" u ON u._id = t."createdBy"  → use t.status, t."Task"
 
 CREATE TABLE "targets" (
     _id TEXT PRIMARY KEY,
-    "userId" TEXT,              -- references users._id
-    "targetInUSD" NUMERIC,      -- monthly target in USD
-    month NUMERIC,              -- 1-12
-    year NUMERIC,               -- e.g. 2025
-    "teamName" TEXT,
-    "createdAt" TEXT
+    "userId" TEXT,          -- → users._id
+    "targetInUSD" NUMERIC,  -- monthly sales target in USD
+    month NUMERIC,          -- 1–12
+    year NUMERIC,           -- e.g. 2025, 2026
+    "teamName" TEXT,        -- e.g. 'Accounts Team'
+    "createdAt" TEXT,
+    document JSONB
 );
+-- ✓ Current month: WHERE t.month = EXTRACT(MONTH FROM CURRENT_DATE) AND t.year = EXTRACT(YEAR FROM CURRENT_DATE)
+-- ✓ With user: LEFT JOIN "users" u ON u._id = t."userId"
 
 CREATE TABLE "meetings" (
     _id TEXT PRIMARY KEY,
-    title TEXT,
+    title TEXT,             -- meeting title e.g. 'Client Call'
     description TEXT,
-    start TEXT,                 -- meeting start datetime (TEXT, cast ::timestamptz)
-    "end" TEXT,                 -- meeting end datetime
+    start TEXT,             -- start datetime (TEXT → cast ::timestamptz)
+    "end" TEXT,             -- end datetime
     location TEXT,
-    "createdBy" TEXT,           -- references users._id
-    "createdAt" TEXT
+    attendees JSONB,        -- list of attendee objects
+    "EventId" TEXT,         -- Google Calendar event ID
+    "createdBy" TEXT,       -- → users._id
+    "createdAt" TEXT,
+    document JSONB
 );
--- Meetings today: WHERE start::timestamptz::date = CURRENT_DATE
--- Meetings for date: WHERE start::timestamptz::date = '2026-05-14'::date
+-- ✓ Today: WHERE m.start::timestamptz::date = CURRENT_DATE
+-- ✓ Previous: WHERE m.start::timestamptz < NOW() ORDER BY m.start DESC
+-- ✓ By date: WHERE m.start::timestamptz::date = '2026-05-14'::date
+
+-- ─── OUTREACH & MARKETING ───────────────────────────────────────────────────
 
 CREATE TABLE "outreaches" (
     _id TEXT PRIMARY KEY,
-    name TEXT,
+    name TEXT,              -- prospect name
     email TEXT,
-    status TEXT,                -- 'New','Contacted','Interested','Converted to Deal'
+    phone TEXT,
+    country TEXT,
+    status TEXT,            -- 'Not Contacted' | 'Contacted' | 'Interested' | 'Converted to Deal'
     "leadStatus" TEXT,
-    campaign TEXT,              -- references campaigns._id
-    "assignedTo" TEXT,          -- references users._id
-    "isDeleted" BOOLEAN,        -- NOTE: isDeleted not deleted!
-    "createdAt" TEXT
+    priority TEXT,
+    campaign TEXT,          -- → campaigns._id
+    region TEXT,            -- → regions._id
+    "assignedTo" TEXT,      -- → users._id
+    "isDeleted" BOOLEAN,    -- ⚠️ isDeleted (not deleted!) WHERE NOT "isDeleted"
+    "createdAt" TEXT,
+    document JSONB
 );
--- Filter: WHERE NOT "isDeleted"
+-- ✓ Filter: WHERE NOT o."isDeleted"
+-- ✓ Conversion rate: COUNT(*) FILTER (WHERE status='Converted to Deal') / COUNT(*) * 100
+
+CREATE TABLE "campaigns" (
+    _id TEXT PRIMARY KEY,
+    "campaignName" TEXT,
+    "categoryId" TEXT,      -- → categories._id
+    "createdBy" TEXT,
+    "createdAt" TEXT,
+    document JSONB
+);
+
+-- ─── FINANCE ────────────────────────────────────────────────────────────────
+
+CREATE TABLE "vendors" (
+    _id TEXT PRIMARY KEY,
+    "companyName" TEXT,     -- vendor company name
+    email TEXT,
+    phone TEXT,
+    currency TEXT,          -- vendor's billing currency
+    stage TEXT,             -- 'Pending Approval' | 'Active' | 'Inactive'
+    country TEXT,
+    "createdBy" TEXT,       -- → users._id
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Count: SELECT COUNT(*) FROM "vendors"
+-- ✓ Active vendors: WHERE v.stage = 'Active'
+
+CREATE TABLE "bills" (
+    _id TEXT PRIMARY KEY,
+    vendor TEXT,            -- → vendors._id
+    "systemBillNo" TEXT,    -- e.g. 'BILL-14'
+    "vendorInvoiceNo" TEXT,
+    "billDate" TEXT,        -- TEXT → cast ::timestamptz
+    "dueDate" TEXT,         -- payment due date
+    status TEXT,            -- 'Payment Scheduled' | 'Paid' | 'Pending' | 'Draft'
+    "netPayableAmount" NUMERIC,
+    subtotal NUMERIC,
+    "gstPercent" NUMERIC,
+    "billType" TEXT,        -- 'Service' | 'Product'
+    "createdBy" TEXT,       -- → users._id
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Unpaid bills: WHERE b.status NOT IN ('Paid') AND b."dueDate" is set
+-- ✓ By vendor: LEFT JOIN "vendors" v ON v._id = b.vendor
+
+-- ─── LOOKUP / REFERENCE TABLES ──────────────────────────────────────────────
 
 CREATE TABLE "departments" (
     _id TEXT PRIMARY KEY,
-    name TEXT
+    name TEXT               -- 'accounts team' | 'Business Analyst' | 'Lead Generation' | 'outreach team'
 );
+-- ✓ Users in dept: JOIN "users" u ON u.department = d._id
 
 CREATE TABLE "regions" (
     _id TEXT PRIMARY KEY,
-    "regionName" TEXT
+    "regionName" TEXT       -- 'USA' | 'Europe' | 'APAC' etc.
 );
 
 CREATE TABLE "products" (
     _id TEXT PRIMARY KEY,
     name TEXT,
-    "isActive" BOOLEAN
+    product_type TEXT,      -- → projecttypes._id
+    unit_cost NUMERIC,
+    currency TEXT,
+    "isActive" BOOLEAN,     -- WHERE "isActive" = true
+    sku TEXT,
+    description_short TEXT,
+    description_long TEXT,
+    billing_frequency TEXT,
+    "createdAt" TEXT,
+    document JSONB
 );
 
--- ── KEY JOIN PATTERNS ────────────────────────────────────────────────────────
--- Deals with owner name:
---   FROM deals d LEFT JOIN users u ON u._id = d.owner
--- Invoices with company name:
---   FROM invoices i LEFT JOIN companies c ON c._id = i.company
--- Tasks with user name:
---   FROM createtasks t LEFT JOIN users u ON u._id = t."createdBy"
--- Targets with user name:
---   FROM targets t LEFT JOIN users u ON u._id = t."userId"
--- Sales with user name:
---   FROM sales s LEFT JOIN users u ON u._id = s."salesOwner"
--- Companies with region:
---   FROM companies c LEFT JOIN regions r ON r._id = c.region
--- Users with department:
---   FROM users u LEFT JOIN departments d ON d._id = u.department
+CREATE TABLE "sources" (
+    _id TEXT PRIMARY KEY,
+    "sourceName" TEXT   -- 'Old Client' | 'LinkedIn' | 'Referral' etc.
+);
+
+CREATE TABLE "technologies" (
+    _id TEXT PRIMARY KEY,
+    name TEXT,          -- 'Magento' | 'React' | 'PHP' etc.
+    category TEXT       -- → technologycategories._id
+);
+
+CREATE TABLE "taxes" (
+    _id TEXT PRIMARY KEY,
+    name TEXT,          -- 'Tax 18%' | 'GST' etc.
+    amount NUMERIC      -- tax rate e.g. 18
+);
+
+CREATE TABLE "categories" (
+    _id TEXT PRIMARY KEY,
+    "categoryName" TEXT,
+    name TEXT
+);
+
+CREATE TABLE "dealstagesettings" (
+    _id TEXT PRIMARY KEY,
+    "dealStageName" TEXT,   -- all active deal stages
+    deleted BOOLEAN
+);
+
+CREATE TABLE "lead_statuses" (
+    _id TEXT PRIMARY KEY,
+    name TEXT   -- 'New' | 'Open' | 'In Progress' | 'Unqualified' etc.
+);
+
+CREATE TABLE "lifecycle_stages" (
+    _id TEXT PRIMARY KEY,
+    name TEXT   -- 'Lead' | 'Customer' | 'Partner' etc.
+);
+
+CREATE TABLE "payments" (
+    _id TEXT PRIMARY KEY,
+    "payment_name" TEXT,    -- payment method name e.g. 'IDFC FIRST BANK International'
+    "payment_fee" NUMERIC,
+    description TEXT
+);
+
+-- ─── ACTIVITY / NOTES ───────────────────────────────────────────────────────
+
+CREATE TABLE "emails" (
+    _id TEXT PRIMARY KEY,
+    "user" TEXT,            -- → users._id (who sent/received)
+    "from" TEXT,
+    "to" TEXT,
+    subject TEXT,
+    snippet TEXT,
+    body TEXT,
+    date TEXT,              -- TEXT → cast ::timestamptz
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Search emails: WHERE e.subject ILIKE '%keyword%' OR e.snippet ILIKE '%keyword%'
+
+CREATE TABLE "commonnotes" (
+    _id TEXT PRIMARY KEY,
+    note TEXT,              -- note content (HTML)
+    type TEXT,              -- 'Company' | 'Deal' | 'Contact' | 'Invoice' | 'Sales'
+    "createdBy" TEXT,       -- → users._id
+    "companyId" TEXT,       -- → companies._id
+    "dealId" TEXT,          -- → deals._id
+    "contactId" TEXT,       -- → contacts._id
+    "invoiceId" TEXT,       -- → invoices._id
+    "salesId" TEXT,         -- → sales._id
+    "isPinned" BOOLEAN,
+    "isLog" BOOLEAN,
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Notes for company: WHERE cn."companyId" = 'company_id_here'
+-- ✓ Notes for deal: WHERE cn."dealId" = 'deal_id_here'
+
+CREATE TABLE "activitylogs" (
+    _id TEXT PRIMARY KEY,
+    action TEXT,            -- 'create' | 'update' | 'delete'
+    module TEXT,            -- 'Companies' | 'Deals' | 'Invoices' | 'Sales' etc.
+    "recordId" TEXT,
+    "recordName" TEXT,
+    "userId" TEXT,          -- → users._id (who performed the action)
+    "ipAddress" TEXT,
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Recent activity: ORDER BY "createdAt" DESC LIMIT 20
+-- ✓ By module: WHERE module = 'Deals'
+
+CREATE TABLE "countryregions" (
+    _id TEXT PRIMARY KEY,
+    country TEXT,
+    region TEXT     -- region name string (not FK)
+);
+
+CREATE TABLE "projecttypes" (
+    _id TEXT PRIMARY KEY,
+    name TEXT   -- 'Dedicated' | 'Fixed Price' | 'T&M' etc.
+);
+
+-- ─── KEY JOIN PATTERNS (use table alias prefix on ALL columns in JOINs) ─────
+-- Deals + owner:     FROM "deals" d LEFT JOIN "users" u ON u._id = d.owner
+--                    SELECT d.name, d.stage, u.name AS owner_name WHERE NOT d.deleted
+-- Invoices + co:     FROM "invoices" i LEFT JOIN "companies" c ON c._id = i.company
+--                    SELECT i.invoice_number, c."companyName", i.grandtotal_in_usd
+-- Tasks + user:      FROM "createtasks" t LEFT JOIN "users" u ON u._id = t."createdBy"
+--                    WHERE t.status='Pending' AND NOT t.deleted
+-- Targets + user:    FROM "targets" t LEFT JOIN "users" u ON u._id = t."userId"
+-- Sales + owner:     FROM "sales" s LEFT JOIN "users" u ON u._id = s."salesOwner"
+-- Companies + dept:  FROM "users" u LEFT JOIN "departments" d ON d._id = u.department
+-- Outreaches + camp: FROM "outreaches" o LEFT JOIN "campaigns" c ON c._id = o.campaign
+-- Bills + vendor:    FROM "bills" b LEFT JOIN "vendors" v ON v._id = b.vendor
+-- Contacts + co:     FROM "contacts" ct LEFT JOIN "companies" c ON c._id = ct.company
+--
+-- ⚠️ JOIN RULE: In any JOIN query, ALWAYS write d.document, i.document, c.document etc.
+--    NEVER write bare 'document' — it is AMBIGUOUS when multiple tables are joined.
 """
 
 
@@ -336,6 +549,16 @@ CRITICAL — MIXED-CASE COLUMNS:
     ✓ document->>'dealWonAt'     (JSONB — always works)
     ✓ "dealWonAt"                (quoted flat — also works)
     ✗ dealWonAt                  (unquoted — PostgreSQL lowercases it, FAILS)
+
+CRITICAL — JOIN QUERIES: ALWAYS prefix `document` with table alias:
+  Every table has a `document` JSONB column. In JOINs the column is AMBIGUOUS.
+  ALWAYS write: d.document->>'field'   NOT   document->>'field'
+  Examples:
+    ✓ FROM "deals" d LEFT JOIN "users" u ON u._id = d.owner
+      WHERE d.document->>'dealWonAt' IS NOT NULL    ← d. prefix required
+      AND NOT d.deleted                              ← d. prefix required
+    ✗ WHERE document->>'dealWonAt' IS NOT NULL       ← AMBIGUOUS — SQL ERROR
+  Rule: ANY time you use FROM ... JOIN ..., prefix ALL column references with alias.
 
 SOFT DELETE:
   Most tables: WHERE NOT deleted          (deleted is BOOLEAN)

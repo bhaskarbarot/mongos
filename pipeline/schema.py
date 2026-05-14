@@ -310,9 +310,25 @@ def _run_sql_direct(sql: str) -> Optional["SqlResult"]:
         normalised = [tuple(_norm(v) for v in row) for row in rows]
         return SqlResult(rows=normalised)
 
+    except ImportError:
+        # psycopg2 not available — return None so caller falls back to LangChain
+        LOGGER.debug("psycopg2 not available for direct execution")
+        return None
     except Exception as exc:
-        LOGGER.debug("Direct psycopg2 fallback error: %s", exc)
-        return None  # caller decides what to do
+        exc_str = str(exc)
+        # Distinguish: DB connection errors → return None (try LangChain fallback)
+        #              SQL errors → return SqlResult(error=...) so auto-repair can fix the SQL
+        is_connection_error = any(k in exc_str.lower() for k in [
+            "connection refused", "could not connect", "connection timed out",
+            "password authentication", "database", "host", "connect timeout",
+        ])
+        if is_connection_error:
+            LOGGER.debug("Direct psycopg2 connection error: %s", exc)
+            return None  # fall back to LangChain tool
+        # SQL-level error (AmbiguousColumn, syntax, permission) → propagate as error
+        # This triggers auto-repair in run_sql() / text2sql.run()
+        LOGGER.warning("Direct psycopg2 SQL error: %s | sql=%.100s", exc, sql)
+        return SqlResult(error=exc_str)
 
 
 def run_sql(agent, sql: str, max_retries: int = 1) -> SqlResult:
