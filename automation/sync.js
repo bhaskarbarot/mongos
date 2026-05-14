@@ -58,7 +58,7 @@ const _errorBuckets = Object.create(null);
 const ERROR_FLUSH_MS = 10000;
 
 function _errorKey(collection, err) {
-  const msg = String(err?.message || err || "unknown error");
+  const msg = String((err && err.message) || err || "unknown error");
   if (msg.includes("ECONNREFUSED")) return `${collection}|ECONNREFUSED`;
   return `${collection}|${msg.slice(0, 120)}`;
 }
@@ -72,7 +72,7 @@ function logSyncErrorOnce(collection, err, context = "sync") {
     firstTs: now,
     lastTs: now,
     count: 0,
-    sample: String(err?.message || err || "unknown error"),
+    sample: String((err && err.message) || err || "unknown error"),
   };
   bucket.count += 1;
   bucket.lastTs = now;
@@ -141,7 +141,7 @@ async function syncUpsert(collection, doc, opType, silent = false) {
     if (!silent) {
       // Change stream path — log one line per real event
       const verb = opType === "insert" ? "INSERT" : "UPDATE";
-      logger.info(`${collection} === ${verb} done in MongoDB → updated in PostgreSQL | id: ${mapped.id}`);
+      logger.info(`${collection} === ${verb} done in MongoDB → updated in PostgreSQL | id: ${mapped._id}`);
     } else {
       // Polling path — just count, summary logged by syncPollDone()
       _pollCounts[collection] = (_pollCounts[collection] || 0) + 1;
@@ -196,7 +196,7 @@ async function startSync() {
     if (error && error.code === 40573) {
       logger.warn("Change streams need replica set — using POLLING mode (every " + (process.env.POLL_INTERVAL_MS || 5000) + "ms)");
     } else {
-      logger.warn("Change stream unavailable — using POLLING mode", { reason: error?.message });
+      logger.warn("Change stream unavailable — using POLLING mode", { reason: (error && error.message) || String(error) });
     }
 
     await startMongoPolling({
@@ -231,7 +231,7 @@ async function startSync() {
   try {
     await watchMongoChanges(
       async (change) => {
-        const collection = change.ns?.coll;
+        const collection = change.ns && change.ns.coll;
         if (!collection) return;
 
         if (change.operationType === "insert") {
@@ -239,12 +239,12 @@ async function startSync() {
         } else if (change.operationType === "update" || change.operationType === "replace") {
           await syncUpsert(collection, change.fullDocument || {}, "update", false);
         } else if (change.operationType === "delete") {
-          const id = change.documentKey?._id ? String(change.documentKey._id) : null;
+          const id = (change.documentKey && change.documentKey._id) ? String(change.documentKey._id) : null;
           await syncDelete(collection, id);
         }
       },
       async (error) => {
-        logger.error("Change stream error", { error: error?.message, code: error?.code });
+        logger.error("Change stream error", { error: (error && error.message), code: (error && error.code) });
         await startPollingFallback(error);
       }
     );
