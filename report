@@ -1,0 +1,59 @@
+# Cross-Validation Fix Plan — Target 45+/50
+
+## Current State: 35/50 (70%) → Target: 45/50 (90%+)
+
+## FREE WINS (+6 points, no code change needed):
+
+### 1. Fix test script number extractor (+2)
+- pipeline value: extractor picks '38' instead of '1,328,508' — need comma-aware large number detection
+- overall win rate: extractor picks '8,000' from text instead of '44.8%' — need % pattern priority
+
+### 2. Stable DB = no crashes (+3)
+- total revenue (paid): DB restart mid-test → 0 response
+- total sales orders: DB restart → 0 response
+- deals created this year: DB restart → 0 response
+- FIX: Set postgres container memory limit higher OR use longer sleep after restart
+
+### 3. Fix misclassified result (+1)
+- invoices due next month: DB=0, chatbot correctly says "no invoices found" — test marks as MISMATCH but it's CORRECT
+- FIX: If DB value=0 and chatbot says "no" or "0", mark as MATCH
+
+## REAL ACCURACY FIXES (+9 points):
+
+### 4. Companies count: 146 vs 139 (appears twice = +2)
+- Root cause: chatbot query not filtering deleted=false correctly OR counting related tables
+- Fix: Check what SQL runs for "how many companies" — add strict deleted filter
+
+### 5. Overdue invoices count: 102 vs 30 (+1)
+- Root cause: _fp_overdue_aging groups by COMPANY (30 companies) not counting individual invoices
+- Fix: "how many overdue invoices" → _fp_count, not _fp_overdue_aging
+
+### 6. Active users: 15 vs 13 (+1)
+- Root cause: chatbot includes users where isActive IS NULL (counts more)
+- Fix: Use isActive=true only (strict filter)
+
+### 7. Draft sales orders: 121 vs 35 (+1)
+- Root cause: "how many draft sales orders" hits general count without status filter
+- Fix: _fp_count should apply "draft" status filter for sales
+
+### 8. High priority tasks: 70 vs 16 (+1)
+- Root cause: "how many high priority pending tasks" returns all pending (70) not high priority
+- Fix: _fp_count attr filter for priority='High' AND status='Pending'
+
+### 9. Total targets: 19 vs None (+1)
+- Root cause: _fp_targets or intent_router says "no targets found" incorrectly
+- Fix: Direct count query for targets table
+
+### 10. Companies with region: 107 vs 146 (+1)
+- Root cause: chatbot returns total companies not filtered by region IS NOT NULL
+- Fix: Handle "companies with a region" as filtered count query
+
+## TOMORROW PRIORITY ORDER:
+1. Fix test script (free +6)
+2. Fix companies count filter (high impact, appears 2x)
+3. Fix overdue invoices routing (how many → count not aging)
+4. Fix targets no-data bug
+5. Fix high priority task filter in _fp_count
+6. Fix users active filter
+7. Fix draft sales count
+8. Fix companies with region filter
