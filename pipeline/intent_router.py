@@ -46,34 +46,80 @@ from pipeline.utils import Timer, fmt_number, format_rows_as_markdown_table, nor
 LOGGER = logging.getLogger("sql_chatbot")
 
 _CONFIDENCE_MIN = 0.55   # below this → let full pipeline handle
-_LIST_LIMIT     = 50
+_LIST_LIMIT     = 500    # return all records by default (user can say "top N" to limit)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LLM SYSTEM PROMPT
 # ══════════════════════════════════════════════════════════════════════════════
 
-_SYSTEM = """CRM intent extractor. Output ONLY valid JSON.
+_SYSTEM = """You are a CRM intent extractor. Output ONLY valid JSON — no extra text.
 
-{"action":"count|list|sum|find|top_n","entity":"deals|invoices|contacts|companies|users|tasks|targets|outreaches|products|regions","filters":{"stage":"closed_won|closed_lost|open","status":"paid|unpaid|overdue|pending|completed|draft|cancelled","owner":null,"time_period":"this_month|last_month|this_year|last_year|this_quarter|last_quarter|today|null","search":null,"limit":10},"confidence":0.0}
+Schema:
+{"action":"count|list|sum|find|top_n","entity":"deals|invoices|contacts|companies|users|tasks|targets|outreaches|sales|meetings|bills|products|regions","filters":{"stage":"closed_won|closed_lost|open","status":"paid|unpaid|overdue|pending|completed|draft|cancelled|approved|rejected|confirmed","owner":null,"time_period":"this_month|last_month|this_year|last_year|this_quarter|last_quarter|today|null","search":null,"limit":null},"confidence":0.0}
 
-ACTIONS: count=how many/count, list=show/give/tell/display/all, sum=revenue/total/amount, find=search specific record, top_n=top N/best/highest
-CONFIDENCE: 0.95=clear single-entity, <0.40=needs 2+ entities/comparison/analysis (full pipeline handles those)
-ENTITIES: deal/opportunity→deals, invoice/bill→invoices, contact/person/lead→contacts, company/account/customer→companies, user/employee/rep→users, task/todo→tasks, target/goal→targets
-STAGES: won/closed won→closed_won, lost/closed lost→closed_lost, open→open
-STATUS: paid→paid, unpaid/outstanding→unpaid, overdue→overdue, pending→pending, completed→completed
+ACTION MEANINGS:
+  count = how many / count / number of / total count
+  list  = show / give / tell / display / all / list / get / fetch
+  sum   = revenue / total / amount / billing / earnings / income
+  find  = search for / who is / find / lookup / get details of [specific name]
+  top_n = top N / best / highest / biggest / most
 
-EXAMPLES:
-"tell me all deals"→{"action":"list","entity":"deals","filters":{},"confidence":0.95}
-"show closed won"→{"action":"list","entity":"deals","filters":{"stage":"closed_won"},"confidence":0.95}
-"list closed lost"→{"action":"list","entity":"deals","filters":{"stage":"closed_lost"},"confidence":0.95}
-"total revenue this month"→{"action":"sum","entity":"invoices","filters":{"time_period":"this_month"},"confidence":0.95}
-"overdue invoices"→{"action":"list","entity":"invoices","filters":{"status":"overdue"},"confidence":0.95}
-"pending tasks"→{"action":"list","entity":"tasks","filters":{"status":"pending"},"confidence":0.95}
-"find John Smith"→{"action":"find","entity":"contacts","filters":{"search":"John Smith"},"confidence":0.90}
-"top 5 by revenue"→{"action":"top_n","entity":"invoices","filters":{"limit":5},"confidence":0.85}
-"compare this vs last month"→{"action":"compare","entity":"invoices","filters":{},"confidence":0.10}
-"target vs achieved"→{"action":"compare","entity":"targets","filters":{},"confidence":0.10}"""
+ENTITY ALIASES:
+  deal / opportunity / pipeline → deals
+  invoice / bill / billing → invoices
+  bill (purchase bill) → bills
+  sales order / so / sales → sales
+  contact / person / lead / prospect → contacts
+  company / account / customer / client / organisation → companies
+  user / employee / rep / salesperson / staff / member / team member → users
+  task / todo / follow-up / followup / assignment → tasks
+  target / goal / quota / kpi → targets
+  campaign / outreach → outreaches
+  meeting / call / appointment / scheduled call → meetings
+  product / item / service → products
+
+CONFIDENCE RULES:
+  0.95 = single entity, clear single action
+  0.80 = single entity but filter is ambiguous
+  0.55 = single entity but multiple filters or time period
+  0.35 = multiple entities OR comparison OR report → full pipeline should handle
+  0.10 = analytical / comparison / vague → always escalate to full pipeline
+
+FILTER RULES:
+  stage: only for deals  (closed_won / closed_lost / open)
+  status: for invoices (paid/unpaid/overdue/pending/draft/cancelled/approved/rejected/confirmed)
+         for tasks (pending / completed / open / overdue)
+  time_period: this_month / last_month / this_year / last_year / this_quarter / last_quarter / today
+  limit: only when user says "top N" or "first N" — otherwise leave null
+
+EXAMPLES (show correct JSON output):
+"tell me all deals" → {"action":"list","entity":"deals","filters":{},"confidence":0.95}
+"give me all deals" → {"action":"list","entity":"deals","filters":{},"confidence":0.95}
+"show all deals" → {"action":"list","entity":"deals","filters":{},"confidence":0.95}
+"show closed won deals" → {"action":"list","entity":"deals","filters":{"stage":"closed_won"},"confidence":0.95}
+"closed won deals" → {"action":"list","entity":"deals","filters":{"stage":"closed_won"},"confidence":0.95}
+"list lost deals" → {"action":"list","entity":"deals","filters":{"stage":"closed_lost"},"confidence":0.95}
+"all open deals" → {"action":"list","entity":"deals","filters":{"stage":"open"},"confidence":0.95}
+"total revenue this month" → {"action":"sum","entity":"invoices","filters":{"time_period":"this_month"},"confidence":0.95}
+"overdue invoices" → {"action":"list","entity":"invoices","filters":{"status":"overdue"},"confidence":0.95}
+"all paid invoices" → {"action":"list","entity":"invoices","filters":{"status":"paid"},"confidence":0.95}
+"unpaid bills" → {"action":"list","entity":"invoices","filters":{"status":"unpaid"},"confidence":0.95}
+"pending tasks" → {"action":"list","entity":"tasks","filters":{"status":"pending"},"confidence":0.95}
+"completed tasks" → {"action":"list","entity":"tasks","filters":{"status":"completed"},"confidence":0.95}
+"all companies" → {"action":"list","entity":"companies","filters":{},"confidence":0.95}
+"all users" → {"action":"list","entity":"users","filters":{},"confidence":0.95}
+"how many deals" → {"action":"count","entity":"deals","filters":{},"confidence":0.95}
+"how many contacts" → {"action":"count","entity":"contacts","filters":{},"confidence":0.95}
+"count pending tasks" → {"action":"count","entity":"tasks","filters":{"status":"pending"},"confidence":0.95}
+"top 5 customers by revenue" → {"action":"top_n","entity":"invoices","filters":{"limit":5},"confidence":0.85}
+"top 10 deals by amount" → {"action":"top_n","entity":"deals","filters":{"limit":10},"confidence":0.85}
+"find John Smith" → {"action":"find","entity":"contacts","filters":{"search":"John Smith"},"confidence":0.90}
+"search for TechCorp" → {"action":"find","entity":"companies","filters":{"search":"TechCorp"},"confidence":0.90}
+"compare this vs last month" → {"action":"compare","entity":"invoices","filters":{},"confidence":0.10}
+"target vs achieved" → {"action":"compare","entity":"targets","filters":{},"confidence":0.10}
+"revenue trend this year" → {"action":"trend","entity":"invoices","filters":{},"confidence":0.10}
+"executive summary" → {"action":"report","entity":"deals","filters":{},"confidence":0.10}"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -83,11 +129,15 @@ EXAMPLES:
 _ENTITY_DATE_FIELD: Dict[str, str] = {
     "invoices":  "invoice_date",
     "deals":     "closeDate",
-    "tasks":     "dueDate",
+    "tasks":     "due_date",      # createtasks table uses due_date
     "contacts":  "createdAt",
     "companies": "createdAt",
     "targets":   "month",
     "users":     "createdAt",
+    "sales":     "sales_date",
+    "meetings":  "date",
+    "bills":     "invoice_date",
+    "outreaches":"createdAt",
 }
 
 
@@ -117,7 +167,12 @@ def _time_clause(period: str, date_field: str) -> str:
 
 def _build_where(entity: str, table: str, filters: Dict, fields: List[str]) -> str:
     """Build a SQL WHERE clause from extracted filters. Always safe — no raw user SQL."""
-    clauses = ["COALESCE(document->>'deleted','false') != 'true'"]
+    # deleted field: stored as JSON boolean → document->>'deleted' returns 'true'/'false'
+    # outreaches uses isDeleted instead of deleted
+    if entity == "outreaches":
+        clauses = ["COALESCE(document->>'isDeleted','false') != 'true'"]
+    else:
+        clauses = ["COALESCE(document->>'deleted','false') != 'true'"]
 
     stage = (filters.get("stage") or "").lower().replace(" ", "_")
     if stage and entity == "deals":
@@ -289,7 +344,7 @@ def _build_sql(
         if owner_f:
             selects.append("document->>'" + owner_f + "' AS owner")
         if not selects:
-            selects = ["id"]
+            selects = ["_id"]
 
         return (
             'SELECT ' + ", ".join(selects)
@@ -468,18 +523,36 @@ def run(query: str, agent, memory_context: str = "") -> Optional[Dict[str, Any]]
         # Normalise entity — LLM sometimes uses aliases or actual table names
         # instead of the canonical set defined in the system prompt.
         _ENTITY_NORM: Dict[str, str] = {
-            "bill": "invoices", "bills": "invoices", "billing": "invoices",
+            # invoices / bills
+            "bill": "invoices", "billing": "invoices",
+            "invoice": "invoices",
+            # deals
             "opportunity": "deals", "opportunities": "deals", "pipeline": "deals",
+            "deal": "deals",
+            # contacts
             "lead": "contacts", "leads": "contacts", "person": "contacts",
-            "people": "contacts",
+            "people": "contacts", "contact": "contacts", "prospect": "contacts",
+            # companies
             "account": "companies", "accounts": "companies",
-            "customer": "companies", "customers": "companies", "client": "companies",
+            "customer": "companies", "customers": "companies",
+            "client": "companies", "clients": "companies",
+            "company": "companies", "organisation": "companies",
+            # users
             "employee": "users", "employees": "users", "rep": "users",
             "salesperson": "users", "salespeople": "users",
-            "todo": "tasks", "todos": "tasks", "followup": "tasks",
-            "goal": "targets", "quota": "targets",
-            "campaign": "outreaches",
-            "sale": "sales", "order": "sales",
+            "staff": "users", "member": "users", "members": "users",
+            "user": "users", "team": "users",
+            # tasks (actual table: createtasks)
+            "task": "tasks", "todo": "tasks", "todos": "tasks",
+            "followup": "tasks", "follow-up": "tasks", "assignment": "tasks",
+            # targets
+            "target": "targets", "goal": "targets", "quota": "targets", "kpi": "targets",
+            # outreaches
+            "campaign": "outreaches", "outreach": "outreaches",
+            # sales orders
+            "sale": "sales", "order": "sales", "sales order": "sales",
+            # meetings
+            "meeting": "meetings", "call": "meetings", "appointment": "meetings",
         }
         entity = _ENTITY_NORM.get(intent["entity"], intent["entity"])
 

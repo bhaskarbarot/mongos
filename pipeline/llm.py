@@ -1,21 +1,19 @@
 """llm.py — Centralized multi-provider LLM client with automatic fallback.
 
-Provider chain (task-specific, fastest → most available):
+Provider chain (fastest → most available):
 
-  classify  → Groq 8b  → Gemini flash-lite → Ollama 1.5b
-  decompose → Groq 8b  → Gemini flash-lite → OpenRouter → Ollama 7b
-  synthesize→ Groq 70b → Gemini flash-lite → OpenRouter → Ollama 7b
+  classify  → Groq 8b-instant   → Gemini flash-lite → Ollama classify-model
+  decompose → Groq llama-4-scout → Gemini flash-lite → OpenRouter → Ollama 8b
+  synthesize→ Groq 70b-versatile → Gemini flash-lite → OpenRouter → Ollama 8b
 
-Rate budget at 3-5 queries/min (50% complex):
-  Groq 8b  (classify+decompose): ~2,250 TPM used / 6,000 TPM limit  ✓
-  Groq 70b (synthesize):         ~7,500 TPM used / 12,000 TPM limit ✓
-  Gemini   (fallback only):      rarely needed under normal load     ✓
-
-NOTE: Text2SQL models (debopam 3B, Arctic 7B) are NOT touched here.
-      They are fine-tuned SQL generators managed by text2sql.py.
+Groq key rotation:
+  3 API keys are tried in sequence on each call.
+  If key-1 gets a 429, key-2 is tried immediately (no sleep), then key-3.
+  This gives 3× the effective rate-limit budget at zero extra latency for
+  the common case where key-1 succeeds.
 
 Public API:
-    call(task, system_prompt, user_prompt, max_tokens) -> Optional[str]
+    call(task, system, user, max_tokens) -> Optional[str]
 
 Tasks: "classify" | "decompose" | "synthesize"
 """
@@ -26,7 +24,7 @@ import logging
 import time
 import urllib.request
 import urllib.error
-from typing import Optional
+from typing import List, Optional
 
 from config import settings
 
@@ -34,9 +32,9 @@ LOGGER = logging.getLogger("sql_chatbot")
 
 # ── Groq headers (User-Agent required to bypass Cloudflare 403) ───────────────
 _GROQ_HEADERS = {
-    "Content-Type":  "application/json",
-    "User-Agent":    "groq-python/0.9.0",
-    "Accept":        "application/json",
+    "Content-Type": "application/json",
+    "User-Agent":   "groq-python/0.9.0",
+    "Accept":       "application/json",
 }
 
 # ── OpenRouter headers ────────────────────────────────────────────────────────
@@ -51,10 +49,15 @@ _OR_HEADERS = {
 # PROVIDER CALLERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20) -> Optional[str]:
-    """Call Groq API. On 429 rate-limit, waits and retries once before returning None."""
-    if not settings.groq_api_key:
-        return None
+def _groq_with_key(
+    api_key: str,
+    model: str,
+    system: str,
+    user: str,
+    max_tokens: int,
+    timeout: int = 20,
+) -> Optional[str]:
+    """Single Groq call with one API key. Returns None on any failure (incl. 429)."""
     payload = {
         "model":       model,
         "messages":    [
@@ -64,12 +67,11 @@ def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20
         "temperature": 0.1,
         "max_tokens":  max_tokens,
     }
-
-    def _do_request() -> Optional[str]:
+    try:
         req = urllib.request.Request(
             "https://api.groq.com/openai/v1/chat/completions",
             data=json.dumps(payload).encode(),
-            headers={**_GROQ_HEADERS, "Authorization": f"Bearer {settings.groq_api_key}"},
+            headers={**_GROQ_HEADERS, "Authorization": f"Bearer {api_key}"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -77,35 +79,33 @@ def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20
             text = data["choices"][0]["message"]["content"].strip()
             LOGGER.debug("Groq [%s] OK — %d chars", model, len(text))
             return text
-
-    try:
-        return _do_request()
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            # Parse retry-after from Groq headers (usually 5-60s).
-            # Cap at 15s — if it's longer, fall through to Gemini instead.
-            retry_after = int(e.headers.get("retry-after") or e.headers.get("x-ratelimit-reset-requests") or 8)
-            retry_after = min(retry_after, 15)
-            LOGGER.warning(
-                "Groq [%s] 429 rate-limit — waiting %ds then retrying once",
-                model, retry_after,
-            )
-            time.sleep(retry_after)
-            try:
-                return _do_request()
-            except urllib.error.HTTPError as e2:
-                body2 = e2.read().decode()[:200]
-                LOGGER.warning("Groq [%s] retry HTTP %d: %s", model, e2.code, body2)
-                return None
-            except Exception as exc2:
-                LOGGER.warning("Groq [%s] retry error: %s", model, exc2)
-                return None
+            LOGGER.warning("Groq [%s] 429 on key ...%s — trying next key", model, api_key[-6:])
+            return None  # caller rotates to next key
         body = e.read().decode()[:200]
         LOGGER.warning("Groq [%s] HTTP %d: %s", model, e.code, body)
         return None
     except Exception as exc:
         LOGGER.warning("Groq [%s] error: %s", model, exc)
         return None
+
+
+def _groq(model: str, system: str, user: str, max_tokens: int, timeout: int = 20) -> Optional[str]:
+    """Try all configured Groq API keys in order. Returns first successful result."""
+    keys: List[str] = settings.groq_api_keys
+    if not keys:
+        return None
+
+    for i, key in enumerate(keys):
+        result = _groq_with_key(key, model, system, user, max_tokens, timeout)
+        if result is not None:
+            if i > 0:
+                LOGGER.info("Groq [%s] succeeded on key %d/%d", model, i + 1, len(keys))
+            return result
+
+    LOGGER.warning("Groq [%s] all %d keys failed/rate-limited", model, len(keys))
+    return None
 
 
 def _gemini(model: str, system: str, user: str, max_tokens: int, timeout: int = 25) -> Optional[str]:
@@ -162,10 +162,7 @@ def _openrouter(model: str, system: str, user: str, max_tokens: int, timeout: in
         req = urllib.request.Request(
             "https://openrouter.ai/api/v1/chat/completions",
             data=json.dumps(payload).encode(),
-            headers={
-                **_OR_HEADERS,
-                "Authorization": f"Bearer {settings.openrouter_api_key}",
-            },
+            headers={**_OR_HEADERS, "Authorization": f"Bearer {settings.openrouter_api_key}"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -190,8 +187,8 @@ def _ollama(model: str, system: str, user: str, max_tokens: int, timeout: int = 
             {"role": "system", "content": system},
             {"role": "user",   "content": user},
         ],
-        "stream":   False,
-        "options":  {"temperature": 0.1, "num_predict": max_tokens},
+        "stream":  False,
+        "options": {"temperature": 0.1, "num_predict": max_tokens},
     }
     try:
         req = urllib.request.Request(
@@ -226,40 +223,40 @@ def call(
     Args:
         task:       "classify" | "decompose" | "synthesize"
         system:     System prompt (role + rules)
-        user:       User prompt (the actual query/data)
+        user:       User prompt (query / data to process)
         max_tokens: Max output tokens
 
-    Returns:
-        Response string, or None if ALL providers failed (caller should handle gracefully).
-
     Provider chains:
-        classify  → Groq 8b  → Gemini → Ollama 1.5b          (small prompt)
-        decompose → Groq 8b  → Gemini → OpenRouter → Ollama 7b
-        synthesize→ Groq 70b → Gemini → OpenRouter → Ollama 7b (large output)
+        classify  → Groq 8b-instant    → Gemini flash-lite → Ollama classify-model
+        decompose → Groq llama-4-scout  → Gemini flash-lite → OpenRouter → Ollama 8b
+        synthesize→ Groq 70b-versatile  → Gemini flash-lite → OpenRouter → Ollama 8b
+
+    Groq rotation: all 3 API keys are tried before moving to Gemini.
+    Returns response string, or None if ALL providers failed.
     """
     t0 = time.perf_counter()
 
     if task == "classify":
         steps = [
-            ("Groq-8b",   lambda: _groq(settings.groq_classify_model,       system, user, max_tokens, timeout=15)),
-            ("Gemini",    lambda: _gemini(settings.gemini_classify_model,    system, user, max_tokens, timeout=20)),
-            ("Ollama-1.5b",lambda: _ollama(settings.ollama_classify_model,  system, user, max_tokens, timeout=30)),
+            ("Groq-8b",       lambda: _groq(settings.groq_classify_model,      system, user, max_tokens, timeout=15)),
+            ("Gemini",        lambda: _gemini(settings.gemini_classify_model,   system, user, max_tokens, timeout=20)),
+            ("Ollama-classify",lambda: _ollama(settings.ollama_classify_model,  system, user, max_tokens, timeout=30)),
         ]
 
     elif task == "decompose":
         steps = [
-            ("Groq-8b",    lambda: _groq(settings.groq_decompose_model,        system, user, max_tokens, timeout=15)),
-            ("Gemini",     lambda: _gemini(settings.gemini_decompose_model,     system, user, max_tokens, timeout=20)),
-            ("OpenRouter", lambda: _openrouter(settings.openrouter_decompose_model, system, user, max_tokens, timeout=20)),
-            ("Ollama-7b",  lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=60)),
+            ("Groq-scout",    lambda: _groq(settings.groq_decompose_model,          system, user, max_tokens, timeout=20)),
+            ("Gemini",        lambda: _gemini(settings.gemini_decompose_model,       system, user, max_tokens, timeout=25)),
+            ("OpenRouter",    lambda: _openrouter(settings.openrouter_decompose_model, system, user, max_tokens, timeout=25)),
+            ("Ollama-8b",     lambda: _ollama(settings.ollama_reasoning_model,       system, user, max_tokens, timeout=settings.ollama_reasoning_timeout)),
         ]
 
     elif task == "synthesize":
         steps = [
-            ("Groq-70b",   lambda: _groq(settings.groq_synthesis_model,        system, user, max_tokens, timeout=30)),
-            ("Gemini",     lambda: _gemini(settings.gemini_synthesis_model,     system, user, max_tokens, timeout=30)),
-            ("OpenRouter", lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=30)),
-            ("Ollama-7b",  lambda: _ollama(settings.ollama_reasoning_model,    system, user, max_tokens, timeout=90)),
+            ("Groq-70b",      lambda: _groq(settings.groq_synthesis_model,           system, user, max_tokens, timeout=30)),
+            ("Gemini",        lambda: _gemini(settings.gemini_synthesis_model,        system, user, max_tokens, timeout=30)),
+            ("OpenRouter",    lambda: _openrouter(settings.openrouter_synthesis_model, system, user, max_tokens, timeout=30)),
+            ("Ollama-8b",     lambda: _ollama(settings.ollama_reasoning_model,        system, user, max_tokens, timeout=settings.ollama_reasoning_timeout)),
         ]
 
     else:

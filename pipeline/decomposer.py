@@ -79,14 +79,71 @@ DECOMPOSITION PRINCIPLES:
 6. NO HALLUCINATED FIELDS — only use concepts from the available tables list.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRM DOMAIN KNOWLEDGE:
-  • Revenue always comes from: invoices (payment_status='paid', field: grandtotal_in_usd)
-  • Open deals = dealWonAt is null AND dealLostAt is null
-  • Won deals = dealWonAt is not null
-  • Sales targets are in: targets table (targetInUSD per user per month)
-  • Achievement = sum of paid invoices for that user in that period
-  • Tasks: createtasks table (status: Pending/Completed, priority: Low/Medium/High)
-  • Soft delete: filter deleted=false (or isDeleted=false for outreaches)
+CRM DATABASE SCHEMA (PostgreSQL with JSONB document column):
+  IMPORTANT: All field access uses document->>'fieldName' syntax.
+  Primary key for all tables: _id (text)
+  JOIN pattern: table1.document->>'fieldRef' = table2._id
+
+  KEY TABLES & FIELDS:
+  • deals       : _id, document->>'name', document->>'stage', document->>'owner'
+                  document->>'grand_total_in_usd', document->>'closeDate'
+                  document->>'deleted', document->>'dealWonAt', document->>'dealLostAt'
+                  Open deals = dealWonAt IS NULL AND dealLostAt IS NULL
+                  Won deals  = dealWonAt IS NOT NULL  |  Lost = dealLostAt IS NOT NULL
+
+  • invoices     : _id, document->>'invoice_number', document->>'payment_status'
+                  document->>'grandtotal_in_usd', document->>'grand_total'
+                  document->>'invoice_date', document->>'due_date', document->>'company'
+                  document->>'deleted', document->>'currency'
+                  Revenue = paid invoices (payment_status='paid') using grandtotal_in_usd
+
+  • sales        : _id, document->>'sales_number', document->>'status'
+                  document->>'grand_total_in_usd', document->>'sales_date'
+                  document->>'salesOwner', document->>'company', document->>'deleted'
+                  Confirmed sales = status='Confirm'
+
+  • companies    : _id, document->>'companyName', document->>'lifecycleStage'
+                  document->>'leadStatus', document->>'industry', document->>'region'
+                  document->>'deleted', document->>'companyOwner'
+
+  • contacts     : _id, document->>'firstName', document->>'lastName'
+                  document->>'email', document->>'jobTitle', document->>'company'
+                  document->>'lifecycleStage', document->>'deleted'
+
+  • users        : _id, document->>'name', document->>'email'
+                  document->>'department', document->>'isActive'
+
+  • createtasks  : _id, document->>'Task' (task title), document->>'status'
+                  document->>'priority', document->>'createdBy' (→ users._id)
+                  document->>'due_date', document->>'deleted'
+                  Status values: 'Pending' / 'Completed'
+                  Priority values: 'Low' / 'Medium' / 'High'
+
+  • targets      : _id, document->>'userId' (→ users._id), document->>'targetInUSD'
+                  document->>'month', document->>'year', document->>'teamName'
+                  Achievement = SUM of confirmed sales for that user in that month/year
+
+  • meetings     : _id, document->>'title', document->>'date'
+                  document->>'attendees', document->>'createdBy'
+
+  • outreaches   : _id, document->>'status', document->>'campaign'
+                  document->>'isDeleted' (NOT deleted — different field name!)
+
+  • departments  : _id, document->>'name'
+                  JOIN with users: users.document->>'department' = departments._id
+
+  SOFT DELETE: COALESCE(document->>'deleted','false') != 'true'
+               For outreaches: COALESCE(document->>'isDeleted','false') != 'true'
+
+  JOIN EXAMPLES:
+    Users → Deals (by owner):
+      deals.document->>'owner' = users._id
+    Invoices → Companies:
+      invoices.document->>'company' = companies._id
+    Tasks → Users (creator):
+      createtasks.document->>'createdBy' = users._id
+    Deals owner name:
+      LEFT JOIN users u ON u._id = deals.document->>'owner'
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EXAMPLES:

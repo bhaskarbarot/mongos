@@ -201,7 +201,7 @@ class SchemaRegistry:
         if ident:
             return f"document->>'{ident}'"
 
-        return "id::text"
+        return "_id"  # fallback: PK column
 
     def get_all_roles(self, table: str, fields: List[str]) -> Dict[str, str]:
         """Resolve all known roles for a table. Returns {role: field_name}."""
@@ -383,7 +383,12 @@ def get_table_names(agent) -> List[str]:
 
 
 def get_document_fields(agent, table: str) -> List[str]:
-    """Return JSONB field names for a table. Cached per table.
+    """Return field names for a table.  Cached per table.
+
+    Strategy (in order):
+      1. JSONB document keys  — fast when document column is populated
+      2. information_schema   — reliable fallback for tables whose document
+                                column has not been populated yet
 
     E7: double-checked locking — SQL execution is outside the lock.
     """
@@ -391,18 +396,38 @@ def get_document_fields(agent, table: str) -> List[str]:
     if table in _TABLE_FIELDS_CACHE:
         return _TABLE_FIELDS_CACHE[table]
 
+    # ── 1. JSONB document keys ────────────────────────────────────────────────
+    fields: List[str] = []
     try:
         sql = (
-            f"SELECT DISTINCT key FROM \"{table}\","
+            f'SELECT DISTINCT key FROM "{table}",'
             f" jsonb_object_keys(document) AS key LIMIT 300"
         )
         _res   = run_sql(agent, sql)
         fields = sorted([r[0] for r in _res.rows if r and r[0]])
     except Exception as exc:
-        LOGGER.warning("Schema: field discovery failed for %s: %s", table, exc)
-        fields = []
+        LOGGER.warning("Schema: JSONB field discovery failed for %s: %s", table, exc)
 
-    # Safe path: write under lock, double-check to avoid overwriting a concurrent write
+    # ── 2. information_schema fallback (when document column is empty) ────────
+    _SYSTEM_COLS = frozenset({"document", "updated_at", "_synced_at"})
+    if not fields:
+        try:
+            _col_sql = (
+                "SELECT column_name FROM information_schema.columns "
+                f"WHERE table_name = '{table}' AND table_schema = 'public' "
+                "ORDER BY ordinal_position"
+            )
+            _c_res = run_sql(agent, _col_sql)
+            fields = [
+                r[0] for r in _c_res.rows
+                if r and r[0] and r[0] not in _SYSTEM_COLS
+            ]
+            LOGGER.info("Schema: %s — using info_schema (%d cols)", table, len(fields))
+        except Exception as exc2:
+            LOGGER.warning("Schema: info_schema fallback failed for %s: %s", table, exc2)
+            fields = []
+
+    # Safe path: write under lock
     with _CACHE_LOCK:
         if table not in _TABLE_FIELDS_CACHE:
             _TABLE_FIELDS_CACHE[table] = fields
@@ -475,7 +500,7 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                     _v_res = run_sql(
                         agent,
                         f"SELECT 1 FROM \"{target_name}\""
-                        f" WHERE document->>'_id' = '{val_str}' LIMIT 1",
+                        f" WHERE _id = '{val_str}' LIMIT 1",
                     )
                     if _v_res.rows:
                         links.setdefault(table, {})[field] = target_name
@@ -526,15 +551,27 @@ def build_text2sql_schema(agent) -> str:
 
         table_names = get_table_names(agent)
         lines = [
-            "PostgreSQL JSONB database — CRITICAL SQL RULES:",
-            "  • ALL field access: document->>'fieldName'",
+            "PostgreSQL CRM database — CRITICAL SQL RULES:",
+            "  • Primary key: _id (TEXT) — use _id, NOT id",
+            "  • ALL field access via JSONB: document->>'fieldName'",
             "  • Numbers: NULLIF(document->>'field','')::numeric",
             "  • Dates: NULLIF(document->>'field','')::timestamptz",
-            "  • NEVER use bare column names — always document->>''",
-            "  • Soft-delete: add COALESCE(document->>'deleted','false')!='true'",
-            "  • Table names in double quotes: FROM \"tableName\"",
-            "  • Use COALESCE for nullable fields",
+            "  • Soft-delete: WHERE COALESCE(document->>'deleted','false')!='true'",
+            "  • For outreaches: WHERE COALESCE(document->>'isDeleted','false')!='true'",
+            "  • Table names MUST be in double quotes: FROM \"tableName\"",
             "  • Use ILIKE for case-insensitive text matching",
+            "  • JOIN syntax: LEFT JOIN \"users\" u ON u._id = t.document->>'owner'",
+            "",
+            "KEY DOMAIN RULES:",
+            "  • Revenue = invoices WHERE payment_status='paid', field: grandtotal_in_usd",
+            "  • Confirmed sales revenue = sales WHERE status='Confirm', field: grand_total_in_usd",
+            "  • Open deals: document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL",
+            "  • Won deals: document->>'dealWonAt' IS NOT NULL",
+            "  • Tasks table name: createtasks (NOT tasks). Status: 'Pending'/'Completed'",
+            "  • createtasks.document->>'Task' = task title (capital T)",
+            "  • createtasks JOIN users: createtasks.document->>'createdBy' = users._id",
+            "  • Targets: targets.document->>'userId' = users._id, field: targetInUSD",
+            "  • Companies lifecycle: document->>'lifecycleStage' = 'Lead'/'Customer'/'Partner'",
             "",
             "TABLES & FIELDS:",
         ]
@@ -561,13 +598,18 @@ def build_text2sql_schema(agent) -> str:
         # CRM domain hints
         lines.extend([
             "",
-            "CRM DOMAIN:",
-            "  • Revenue = invoices WHERE payment_status='paid', field: grandtotal_in_usd",
-            "  • Open deals = dealWonAt IS NULL AND dealLostAt IS NULL",
-            "  • Won deals = dealWonAt IS NOT NULL",
-            "  • Targets: targetInUSD per userId per month/year",
-            "  • Tasks: createtasks (status: Pending/Completed, priority: Low/Medium/High)",
-            "  • Outreaches: isDeleted field (not deleted)",
+            "CRM DOMAIN QUICK REFERENCE:",
+            "  • Revenue:  SELECT SUM(NULLIF(document->>'grandtotal_in_usd','')::numeric)",
+            "              FROM \"invoices\" WHERE document->>'payment_status'='paid'",
+            "  • Open deals:  WHERE document->>'dealWonAt' IS NULL",
+            "                 AND document->>'dealLostAt' IS NULL",
+            "  • Won deals:   WHERE document->>'dealWonAt' IS NOT NULL",
+            "  • Targets:     targets table — targetInUSD per userId per month/year",
+            "  • Task title:  createtasks.document->>'Task'  (capital T)",
+            "  • Task JOIN:   createtasks.document->>'createdBy' = users._id",
+            "  • Outreaches:  use isDeleted field (NOT deleted)",
+            "  • Sales owner: sales.document->>'salesOwner' = users._id",
+            "  • Deals owner: deals.document->>'owner' = users._id",
         ])
 
         _TEXT2SQL_SCHEMA_CACHE = "\n".join(lines)
@@ -622,8 +664,27 @@ def build_revenue_coalesce(fields: List[str]) -> str:
     if not candidates:
         candidates = ["grand_total"]
 
+    # Use JSONB document access (document column is now populated from flat cols)
     parts = [f"NULLIF(document->>'{f}','')::numeric" for f in candidates]
     return "COALESCE(" + ", ".join(parts) + ", 0)"
+
+
+def col(field: str) -> str:
+    """Return the JSONB document access expression for a field.
+
+    Centralised so a future schema change only needs updating here.
+    """
+    return f"document->>'{field}'"
+
+
+def col_num(field: str) -> str:
+    """Return a numeric JSONB access expression (safe cast)."""
+    return f"NULLIF(document->>'{field}','')::numeric"
+
+
+def col_ts(field: str) -> str:
+    """Return a timestamptz JSONB access expression (safe cast)."""
+    return f"NULLIF(document->>'{field}','')::timestamptz"
 
 
 def resolve_entity_table(

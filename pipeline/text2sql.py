@@ -1,22 +1,23 @@
-"""text2sql.py — Ollama Text2SQL engine with parallel model execution.
-
-Production-grade NL→SQL conversion pipeline:
-  • Parallel primary + fallback model calls (first-success-wins)
-  • Multi-stage SQL validation (syntax, JSONB compliance, table existence)
-  • Smart table detection from generated SQL
-  • Retry with prompt refinement on validation failure
-  • Result formatting with column header extraction
+"""text2sql.py — Dual-model Text2SQL engine with parallel execution.
 
 Model priority:
-  1. PRIMARY:  Qwen2.5-Coder 3B  (fast, 8s timeout)
-  2. FALLBACK: Arctic Text2SQL 7B (accurate, 20s timeout)
-  Both run in parallel — first valid SQL wins.
+  1. PRIMARY:  debopam/Text-to-SQL__Qwen2.5-Coder-3B-FineTuned  (fast, 8s)
+  2. FALLBACK: a-kore/Arctic-Text2SQL-R1-7B                      (accurate, 30s)
+
+Both fire in parallel — first valid SQL wins.
+If parallel fails → retry with fallback model alone (more thorough).
+
+Key design:
+  • CREATE TABLE schema format (what fine-tuned Text2SQL models expect)
+  • Ollama /api/chat endpoint so each model uses its correct template
+  • Accepts BOTH direct column access AND document->>'field' JSONB access
+    (both work: flat columns AND document JSONB column are populated)
+  • JOIN key: always use _id (the actual PK text column)
 
 Public API:
-    run(query, agent) -> Optional[Dict]
+    run(query, agent)          -> Optional[Dict]
     generate_sql(query, agent) -> Optional[str]
 """
-
 from __future__ import annotations
 
 import json
@@ -29,9 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from config import settings
 from pipeline.schema import (
     build_text2sql_schema,
-    get_document_fields,
     get_table_names,
-    resolve_entity_table,
     run_sql,
 )
 from pipeline.utils import (
@@ -39,116 +38,359 @@ from pipeline.utils import (
     coerce_number,
     fmt_number,
     format_rows_as_markdown_table,
-    normalize_text,
 )
 
 LOGGER = logging.getLogger("sql_chatbot")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-
-_MAX_SQL_RETRIES      = 1       # retry once with refined prompt on failure
-_PARALLEL_TIMEOUT_S   = 25      # max wait for parallel model pool
-_MAX_RESULT_ROWS      = 50      # cap rows returned to user
-_SQL_EXEC_TIMEOUT_S   = 30      # SQL execution timeout
+_MAX_SQL_RETRIES    = 1     # retry once with fallback model on failure
+_PARALLEL_TIMEOUT_S = 35    # max wait for the parallel pool
+_MAX_RESULT_ROWS    = 500   # return all rows; user can add "top N" to limit
+_SQL_EXEC_TIMEOUT_S = 30    # SQL execution timeout
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# OLLAMA MODEL CALLERS
+# SCHEMA — CREATE TABLE format (what fine-tuned Text2SQL models understand)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _call_ollama(
-    prompt: str,
+# Static CREATE TABLE schema built from the actual DB columns.
+# Includes only the fields most relevant to CRM queries.
+# Both direct column access (deals.name) AND document->>'name' work — the DB
+# has flat columns AND a populated JSONB document column.
+
+_CREATE_TABLE_SCHEMA = """-- PostgreSQL CRM Database
+-- PRIMARY KEY: _id TEXT on every table
+-- JOINs: JOIN "users" u ON u._id = d.owner   (use _id flat column)
+-- SOFT DELETE: WHERE NOT deleted   (boolean)  |  outreaches: WHERE NOT "isDeleted"
+--
+-- ⚠️ FIELD ACCESS RULE — VERY IMPORTANT:
+--   Mixed-case fields (dealWonAt, companyName, firstName…) MUST use JSONB:
+--     document->>'dealWonAt'      ← CORRECT (JSONB preserves case)
+--     dealWonAt                   ← WRONG  (PostgreSQL lowercases → not found)
+--   All-lowercase fields can use either: _id, deleted, stage, name, email, etc.
+--   NUMERIC FIELDS: use direct column (already numeric, no cast needed):
+--     grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, month, year
+--   DATE TEXT FIELDS: cast with NULLIF to avoid empty-string error:
+--     NULLIF(document->>'invoice_date','')::timestamptz
+--     NULLIF(invoice_date,'')::timestamptz     (both work the same)
+
+CREATE TABLE "deals" (
+    _id TEXT PRIMARY KEY,
+    name TEXT,                  -- deal name (lowercase — use directly)
+    stage TEXT,                 -- 'Analysis - To be Quoted','Quotation Sent','Negotiation',
+                                -- 'Contract Under Review','On Hold','Closed Won','Closed Lost'
+    owner TEXT,                 -- references users._id
+    company TEXT,               -- references companies._id
+    grand_total_in_usd NUMERIC, -- deal value in USD (use directly, already numeric)
+    deleted BOOLEAN,            -- WHERE NOT deleted
+    -- MIXED-CASE columns — MUST use document->>:
+    -- document->>'closeDate'   TEXT date, cast: NULLIF(document->>'closeDate','')::timestamptz
+    -- document->>'dealWonAt'   NULL=not won / NOT NULL=won
+    -- document->>'dealLostAt'  NULL=not lost / NOT NULL=lost
+    -- document->>'createdAt'   TEXT date
+    document JSONB              -- always populated; use for mixed-case fields
+);
+-- ✓ Open deals:  WHERE document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL AND NOT deleted
+-- ✓ Won deals:   WHERE document->>'dealWonAt' IS NOT NULL AND NOT deleted
+-- ✓ Lost deals:  WHERE document->>'dealLostAt' IS NOT NULL AND NOT deleted
+-- ✓ Close date:  WHERE NULLIF(document->>'closeDate','')::timestamptz < NOW()
+
+CREATE TABLE "invoices" (
+    _id TEXT PRIMARY KEY,
+    invoice_number TEXT,        -- e.g. 'ELSN/2025/101'
+    payment_status TEXT,        -- 'paid','unpaid','cancelled','draft','partial_payment',
+                                -- 'approved','rejected','submitted','confirmed'
+    approval_status TEXT,       -- 'approved','rejected','pending','submitted'
+    grand_total NUMERIC,        -- invoice total in base currency
+    grandtotal_in_usd NUMERIC,  -- invoice total in USD (use this for revenue)
+    currency TEXT,
+    company TEXT,               -- references companies._id
+    invoice_date TEXT,          -- invoice date (TEXT, cast ::timestamptz)
+    due_date TEXT,              -- payment due date (TEXT, cast ::timestamptz)
+    payment_date TEXT,
+    deleted BOOLEAN,
+    createdBy TEXT,             -- references users._id
+    createdAt TEXT
+);
+-- Revenue = SUM(grandtotal_in_usd) WHERE payment_status='paid' AND NOT deleted
+-- Overdue  = WHERE due_date::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')
+
+CREATE TABLE "sales" (
+    _id TEXT PRIMARY KEY,
+    sales_number TEXT,          -- e.g. 'S000080'
+    status TEXT,                -- 'Confirm','Draft','Cancel'
+    salesOwner TEXT,            -- references users._id
+    company TEXT,               -- references companies._id
+    grand_total NUMERIC,
+    grand_total_in_usd NUMERIC, -- use this for revenue calculations
+    currency TEXT,
+    sales_date TEXT,            -- TEXT, cast ::timestamptz for date filtering
+    deleted BOOLEAN,
+    createdAt TEXT
+);
+-- Confirmed sales revenue = SUM(grand_total_in_usd) WHERE status='Confirm' AND NOT deleted
+
+CREATE TABLE "companies" (
+    _id TEXT PRIMARY KEY,
+    industry TEXT,      -- (lowercase — use directly)
+    email TEXT,
+    country TEXT,
+    source TEXT,
+    deleted BOOLEAN,    -- WHERE NOT deleted
+    -- MIXED-CASE — use document->>'fieldName':
+    -- document->>'companyName'    company display name
+    -- document->>'lifecycleStage' 'Lead','Customer','Partner','Inactive Customer','Dead Customer'
+    -- document->>'leadStatus'
+    -- document->>'companyOwner'   references users._id
+    -- document->>'createdAt'
+    document JSONB
+);
+-- ✓ Company name:    document->>'companyName'
+-- ✓ Active companies: WHERE document->>'lifecycleStage' NOT IN ('Inactive Customer','Dead Customer') AND NOT deleted
+
+CREATE TABLE "contacts" (
+    _id TEXT PRIMARY KEY,
+    email TEXT,
+    company TEXT,           -- references companies._id
+    deleted BOOLEAN,
+    -- MIXED-CASE — use document->>'fieldName':
+    -- document->>'firstName', document->>'lastName'
+    -- document->>'jobTitle', document->>'phoneNumber'
+    -- document->>'lifecycleStage', document->>'leadStatus'
+    -- document->>'contactOwner'   references users._id
+    document JSONB
+);
+-- ✓ Full name: document->>'firstName' || ' ' || document->>'lastName'
+
+CREATE TABLE "users" (
+    _id TEXT PRIMARY KEY,
+    name TEXT,                  -- full name
+    email TEXT,
+    department TEXT,            -- references departments._id
+    "isActive" BOOLEAN,
+    "isAdmin" BOOLEAN,
+    "createdAt" TEXT
+);
+
+CREATE TABLE "createtasks" (    -- NOTE: table name is 'createtasks' NOT 'tasks'
+    _id TEXT PRIMARY KEY,
+    "Task" TEXT,                -- task title (capital T)
+    status TEXT,                -- 'Pending','Completed','Open'
+    priority TEXT,              -- 'Low','Medium','High'
+    "createdBy" TEXT,           -- references users._id (task owner/assignee)
+    due_date TEXT,              -- TEXT, cast ::timestamptz for date filtering
+    company TEXT,               -- references companies._id
+    deleted BOOLEAN,
+    "createdAt" TEXT
+);
+-- Pending tasks: WHERE status='Pending' AND NOT deleted
+-- Overdue tasks: WHERE due_date::timestamptz < NOW() AND status!='Completed' AND NOT deleted
+
+CREATE TABLE "targets" (
+    _id TEXT PRIMARY KEY,
+    "userId" TEXT,              -- references users._id
+    "targetInUSD" NUMERIC,      -- monthly target in USD
+    month NUMERIC,              -- 1-12
+    year NUMERIC,               -- e.g. 2025
+    "teamName" TEXT,
+    "createdAt" TEXT
+);
+
+CREATE TABLE "meetings" (
+    _id TEXT PRIMARY KEY,
+    title TEXT,
+    description TEXT,
+    start TEXT,                 -- meeting start datetime (TEXT, cast ::timestamptz)
+    "end" TEXT,                 -- meeting end datetime
+    location TEXT,
+    "createdBy" TEXT,           -- references users._id
+    "createdAt" TEXT
+);
+-- Meetings today: WHERE start::timestamptz::date = CURRENT_DATE
+-- Meetings for date: WHERE start::timestamptz::date = '2026-05-14'::date
+
+CREATE TABLE "outreaches" (
+    _id TEXT PRIMARY KEY,
+    name TEXT,
+    email TEXT,
+    status TEXT,                -- 'New','Contacted','Interested','Converted to Deal'
+    "leadStatus" TEXT,
+    campaign TEXT,              -- references campaigns._id
+    "assignedTo" TEXT,          -- references users._id
+    "isDeleted" BOOLEAN,        -- NOTE: isDeleted not deleted!
+    "createdAt" TEXT
+);
+-- Filter: WHERE NOT "isDeleted"
+
+CREATE TABLE "departments" (
+    _id TEXT PRIMARY KEY,
+    name TEXT
+);
+
+CREATE TABLE "regions" (
+    _id TEXT PRIMARY KEY,
+    "regionName" TEXT
+);
+
+CREATE TABLE "products" (
+    _id TEXT PRIMARY KEY,
+    name TEXT,
+    "isActive" BOOLEAN
+);
+
+-- ── KEY JOIN PATTERNS ────────────────────────────────────────────────────────
+-- Deals with owner name:
+--   FROM deals d LEFT JOIN users u ON u._id = d.owner
+-- Invoices with company name:
+--   FROM invoices i LEFT JOIN companies c ON c._id = i.company
+-- Tasks with user name:
+--   FROM createtasks t LEFT JOIN users u ON u._id = t."createdBy"
+-- Targets with user name:
+--   FROM targets t LEFT JOIN users u ON u._id = t."userId"
+-- Sales with user name:
+--   FROM sales s LEFT JOIN users u ON u._id = s."salesOwner"
+-- Companies with region:
+--   FROM companies c LEFT JOIN regions r ON r._id = c.region
+-- Users with department:
+--   FROM users u LEFT JOIN departments d ON d._id = u.department
+"""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OLLAMA CALLER  (uses /api/chat so each model applies its own template)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _call_ollama_chat(
     model: str,
+    system_msg: str,
+    user_msg: str,
     timeout: int,
+    max_tokens: int = 600,
 ) -> Optional[str]:
-    """Send prompt to Ollama and return raw response string.
+    """Call Ollama /api/chat endpoint with system + user messages.
 
-    Args:
-        prompt:  Full prompt text (schema + question)
-        model:   Ollama model name
-        timeout: Request timeout in seconds
-
-    Returns:
-        Raw model response string, or None on any failure
+    Using the chat endpoint ensures each model applies its correct prompt
+    template (Qwen ChatML, Arctic instruct format, etc.) rather than raw text.
     """
     payload = {
-        "model":   model,
-        "prompt":  prompt,
+        "model":    model,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user",   "content": user_msg},
+        ],
         "stream":  False,
         "options": {
             "temperature": 0,
-            "num_predict": 500,
-            "stop": [
-                "Question:", "Explanation:", "Note:",
-                "\n\n\n", "```\n\n", "Here is",
-            ],
+            "num_predict": max_tokens,
+            "stop": ["Question:", "\n\n\n", "```\n\n"],
         },
     }
     try:
         req = urllib.request.Request(
-            f"{settings.ollama_base_url}/api/generate",
+            f"{settings.ollama_base_url}/api/chat",
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read())
-            result = data.get("response", "").strip()
+            data   = json.loads(resp.read())
+            result = data.get("message", {}).get("content", "").strip()
             if result:
                 LOGGER.debug("Ollama [%s] responded (%d chars)", model, len(result))
             return result or None
     except Exception as exc:
-        LOGGER.debug("Ollama [%s] error: %s", model, exc)
+        LOGGER.debug("Ollama [%s] chat error: %s", model, exc)
         return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PROMPT BUILDING
+# PROMPT BUILDING  (model-specific)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _build_prompt(query: str, schema: str, retry_hint: str = "") -> str:
-    """Build Text2SQL prompt with schema context.
+_SYSTEM_SQL_EXPERT = """You are an expert PostgreSQL SQL generator for a CRM database.
+Given a schema and a question, generate ONE correct SELECT SQL query.
 
-    Args:
-        query:      User's natural language question
-        schema:     Schema context from build_text2sql_schema()
-        retry_hint: Optional hint for retry (e.g., previous error)
-    """
-    hint_block = f"\nIMPORTANT: {retry_hint}\n" if retry_hint else ""
+STRICT OUTPUT RULES:
+1. Output ONLY the SQL — no explanation, no markdown, no text before or after.
+2. Start directly with SELECT.
+3. Table names in double-quotes: FROM "deals", FROM "createtasks"
+4. JOIN key is always _id: LEFT JOIN "users" u ON u._id = d.owner
 
-    return (
-        f"{schema}\n\n"
-        f"{hint_block}"
+CRITICAL — MIXED-CASE COLUMNS:
+  Many columns have mixed case (dealWonAt, companyName, firstName, etc.).
+  ALWAYS use document->>'fieldName' (JSONB) for these — it is case-safe.
+  NEVER use bare column names for mixed-case fields without double-quoting.
+  Examples:
+    ✓ document->>'dealWonAt'     (JSONB — always works)
+    ✓ "dealWonAt"                (quoted flat — also works)
+    ✗ dealWonAt                  (unquoted — PostgreSQL lowercases it, FAILS)
+
+SOFT DELETE:
+  Most tables: WHERE NOT deleted          (deleted is BOOLEAN)
+  outreaches:  WHERE NOT "isDeleted"      (isDeleted is BOOLEAN)
+
+DATE FILTERING:
+  Date columns are TEXT — cast when comparing:
+    WHERE due_date::timestamptz < NOW()
+    WHERE start::timestamptz::date = CURRENT_DATE
+    WHERE invoice_date::timestamptz >= date_trunc('month', NOW())
+
+NUMERIC COLUMNS (no casting needed — already numeric):
+  grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, "targetInUSD"
+
+OPEN/WON/LOST DEALS — use JSONB (avoids mixed-case quoting):
+  Open:  document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL
+  Won:   document->>'dealWonAt' IS NOT NULL
+  Lost:  document->>'dealLostAt' IS NOT NULL
+
+TASKS TABLE:
+  Table name:    "createtasks"   (NOT "tasks")
+  Title column:  document->>'Task'   (capital T — use JSONB to avoid case issues)
+  Assignee:      document->>'createdBy' = users._id
+
+SELECT COLUMNS — always include a human-readable name first:
+  deals:       d.name, d.stage, d.grand_total_in_usd
+  invoices:    i.invoice_number, i.payment_status, i.grandtotal_in_usd
+  companies:   document->>'companyName' (JSONB — mixed case)
+  contacts:    document->>'firstName', document->>'lastName' (JSONB — mixed case)
+  users:       u.name, u.email
+  createtasks: document->>'Task', t.status, t.priority
+
+ONLY generate SELECT. Never UPDATE, DELETE, INSERT, DROP, CREATE."""
+
+
+def _build_primary_prompt(query: str) -> Tuple[str, str]:
+    """Prompt for Qwen2.5-Coder 3B fine-tuned (fast, direct SQL generation)."""
+    user_msg = (
+        f"Database Schema:\n{_CREATE_TABLE_SCHEMA}\n\n"
         f"Question: {query}\n\n"
-        "Write ONLY the SQL query. No explanation, no markdown, no text before or after.\n"
-        "Rules:\n"
-        "- Use document->>'fieldName' for ALL field access\n"
-        "- Use NULLIF(document->>'field','')::numeric for numbers\n"
-        "- Use NULLIF(document->>'field','')::timestamptz for dates\n"
-        "- Use table names in double quotes: FROM \"tableName\"\n"
-        "- Add COALESCE(document->>'deleted','false')!='true' to filter deleted records\n"
-        "- Use ILIKE for text matching\n"
-        "- Output ONLY a SELECT statement\n\n"
-        "SQL:"
+        "Write ONLY the SQL query:"
     )
+    return _SYSTEM_SQL_EXPERT, user_msg
 
 
-def _build_retry_prompt(
-    query: str,
-    schema: str,
-    prev_sql: str,
-    error: str,
-) -> str:
-    """Build a refined prompt for retry after first attempt failed."""
-    return (
-        f"{schema}\n\n"
-        f"Question: {query}\n\n"
-        f"Previous SQL attempt (FAILED):\n{prev_sql}\n\n"
-        f"Error: {error}\n\n"
-        "Fix the SQL. Output ONLY the corrected SELECT statement. "
-        "Remember: use document->>'field' for all field access.\n\n"
-        "SQL:"
+def _build_fallback_prompt(query: str, prev_sql: str = "", error: str = "") -> Tuple[str, str]:
+    """Prompt for Arctic-Text2SQL-R1-7B (accurate, with reasoning context)."""
+    system = (
+        _SYSTEM_SQL_EXPERT
+        + "\n\nThink carefully about the correct table names, JOIN keys, and filters. "
+        "The primary key is always _id. Use it for all JOINs."
     )
+    if prev_sql and error:
+        user_msg = (
+            f"Database Schema:\n{_CREATE_TABLE_SCHEMA}\n\n"
+            f"Question: {query}\n\n"
+            f"Previous SQL attempt failed:\n{prev_sql}\n"
+            f"Error: {error}\n\n"
+            "Fix the SQL and write ONLY the corrected query:"
+        )
+    else:
+        user_msg = (
+            f"Database Schema:\n{_CREATE_TABLE_SCHEMA}\n\n"
+            f"Question: {query}\n\n"
+            "Write ONLY the SQL query:"
+        )
+    return system, user_msg
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -156,38 +398,27 @@ def _build_retry_prompt(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _extract_sql(raw: str) -> Optional[str]:
-    """Extract a clean SELECT statement from model output.
-
-    Handles: ```sql``` blocks, <execute> blocks, bare SELECT, and mixed output.
-    """
+    """Extract a clean SELECT statement from model output."""
     if not raw:
         return None
 
-    # Strip leading/trailing whitespace and common prefixes
     cleaned = raw.strip()
-    cleaned = re.sub(r"^(?:Here is|The SQL|SQL query|Answer:)\s*:?\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"^(?:Here is|The SQL|SQL query|Answer|Result)\s*:?\s*", "", cleaned, flags=re.I)
 
-    # ```sql ... ``` code blocks (prefer last one — models sometimes iterate)
-    code_blocks = re.findall(
-        r"```(?:sql|SQL|postgresql)?\s*(SELECT.+?)```",
-        cleaned, re.DOTALL,
-    )
+    # ```sql ... ``` code block
+    code_blocks = re.findall(r"```(?:sql|SQL|postgresql)?\s*(SELECT.+?)```", cleaned, re.DOTALL)
     if code_blocks:
-        sql = code_blocks[-1].strip()
-        return _clean_sql(sql)
+        return _clean_sql(code_blocks[-1])
 
-    # <execute>...</execute> blocks
-    exec_m = re.search(
-        r"<execute>\s*(SELECT.+?)(?:</execute>|```|$)",
-        cleaned, re.DOTALL | re.IGNORECASE,
-    )
+    # <execute>...</execute>
+    exec_m = re.search(r"<execute>\s*(SELECT.+?)(?:</execute>|```|$)", cleaned, re.DOTALL | re.I)
     if exec_m:
         return _clean_sql(exec_m.group(1))
 
     # Bare SELECT statement
     m = re.search(
         r"(SELECT\b.+?)(?:;|\n\n\n|Explanation:|Note:|Question:|$)",
-        cleaned, re.DOTALL | re.IGNORECASE,
+        cleaned, re.DOTALL | re.I,
     )
     if m:
         return _clean_sql(m.group(1))
@@ -196,60 +427,39 @@ def _extract_sql(raw: str) -> Optional[str]:
 
 
 def _clean_sql(sql: str) -> str:
-    """Normalize extracted SQL: strip semicolons, extra whitespace."""
+    """Normalise extracted SQL: strip semicolons, trailing comments, whitespace."""
     sql = sql.strip().rstrip(";").strip()
-    # Remove trailing incomplete lines
-    sql = re.sub(r"\n--.*$", "", sql)
-    # Collapse multiple spaces/newlines
+    sql = re.sub(r"\s*--[^\n]*$", "", sql, flags=re.MULTILINE)
     sql = re.sub(r"\s+", " ", sql).strip()
     return sql
 
 
 def _validate_sql(sql: str, table_names: Optional[List[str]] = None) -> Tuple[bool, str]:
-    """Validate SQL for JSONB correctness and safety.
+    """Validate SQL for safety and correctness.
 
-    Returns:
-        (is_valid, error_message) — error_message is empty if valid
+    Accepts BOTH:
+      • Direct column access:  SELECT name FROM "deals"
+      • JSONB document access: SELECT document->>'name' FROM "deals"
+    Both work because the DB has flat columns AND a populated document JSONB.
     """
-    if not sql:
-        return False, "empty SQL"
+    if not sql or len(sql) < 10:
+        return False, "empty or too short SQL"
 
-    sql_upper = sql.upper().strip()
-
-    # Must be a SELECT
-    if not sql_upper.startswith("SELECT"):
+    if not sql.upper().strip().startswith("SELECT"):
         return False, "not a SELECT statement"
 
     # Block destructive operations
-    if re.search(r"\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE|GRANT)\b", sql, re.I):
+    if re.search(r"\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE|GRANT|REVOKE|CREATE)\b", sql, re.I):
         return False, "destructive operation detected"
 
     # Wrong dialect functions
-    if re.search(r"\bDATE\(['\"]?now['\"]?\)", sql, re.I):
-        return False, "wrong dialect: DATE('now') — use NOW()"
-    if re.search(r"\bIFNULL\b|\bNVL\b|\bIF\(|\bDATEDIFF\b", sql, re.I):
-        return False, "wrong dialect: MySQL/Oracle function used"
-    if re.search(r"\bSTRFTIME\b|\bSQLITE\b", sql, re.I):
-        return False, "wrong dialect: SQLite function used"
+    if re.search(r"\bIFNULL\b|\bNVL\b|\bDATEDIFF\b|\bSTRFTIME\b", sql, re.I):
+        return False, "wrong SQL dialect (MySQL/SQLite function)"
 
-    # Bare column access (should use document->>)
-    bare_cols = re.findall(
-        r"\b[a-z]\.(owner|stage|name|company|email|status|currency|amount|"
-        r"createdAt|updatedAt|closeDate|invoice_number|grand_total|"
-        r"payment_status|due_date|dealWonAt|dealLostAt|"
-        r"firstName|lastName|companyName|phoneNumber)\b",
-        sql, re.I,
-    )
-    if bare_cols:
-        return False, f"bare column access (use document->>): {bare_cols[:3]}"
-
-    # Table name validation (if table list provided)
+    # Unknown table reference check
     if table_names:
-        used_tables = re.findall(
-            r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?',
-            sql, re.IGNORECASE,
-        )
-        unknown = [t for t in used_tables if t not in table_names]
+        used_tables = re.findall(r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?', sql, re.I)
+        unknown = [t for t in used_tables if t.lower() not in [x.lower() for x in table_names]]
         if unknown:
             return False, f"unknown tables: {unknown}"
 
@@ -257,87 +467,34 @@ def _validate_sql(sql: str, table_names: Optional[List[str]] = None) -> Tuple[bo
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SQL COLUMN HEADER EXTRACTION
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _extract_column_headers(sql: str) -> List[str]:
-    """Extract column aliases from SQL SELECT clause for table rendering.
-
-    Parses: SELECT ... AS alias patterns and document->>'field' patterns.
-    """
-    # Get the SELECT clause (between SELECT and FROM)
-    select_m = re.search(r"SELECT\s+(.+?)\s+FROM\b", sql, re.DOTALL | re.IGNORECASE)
-    if not select_m:
-        return []
-
-    select_clause = select_m.group(1)
-    headers = []
-
-    # Split by top-level commas (not inside parentheses)
-    depth = 0
-    current = ""
-    for ch in select_clause:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-        elif ch == "," and depth == 0:
-            headers.append(current.strip())
-            current = ""
-            continue
-        current += ch
-    if current.strip():
-        headers.append(current.strip())
-
-    # Extract alias from each column expression
-    clean_headers = []
-    for expr in headers:
-        # Explicit AS alias
-        as_m = re.search(r"\bAS\s+\"?(\w+)\"?\s*$", expr, re.I)
-        if as_m:
-            clean_headers.append(as_m.group(1))
-            continue
-        # document->>'field' without alias
-        doc_m = re.search(r"document->>'(\w+)'\s*$", expr)
-        if doc_m:
-            clean_headers.append(doc_m.group(1))
-            continue
-        # COUNT/SUM/AVG etc.
-        agg_m = re.search(r"^(COUNT|SUM|AVG|MIN|MAX)\s*\(", expr, re.I)
-        if agg_m:
-            clean_headers.append(agg_m.group(1).lower())
-            continue
-        # Fallback
-        clean_headers.append(expr[:20].strip())
-
-    return clean_headers
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # PARALLEL SQL GENERATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _generate_with_model(
-    prompt: str,
-    model: str,
-    timeout: int,
+def _run_model(
+    model:       str,
+    system_msg:  str,
+    user_msg:    str,
+    timeout:     int,
     table_names: List[str],
+    label:       str,
 ) -> Optional[str]:
-    """Generate and validate SQL with a single model. Used as thread target."""
-    raw = _call_ollama(prompt, model, timeout)
+    """Generate + validate SQL with one model. Returns valid SQL or None."""
+    raw = _call_ollama_chat(model, system_msg, user_msg, timeout)
     if not raw:
+        LOGGER.debug("[%s] no response from Ollama", label)
         return None
 
     sql = _extract_sql(raw)
     if not sql:
-        LOGGER.debug("[%s] no SQL extracted from output", model)
+        LOGGER.debug("[%s] could not extract SQL from: %.100s", label, raw)
         return None
 
-    is_valid, err = _validate_sql(sql, table_names)
-    if not is_valid:
-        LOGGER.debug("[%s] SQL validation failed: %s | SQL: %.80s", model, err, sql)
+    ok, err = _validate_sql(sql, table_names)
+    if not ok:
+        LOGGER.debug("[%s] SQL validation failed: %s | SQL: %.80s", label, err, sql)
         return None
 
+    LOGGER.debug("[%s] valid SQL (%d chars): %.80s", label, len(sql), sql)
     return sql
 
 
@@ -345,47 +502,43 @@ def generate_sql(query: str, agent) -> Optional[str]:
     """Generate SQL for a query using parallel primary + fallback models.
 
     Strategy:
-      1. Fire both models in parallel (ThreadPoolExecutor)
-      2. Return the first valid SQL (primary model preferred if both succeed fast)
-      3. If both fail, retry once with refined prompt using primary model
-      4. Return None if all attempts fail
+      1. Fire PRIMARY (Qwen 3B) + FALLBACK (Arctic 7B) in parallel
+      2. Return the first valid SQL — prefer primary if both finish close together
+      3. If both fail → retry with FALLBACK model alone (more thorough)
 
-    Args:
-        query: Natural language question
-        agent: DB agent for schema access
-
-    Returns:
-        Validated SQL string, or None
+    Returns validated SQL string, or None if all attempts fail.
     """
-    schema      = build_text2sql_schema(agent)
-    prompt      = _build_prompt(query, schema)
     table_names = get_table_names(agent)
 
-    # ── Parallel execution: both models simultaneously ─────────────────────
+    primary_sys,  primary_user  = _build_primary_prompt(query)
+    fallback_sys, fallback_user = _build_fallback_prompt(query)
+
+    # ── Parallel execution ────────────────────────────────────────────────────
     with Timer("text2sql_parallel") as timer:
-        valid_sql: Optional[str] = None
-        primary_sql: Optional[str] = None
+        primary_sql:  Optional[str] = None
         fallback_sql: Optional[str] = None
 
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="t2s") as pool:
-            future_primary = pool.submit(
-                _generate_with_model, prompt,
+            f_primary = pool.submit(
+                _run_model,
                 settings.ollama_primary_model,
+                primary_sys,
+                primary_user,
                 settings.ollama_primary_timeout,
                 table_names,
+                "primary(Qwen3B)",
             )
-            future_fallback = pool.submit(
-                _generate_with_model, prompt,
+            f_fallback = pool.submit(
+                _run_model,
                 settings.ollama_fallback_model,
+                fallback_sys,
+                fallback_user,
                 settings.ollama_fallback_timeout,
                 table_names,
+                "fallback(Arctic7B)",
             )
 
-            futures = {
-                future_primary:  "primary",
-                future_fallback: "fallback",
-            }
-
+            futures = {f_primary: "primary", f_fallback: "fallback"}
             for future in as_completed(futures, timeout=_PARALLEL_TIMEOUT_S):
                 label = futures[future]
                 try:
@@ -395,49 +548,53 @@ def generate_sql(query: str, agent) -> Optional[str]:
                             primary_sql = sql
                         else:
                             fallback_sql = sql
-                        # First valid result — accept it immediately
-                        if valid_sql is None:
-                            valid_sql = sql
-                            LOGGER.info(
-                                "Text2SQL: %s model won (%.0fms): %.80s",
-                                label, timer.elapsed_ms, sql,
-                            )
+                        LOGGER.info(
+                            "Text2SQL: %s model produced SQL (%.0fms): %.80s",
+                            label, timer.elapsed_ms, sql,
+                        )
                 except Exception as exc:
                     LOGGER.debug("Text2SQL %s future error: %s", label, exc)
 
-    # Prefer primary model's output if both succeeded
-    if primary_sql:
-        valid_sql = primary_sql
-    elif fallback_sql:
-        valid_sql = fallback_sql
+    # Prefer primary if both succeeded; otherwise use whichever worked
+    best_sql = primary_sql or fallback_sql
+    if best_sql:
+        LOGGER.info("Text2SQL parallel: selected %s SQL", "primary" if primary_sql else "fallback")
+        return best_sql
 
-    if valid_sql:
-        LOGGER.info("Text2SQL generated: %.100s", valid_sql)
-        return valid_sql
-
-    # ── Retry with refined prompt (primary model only) ─────────────────────
-    LOGGER.debug("Text2SQL: parallel failed, attempting retry with refined prompt")
-    raw = _call_ollama(prompt, settings.ollama_primary_model, settings.ollama_primary_timeout)
-    if raw:
-        sql = _extract_sql(raw)
-        if sql:
-            is_valid, err = _validate_sql(sql, table_names)
-            if not is_valid and _MAX_SQL_RETRIES > 0:
-                retry_prompt = _build_retry_prompt(query, schema, sql, err)
-                raw2 = _call_ollama(
-                    retry_prompt,
-                    settings.ollama_primary_model,
-                    settings.ollama_primary_timeout,
-                )
-                if raw2:
-                    sql2 = _extract_sql(raw2)
-                    if sql2:
-                        ok, _ = _validate_sql(sql2, table_names)
-                        if ok:
-                            LOGGER.info("Text2SQL retry success: %.80s", sql2)
-                            return sql2
-            elif is_valid:
-                return sql
+    # ── Retry with fallback model (more powerful, more time) ─────────────────
+    LOGGER.info("Text2SQL parallel both failed → retry with Arctic-7B fallback")
+    retry_sys, retry_user = _build_fallback_prompt(query)
+    retry_raw = _call_ollama_chat(
+        settings.ollama_fallback_model,
+        retry_sys,
+        retry_user,
+        timeout=settings.ollama_fallback_timeout,
+        max_tokens=800,
+    )
+    if retry_raw:
+        retry_sql = _extract_sql(retry_raw)
+        if retry_sql:
+            ok, err = _validate_sql(retry_sql, table_names)
+            if ok:
+                LOGGER.info("Text2SQL retry success: %.80s", retry_sql)
+                return retry_sql
+            # One more attempt with error feedback
+            LOGGER.debug("Text2SQL retry SQL invalid (%s) — trying with error hint", err)
+            fix_sys, fix_user = _build_fallback_prompt(query, retry_sql, err)
+            fix_raw = _call_ollama_chat(
+                settings.ollama_fallback_model,
+                fix_sys,
+                fix_user,
+                timeout=settings.ollama_fallback_timeout,
+                max_tokens=800,
+            )
+            if fix_raw:
+                fix_sql = _extract_sql(fix_raw)
+                if fix_sql:
+                    ok2, _ = _validate_sql(fix_sql, table_names)
+                    if ok2:
+                        LOGGER.info("Text2SQL fix-retry success: %.80s", fix_sql)
+                        return fix_sql
 
     LOGGER.warning("Text2SQL: all attempts failed for query: %.60s", query)
     return None
@@ -448,7 +605,7 @@ def generate_sql(query: str, agent) -> Optional[str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _extract_tables_from_sql(sql: str) -> List[str]:
-    """Extract table names used in a SQL query."""
+    """Extract table names referenced in a SQL query."""
     return sorted({
         m for m in re.findall(
             r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?',
@@ -457,54 +614,87 @@ def _extract_tables_from_sql(sql: str) -> List[str]:
     })
 
 
-def _format_result(rows: List[Any], sql: str, query: str) -> str:
-    """Format SQL result rows into user-friendly output.
+def _extract_column_headers(sql: str) -> List[str]:
+    """Extract column aliases or names from the SELECT clause."""
+    select_m = re.search(r"SELECT\s+(.+?)\s+FROM\b", sql, re.DOTALL | re.I)
+    if not select_m:
+        return []
 
-    Handles:
-      • Empty results
-      • Single scalar values (count, sum, etc.)
-      • Single row results
-      • Multi-row tables with extracted column headers
-    """
+    select_clause = select_m.group(1)
+    headers: List[str] = []
+
+    # Split by top-level commas
+    depth, current = 0, ""
+    for ch in select_clause:
+        if ch == "(":   depth += 1
+        elif ch == ")": depth -= 1
+        elif ch == "," and depth == 0:
+            headers.append(current.strip())
+            current = ""
+            continue
+        current += ch
+    if current.strip():
+        headers.append(current.strip())
+
+    result = []
+    for expr in headers:
+        as_m = re.search(r"\bAS\s+\"?(\w+)\"?\s*$", expr, re.I)
+        if as_m:
+            result.append(as_m.group(1))
+            continue
+        doc_m = re.search(r"document->>'(\w+)'\s*$", expr)
+        if doc_m:
+            result.append(doc_m.group(1))
+            continue
+        agg_m = re.search(r"^(COUNT|SUM|AVG|MIN|MAX)\s*\(", expr, re.I)
+        if agg_m:
+            result.append(agg_m.group(1).lower())
+            continue
+        # bare column or table.column
+        bare = re.search(r'(?:\w+\.)?"?(\w+)"?\s*$', expr)
+        if bare:
+            result.append(bare.group(1))
+            continue
+        result.append(expr[:20].strip())
+
+    return result
+
+
+def _format_result(rows: List[Any], sql: str, query: str) -> str:
+    """Format SQL result rows into user-friendly output."""
     if not rows:
         return "No data found for this query."
 
-    # All-null check
     first = rows[0]
-    if isinstance(first, (list, tuple)):
-        if len(rows) == 1 and all(v is None for v in first):
-            return "No data found for this query."
-    elif first is None:
+    if isinstance(first, (list, tuple)) and len(rows) == 1 and all(v is None for v in first):
+        return "No data found for this query."
+    if first is None:
         return "No data found for this query."
 
     # Single scalar value
     if len(rows) == 1 and not isinstance(first, (list, tuple)):
-        return f"Result: **{fmt_number(first)}**"
+        return f"**{fmt_number(first)}**"
 
-    # Single row with single column
     if len(rows) == 1 and isinstance(first, (list, tuple)) and len(first) == 1:
         val = first[0]
-        n = coerce_number(val)
+        n   = coerce_number(val)
         if isinstance(n, (int, float)):
-            return f"Result: **{fmt_number(n)}**"
-        return f"Result: **{val}**"
+            return f"**{fmt_number(n)}**"
+        return f"**{val}**"
 
-    # Extract column headers from SQL
-    headers = _extract_column_headers(sql)
-
-    # Limit rows
+    headers      = _extract_column_headers(sql)
     display_rows = rows[:_MAX_RESULT_ROWS]
 
-    # Multi-row result → markdown table
     table = format_rows_as_markdown_table(
         display_rows,
-        headers=headers if headers else None,
+        headers=headers or None,
         max_rows=_MAX_RESULT_ROWS,
         show_overflow=len(rows) > _MAX_RESULT_ROWS,
     )
 
-    count_str = f"**{len(rows)}**" if len(rows) <= _MAX_RESULT_ROWS else (
-        f"**{_MAX_RESULT_ROWS}** of **{len(rows)}**"
+    count_str = (
+        f"**{len(rows)}**" if len(rows) <= _MAX_RESULT_ROWS
+        else f"**{_MAX_RESULT_ROWS}** of **{len(rows)}**"
     )
     return f"Found {count_str} result(s):\n\n{table}"
 
@@ -516,25 +706,17 @@ def _format_result(rows: List[Any], sql: str, query: str) -> str:
 def run(query: str, agent) -> Optional[Dict[str, Any]]:
     """Generate SQL → execute → return formatted result dict.
 
-    Used for SIMPLE queries that fast-path missed.
-
-    Args:
-        query: Natural language question
-        agent: DB agent with SQL execution tools
-
-    Returns:
-        Result dict: {answer, tables_used, confidence, sql_queries}
-        None if SQL generation failed entirely.
+    Returns result dict {answer, tables_used, confidence, sql_queries}
+    or None if SQL generation failed entirely.
     """
     with Timer("text2sql_total") as timer:
-        LOGGER.info("Text2SQL: processing query: %.60s", query)
+        LOGGER.info("Text2SQL: processing: %.60s", query)
 
         sql = generate_sql(query, agent)
         if not sql:
-            LOGGER.warning("Text2SQL: no valid SQL for: %.60s", query)
+            LOGGER.warning("Text2SQL: no valid SQL generated for: %.60s", query)
             return None
 
-        # Execute the SQL
         _res = run_sql(agent, sql)
         if _res.error:
             LOGGER.warning("Text2SQL exec failed: %s | SQL: %.80s", _res.error, sql)
@@ -544,18 +726,15 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
         tables_used = _extract_tables_from_sql(sql)
         body        = _format_result(rows, sql, query)
 
-        # Confidence scoring
         confidence = 0.90
         if not rows or "No data found" in body:
             confidence = 0.70
         elif len(rows) == 1:
             confidence = 0.92
-        elif len(rows) > 5:
-            confidence = 0.88
 
     LOGGER.info(
-        "Text2SQL: done in %.0fms | rows=%d | tables=%s",
-        timer.elapsed_ms, len(rows) if rows else 0, tables_used,
+        "Text2SQL: done %.0fms | rows=%d | tables=%s | sql=%.80s",
+        timer.elapsed_ms, len(rows) if rows else 0, tables_used, sql,
     )
 
     return {

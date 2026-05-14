@@ -60,9 +60,9 @@ def _build_synthesis_prompt(
     """
 
     # Format sub-results as structured data blocks.
-    # Each answer is capped at 600 chars to prevent the combined prompt from
-    # exceeding Groq / Gemini token limits on large table results.
-    _MAX_ANSWER_CHARS = 600
+    # Each answer is capped at 1500 chars so the synthesizer sees enough detail
+    # while still staying within Groq / Gemini context limits.
+    _MAX_ANSWER_CHARS = 1500
     data_blocks = []
     for i, item in enumerate(sub_results, 1):
         sq     = item.get("sub_query", "Unknown")
