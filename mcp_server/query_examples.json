@@ -1,0 +1,247 @@
+[
+  {
+    "natural_query": "test query 1778841896",
+    "sql": "SELECT COUNT(*) FROM \"deals\" WHERE NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:44:56.709269"
+  },
+  {
+    "natural_query": "test save query 1778842003",
+    "sql": "SELECT COUNT(*) FROM \"deals\"",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:46:43.913912"
+  },
+  {
+    "natural_query": "how many deals are there",
+    "sql": "SELECT COUNT(*) AS c FROM \"deals\" WHERE NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:50:22.453492"
+  },
+  {
+    "natural_query": "sales leaderboard all reps",
+    "sql": "SELECT u.name FROM \"users\" u WHERE u.\"isActive\"=true",
+    "tables": [
+      "users",
+      "deals",
+      "sales"
+    ],
+    "saved_at": "2026-05-15T10:50:25.885951"
+  },
+  {
+    "natural_query": "target vs achieved all reps",
+    "sql": "SELECT u.name, t.\"targetInUSD\" FROM \"targets\" t LEFT JOIN \"users\" u ON u._id=t.\"userId\"",
+    "tables": [
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-15T10:50:25.886487"
+  },
+  {
+    "natural_query": "pipeline value by stage",
+    "sql": "SELECT stage, COUNT(*), SUM(grand_total_in_usd) FROM \"deals\" WHERE NOT deleted GROUP BY stage",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:50:25.886791"
+  },
+  {
+    "natural_query": "How many departments",
+    "sql": "SELECT COUNT(*) AS department_count FROM \"departments\"",
+    "tables": [
+      "departments"
+    ],
+    "saved_at": "2026-05-15T10:54:57.157437"
+  },
+  {
+    "natural_query": "Give me names of departments",
+    "sql": "SELECT name FROM \"departments\"",
+    "tables": [
+      "departments"
+    ],
+    "saved_at": "2026-05-15T10:55:02.743088"
+  },
+  {
+    "natural_query": "Give me who have pending task?",
+    "sql": "SELECT u._id, u.name \nFROM \"users\" u \nLEFT JOIN \"createtasks\" t ON t.\"createdBy\" = u._id \nWHERE t.status = 'Pending' AND NOT t.deleted \nGROUP BY u._id, u.name",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-15T10:55:03.576391"
+  },
+  {
+    "natural_query": "Share kartik's task status",
+    "sql": "SELECT t.\"Task\", t.status \nFROM \"createtasks\" t \nLEFT JOIN \"users\" u ON u._id = t.\"createdBy\" \nWHERE u.name = 'kartik' AND NOT t.deleted",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-15T10:55:04.292181"
+  },
+  {
+    "natural_query": "Share me yesh bhide pending task list",
+    "sql": "SELECT t.\"Task\", t.status, t.priority, t.due_date, u.name AS created_by \nFROM \"createtasks\" t \nLEFT JOIN \"users\" u ON u._id = t.\"createdBy\" \nWHERE t.status = 'Pending' AND u.name = 'Yesh Bhide' AND NOT t.deleted ORDER BY t.due_date ASC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-15T10:55:05.023149"
+  },
+  {
+    "natural_query": "Give me deals with categories",
+    "sql": "SELECT \n  d._id, \n  d.name, \n  d.stage, \n  d.grand_total_in_usd, \n  c.\"categoryName\"\nFROM \"deals\" d \nLEFT JOIN \"categories\" c ON c._id = d.type \nWHERE NOT d.deleted \nORDER BY d.grand_total_in_usd DESC NULLS LAST",
+    "tables": [
+      "categories",
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:55:05.920055"
+  },
+  {
+    "natural_query": "Share me deals with stages",
+    "sql": "SELECT \n  d.stage, \n  COUNT(d._id) AS deal_count \nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \nGROUP BY \n  d.stage \nORDER BY \n  deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:55:06.605594"
+  },
+  {
+    "natural_query": "Give me all deals with year wise stages status count",
+    "sql": "SELECT \n  EXTRACT(YEAR FROM NULLIF(d.\"closeDate\",'')::timestamptz) AS deal_year,\n  d.stage,\n  COUNT(d._id) AS deal_count\nFROM \n  \"deals\" d\nWHERE \n  NOT d.deleted\nGROUP BY \n  EXTRACT(YEAR FROM NULLIF(d.\"closeDate\",'')::timestamptz),\n  d.stage\nORDER BY \n  deal_year,\n  deal_count DESC",
+    "tables": [
+      "NULLIF",
+      "deals"
+    ],
+    "saved_at": "2026-05-15T10:55:07.426137"
+  },
+  {
+    "natural_query": "Share me revenue of september 2027",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = 2027 \n  AND EXTRACT(MONTH FROM NULLIF(i.payment_date,'')::timestamptz) = 9",
+    "tables": [
+      "NULLIF",
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T10:55:08.357427"
+  },
+  {
+    "natural_query": "Share me revenue of march 2025",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = 2025 \n  AND EXTRACT(MONTH FROM NULLIF(i.payment_date,'')::timestamptz) = 3",
+    "tables": [
+      "NULLIF",
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T10:55:09.095033"
+  },
+  {
+    "natural_query": "List new leads from this week",
+    "sql": "SELECT \n  d._id, \n  d.name, \n  d.stage, \n  d.grand_total_in_usd, \n  c.\"companyName\", \n  u.name AS owner_name\nFROM \n  \"deals\" d\n  LEFT JOIN \"companies\" c ON c._id = d.company \n  LEFT JOIN \"users\" u ON u._id = d.owner\nWHERE \n  d.stage = 'Analysis - To be Quoted' \n  AND d.type = 'New Business' \n  AND NOT d.deleted \n  AND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND EXTRACT(WEEK FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(WEEK FROM CURRENT_DATE)",
+    "tables": [
+      "companies",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-15T11:01:52.774891"
+  },
+  {
+    "natural_query": "New leads this month",
+    "sql": "SELECT \n  COUNT(d._id) AS new_leads \nFROM \n  \"deals\" d \nWHERE \n  d.stage = 'Analysis - To be Quoted' \n  AND d.type = 'New Business' \n  AND NOT d.deleted \n  AND EXTRACT(MONTH FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T11:01:58.595099"
+  },
+  {
+    "natural_query": "Last 5 contacts details",
+    "sql": "SELECT \n  c._id,\n  c.\"firstName\",\n  c.\"lastName\",\n  c.email,\n  c.\"jobTitle\",\n  c.\"phoneNumber\",\n  c.\"lifecycleStage\",\n  c.\"leadStatus\"\nFROM \"contacts\" c \nWHERE NOT deleted \n  AND c.\"lifecycleStage\" = 'Lead' \n  AND c.\"leadStatus\" = 'New'\nORDER BY c._id DESC \nLIMIT 5",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-15T11:01:59.406255"
+  },
+  {
+    "natural_query": "Show me the total sales for last month",
+    "sql": "SELECT COALESCE(SUM(s.grand_total_in_usd), 0) AS total_sales \nFROM \"sales\" s \nWHERE s.status = 'Confirm' AND NOT s.deleted \n  AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) - 1 \n  OR (EXTRACT(MONTH FROM CURRENT_DATE) = 1 AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = 12 \n      AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) - 1)",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-15T11:02:00.624111"
+  },
+  {
+    "natural_query": "Total revenue this financial year",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:02:01.718574"
+  },
+  {
+    "natural_query": "Total revenue generated in 2025",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \nAND NOT i.deleted \nAND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = 2025",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:02:02.678888"
+  },
+  {
+    "natural_query": "Total revenue of 2025 for Lead",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = 2025",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:02:05.188959"
+  },
+  {
+    "natural_query": "Pending invoices",
+    "sql": "SELECT \n  i.invoice_number, \n  i.grandtotal_in_usd, \n  c.\"companyName\", \n  i.invoice_date, \n  i.due_date \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE i.payment_status IN ('draft', 'pending', 'partial_payment') \n  AND NOT i.deleted \nORDER BY i.invoice_date DESC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:02:06.255996"
+  },
+  {
+    "natural_query": "Overdue payments",
+    "sql": "SELECT \n  i.invoice_number, \n  i.grandtotal_in_usd, \n  i.due_date, \n  i.payment_status\nFROM \n  \"invoices\" i\nWHERE \n  NOT i.deleted \n  AND NULLIF(i.due_date,'')::timestamptz < NOW() \n  AND i.payment_status NOT IN ('paid','cancelled')",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:02:08.308537"
+  },
+  {
+    "natural_query": "Total collection",
+    "sql": "SELECT UPPER(COALESCE(d.currency,'USD')) AS currency, COALESCE(SUM(d.grand_total),0) AS total_collection \nFROM \"deals\" d \nWHERE NOT d.deleted \nGROUP BY 1 \nORDER BY 2 DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-15T11:13:36.020695"
+  },
+  {
+    "natural_query": "Get revenue summary for last 6 months",
+    "sql": "SELECT \n  UPPER(COALESCE(i.currency, 'USD')) AS currency, \n  COALESCE(SUM(i.grand_total), 0) AS amount\nFROM \n  \"invoices\" i\nWHERE \n  i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND NULLIF(i.payment_date, '')::timestamptz >= NOW() - INTERVAL '6 month'\nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:13:36.896519"
+  },
+  {
+    "natural_query": "Show me top 10 invoices by that amount",
+    "sql": "SELECT \n  UPPER(COALESCE(i.currency,'USD')) AS currency, \n  COALESCE(SUM(i.grand_total),0) AS amount\nFROM \n  \"invoices\" i \nWHERE \n  i.payment_status = 'paid' \n  AND NOT i.deleted \nGROUP BY \n  1 \nORDER BY \n  2 DESC \nLIMIT 10",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:13:38.009314"
+  },
+  {
+    "natural_query": "Give me USD currency invoices list only with total",
+    "sql": "SELECT \n  UPPER(COALESCE(i.currency, 'USD')) AS currency, \n  COALESCE(SUM(i.grand_total), 0) AS amount \nFROM \n  \"invoices\" i \nWHERE \n  i.currency = 'USD' \n  AND NOT i.deleted \nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-15T11:13:38.996169"
+  }
+]

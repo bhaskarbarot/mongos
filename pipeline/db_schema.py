@@ -408,7 +408,8 @@ def _build_table_schema_line(table: str) -> str:
         vals = _get_enum_values(table, ecol)
         if vals:
             quoted = f'"{ecol}"' if _needs_quote(ecol) else ecol
-            enum_hints.append(f"  {quoted}: {\"|\".join(repr(v) for v in vals[:8])}")
+            vals_str = "|".join(repr(v) for v in vals[:8])
+            enum_hints.append(f"  {quoted}: {vals_str}")
 
     # Soft delete
     sd = _SOFT_DELETE.get(table, "NOT deleted")  # default assume deleted col exists

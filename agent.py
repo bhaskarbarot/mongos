@@ -15,15 +15,20 @@ Architecture:
     app.py
       └─ agent.py          ← you are here (setup + delegation)
            └─ pipeline/
-                ├─ main.py        (orchestrator)
-                ├─ fast_path.py   (rule-based, <300ms)
-                ├─ classifier.py  (SIMPLE / COMPLEX)
-                ├─ text2sql.py    (Ollama NL→SQL)
-                ├─ decomposer.py  (Groq/Ollama query splitting)
-                ├─ executor.py    (parallel sub-query runner)
-                ├─ synthesizer.py (Groq/Ollama final answer)
-                ├─ schema.py      (registry, SQL runner, caching)
+                ├─ main.py        (orchestrator — routes to 3 agents)
+                ├─ fast_path.py   (rule-based, <300ms, no LLM)
+                ├─ classifier.py  (LLM: SIMPLE / MEDIUM / COMPLEX)
+                ├─ text2sql.py    (Ollama NL→SQL, 3-attempt self-heal)
+                ├─ synthesizer.py (fast-path narration only)
+                ├─ schema.py      (SQL runner, caching)
+                ├─ db_schema.py   (live schema from information_schema)
                 └─ utils.py       (shared helpers)
+           └─ agents/
+                ├─ simple_agent.py   (CrewAI, <5s)
+                ├─ medium_agent.py   (LangGraph 7-node, <15s)
+                └─ complex_agent.py  (LangGraph 10-node, <30s)
+           └─ mcp_server/
+                └─ crm_mcp.py        (MCP server — live schema + SQL tools)
 """
 
 from __future__ import annotations

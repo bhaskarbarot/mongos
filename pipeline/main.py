@@ -1,36 +1,27 @@
-"""main.py — Pipeline orchestrator.
+"""main.py — Pipeline orchestrator with 3-agent routing.
 
-Exact query flow:
+Query flow:
 
     User Query
         ↓
-    [Guard]       Greeting / Blocked / Vague / Identity checks  (0ms, no LLM)
+    [GUARD]       Greeting / Identity / Blocked / Vague — 0ms, no LLM
         ↓ pass
-    [Layer 1]     Fast Path Engine                              (~300ms, NO LLM)
-                  Rule-based regex + SQL templates.
-                  Handles ~70% of all CRM queries instantly.
-        ↓ miss (None)
-    [Layer 2]     Text2SQL — Ollama fine-tuned models           (5–30s, local)
-                  PRIMARY : Qwen2.5-Coder-3B  (fast, 15s timeout)
-                  FALLBACK: Arctic-Text2SQL-7B (accurate, 30s timeout)
-                  Both fire in parallel — first valid SQL wins.
-        ↓ hit → narrate → return to user
-        ↓ miss (both models fail or SQL error)
-    [Layer 3]     Intent Classifier                             (~300ms, Groq)
-                  Decides: SIMPLE | COMPLEX
-        ↓
-    [SIMPLE]      Text2SQL retry with fallback model only       (30s, local)
-        ↓ hit → narrate → return
+    [LAYER 1]     Fast Path — regex SQL templates, NO LLM (~300ms)
+                  Controlled by FAST_PATH_ENABLED in .env
         ↓ miss
-    [COMPLEX]     Decomposer  → sub-queries                     (Groq/Ollama)
-                  Executor    → parallel SQL execution          (threads)
-                  Synthesizer → merge into final answer         (Groq/Ollama)
+    [CLASSIFY]    LLM classifier (Groq 8b → Gemini → Ollama)
+                  Returns: SIMPLE | MEDIUM | COMPLEX
+        ↓
+    [ROUTE]       → simple_agent  (CrewAI, target <5s)
+                  → medium_agent  (LangGraph, target <15s)
+                  → complex_agent (LangGraph extended, target <30s)
+        ↓
+    [RESPONSE]    Standard dict: answer, sql_queries, tables_used, confidence, latency_ms
 
-Public API:
-    run(agent, user_query, memory, request_id="") -> Dict[str, Any]
-    ConversationMemory                             ← alias for ChatMemory
+Public API (unchanged — compatible with agent.py and api.py):
+    run(agent, user_query, memory=None, request_id="") -> Dict[str, Any]
+    ConversationMemory  ← alias for ChatMemory
 """
-
 from __future__ import annotations
 
 import json
@@ -39,17 +30,10 @@ import time
 from typing import Any, Dict, List, Optional
 
 from config import settings
-from pipeline import fast_path, text2sql
+from pipeline import fast_path
 from pipeline.chat_memory import ChatMemory
 from pipeline.classifier import classify
-from pipeline.decomposer import decompose
-from pipeline.executor import run_parallel, SubQueryResult
-from pipeline.schema import (
-    build_text2sql_schema,
-    discover_schema_links,
-    get_table_names,
-)
-from pipeline.synthesizer import narrate_response, synthesize
+from pipeline.schema import build_text2sql_schema, discover_schema_links, get_table_names
 from pipeline.utils import (
     Timer,
     _IDENTITY_ANSWER,
@@ -63,93 +47,76 @@ from pipeline.utils import (
 
 LOGGER = logging.getLogger("sql_chatbot")
 
-_SCHEMA_WARMED = False
-
-# Legacy alias — any code that imported ConversationMemory from here still works
+# Legacy alias — kept for backward compat with api.py / agent.py
 ConversationMemory = ChatMemory
+
+_SCHEMA_WARMED = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _build_response(
-    answer:      str,
-    tables_used: List[str],
-    sql_queries: List[str],
-    confidence:  float,
-    started:     float,
-    layer:       str = "unknown",
-    sub_results: Optional[List] = None,
-    metrics:     Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    latency = round((time.perf_counter() - started) * 1000, 2)
-    resp: Dict[str, Any] = {
-        "answer":      format_final_answer(answer, tables_used),
-        "latency_ms":  latency,
-        "confidence":  round(confidence, 3),
-        "tables_used": tables_used,
-        "sql_queries": sql_queries,
-        "layer":       layer,
-    }
-    if sub_results:
-        resp["_sub_results"] = sub_results
-    if metrics is not None:
-        resp["metrics"] = metrics
-    return resp
-
-
 def _warm_schema(agent) -> None:
-    """Pre-warm schema caches on first query (runs once per process)."""
+    """Pre-warm schema caches on first call (once per process)."""
     global _SCHEMA_WARMED
     if _SCHEMA_WARMED:
         return
-    with Timer("schema_warmup") as t:
-        try:
-            tables = get_table_names(agent)
-            if tables:
-                discover_schema_links(agent)
-                build_text2sql_schema(agent)
-                _SCHEMA_WARMED = True
-                LOGGER.info("Schema pre-warmed: %d tables in %.0fms", len(tables), t.elapsed_ms)
-        except Exception as exc:
-            LOGGER.warning("Schema warmup failed (non-fatal): %s", exc)
+    try:
+        tables = get_table_names(agent)
+        if tables:
+            discover_schema_links(agent)
+            build_text2sql_schema(agent)
+            _SCHEMA_WARMED = True
+            LOGGER.info("Schema pre-warmed: %d tables", len(tables))
+    except Exception as exc:
+        LOGGER.warning("Schema warmup non-fatal: %s", exc)
 
 
-def _empty_metrics() -> Dict[str, Any]:
-    return {
-        "guard_ms":      0,
-        "fastpath_ms":   0,
-        "text2sql_ms":   0,
-        "classifier_ms": 0,
-        "decomposer_ms": 0,
-        "executor_ms":   0,
-        "synthesizer_ms":0,
-        "narrate_ms":    0,
-        "total_ms":      0,
-    }
-
-
-def _narrate(query: str, raw: Dict[str, Any]) -> str:
-    """Add executive summary paragraph to a SIMPLE-path answer."""
-    return narrate_response(
-        query,
-        raw.get("answer", ""),
-        raw.get("tables_used", []),
-    )
-
-
-def _guard_response(answer: str, started: float, metrics: Dict) -> Dict[str, Any]:
-    metrics["guard_ms"] = metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
+def _guard_response(answer: str, started: float, layer: str = "guard") -> Dict[str, Any]:
+    elapsed = round((time.perf_counter() - started) * 1000, 2)
     return {
         "answer":      answer,
-        "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
+        "latency_ms":  elapsed,
         "confidence":  1.0,
         "tables_used": [],
         "sql_queries": [],
-        "layer":       "guard",
-        "metrics":     metrics,
+        "layer":       layer,
     }
+
+
+def _normalize_response(result: Dict[str, Any], started: float) -> Dict[str, Any]:
+    """Ensure every response has all fields expected by api.py."""
+    if "latency_ms" not in result or not result["latency_ms"]:
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+    if "answer" not in result:
+        result["answer"] = "No response generated."
+    if "tables_used" not in result:
+        result["tables_used"] = []
+    if "sql_queries" not in result:
+        result["sql_queries"] = []
+    if "confidence" not in result:
+        result["confidence"] = 0.80
+    if "layer" not in result:
+        result["layer"] = "unknown"
+    # Wrap answer with tables footer (kept for UI compatibility)
+    result["answer"] = format_final_answer(
+        result["answer"], result.get("tables_used", [])
+    )
+    return result
+
+
+def _narrate_fast_path(query: str, fp_result: Dict) -> str:
+    """Add executive summary to a fast-path answer via the narrate LLM route."""
+    from pipeline.synthesizer import narrate_response
+    try:
+        return narrate_response(
+            query,
+            fp_result.get("answer", ""),
+            fp_result.get("tables_used", []),
+        )
+    except Exception:
+        return fp_result.get("answer", "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -162,9 +129,22 @@ def run(
     memory:      Optional[ChatMemory] = None,
     request_id:  str = "",
 ) -> Dict[str, Any]:
-    """Execute the full pipeline for one user query and return a result dict."""
+    """Execute the full pipeline for one user query and return a result dict.
+
+    This is the single entry point called by agent.py → api.py.
+    All agent imports are lazy (inside the routing block) to avoid circular
+    imports and to keep the module fast on startup.
+
+    Args:
+        agent:      LangChain AgentExecutor (kept for fast_path and schema tools)
+        user_query: Raw user input
+        memory:     Optional ChatMemory for pronoun resolution
+        request_id: Correlation ID for log tracing
+
+    Returns:
+        Dict with: answer, latency_ms, confidence, tables_used, sql_queries, layer
+    """
     started = time.perf_counter()
-    metrics = _empty_metrics()
 
     # ── Input sanitization ────────────────────────────────────────────────────
     user_query, was_truncated = sanitize_user_input(user_query)
@@ -177,48 +157,51 @@ def run(
         user_query = memory.resolve(user_query)
 
     # ══════════════════════════════════════════════════════════════════════
-    # GUARD — fast checks, no DB, no LLM (0ms)
+    # GUARD — 0ms checks, no DB, no LLM
     # ══════════════════════════════════════════════════════════════════════
     if is_identity_question(user_query):
         LOGGER.info("[RID:%s] Guard: identity", request_id)
-        return _guard_response(_IDENTITY_ANSWER, started, metrics)
+        result = _guard_response(_IDENTITY_ANSWER, started, "guard_identity")
+        if memory:
+            memory.update(original_query, result)
+        return result
 
     if is_greeting(user_query):
         LOGGER.info("[RID:%s] Guard: greeting", request_id)
-        return _guard_response(
+        result = _guard_response(
             "Hello! I can help you query your CRM data. Try asking:\n\n"
             "• **Counts**: \"How many deals do we have?\"\n"
-            "• **Lists**: \"Show all closed won deals\"\n"
             "• **Revenue**: \"Total revenue this month\"\n"
-            "• **Reports**: \"KPI report\" / \"Executive summary\"\n"
-            "• **Targets**: \"Target vs achieved this quarter\"\n"
+            "• **Reports**: \"Sales leaderboard\" / \"Executive summary\"\n"
+            "• **Analysis**: \"Which rep has the best win rate?\"\n"
             "• **Search**: \"Find contact John Smith\"",
-            started, metrics,
+            started, "guard_greeting",
         )
+        if memory:
+            memory.update(original_query, result)
+        return result
 
     if is_blocked(user_query):
         LOGGER.warning("[RID:%s] Guard: blocked: %.60s", request_id, user_query)
-        return _guard_response(
+        result = _guard_response(
             "This query contains operations that are not permitted. "
             "I can only run read-only (SELECT) queries on your CRM data.",
-            started, metrics,
+            started, "guard_blocked",
         )
+        return result
 
     if is_vague_query(user_query):
         LOGGER.info("[RID:%s] Guard: vague: %.60s", request_id, user_query)
-        return {
-            "answer":      (
-                "Your query seems a bit vague. Could you be more specific? For example:\n\n"
-                "• \"How many **open deals** do we have?\"\n"
-                "• \"Show **revenue this month**\"\n"
-                "• \"List **pending tasks** for all users\""
-            ),
-            "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
-            "confidence":  0.5, "tables_used": [], "sql_queries": [],
-            "layer":       "guard", "metrics": {**metrics, "guard_ms": round((time.perf_counter()-started)*1000), "total_ms": round((time.perf_counter()-started)*1000)},
-        }
+        result = _guard_response(
+            "Your query seems a bit vague. Could you be more specific? For example:\n\n"
+            "• \"How many **open deals** do we have?\"\n"
+            "• \"Show **revenue this month**\"\n"
+            "• \"List **pending tasks** for all users\"",
+            started, "guard_vague",
+        )
+        result["confidence"] = 0.5
+        return result
 
-    metrics["guard_ms"] = round((time.perf_counter() - started) * 1000)
     LOGGER.info("[RID:%s] ══ Pipeline START | query: %.80s ══", request_id, user_query)
 
     # ── Schema pre-warm (runs once per process) ───────────────────────────────
@@ -226,7 +209,6 @@ def run(
 
     # ══════════════════════════════════════════════════════════════════════
     # LAYER 1 — FAST PATH (regex + SQL templates, NO LLM, ~300ms)
-    # Controlled by FAST_PATH_ENABLED in .env (default: true)
     # ══════════════════════════════════════════════════════════════════════
     if settings.fast_path_enabled:
         with Timer("fast_path") as fp_timer:
@@ -235,251 +217,98 @@ def run(
             except Exception as exc:
                 LOGGER.warning("[RID:%s] Fast-path error: %s", request_id, exc)
                 fp_result = None
-        metrics["fastpath_ms"] = round(fp_timer.elapsed_ms)
 
         if fp_result is not None:
-            LOGGER.info(
-                "[RID:%s] ══ Layer 1 HIT (fast-path) %.0fms | tables=%s",
-                request_id, fp_timer.elapsed_ms, fp_result.get("tables_used"),
-            )
-            with Timer("narrate") as nar_timer:
-                narrated = _narrate(original_query, fp_result)
-            metrics["narrate_ms"] = round(nar_timer.elapsed_ms)
-            metrics["total_ms"]   = round((time.perf_counter() - started) * 1000)
-            LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
-            result = _build_response(
-                narrated,
-                fp_result.get("tables_used", []),
-                fp_result.get("sql_queries", []),
-                fp_result.get("confidence", 0.95),
-                started, layer="fast_path", metrics=metrics,
-            )
+            LOGGER.info("[RID:%s] ══ Layer 1 HIT (fast-path) %.0fms", request_id, fp_timer.elapsed_ms)
+            narrated = _narrate_fast_path(original_query, fp_result)
+            result   = {
+                "answer":      narrated,
+                "latency_ms":  round(fp_timer.elapsed_ms, 2),
+                "confidence":  fp_result.get("confidence", 0.95),
+                "tables_used": fp_result.get("tables_used", []),
+                "sql_queries": fp_result.get("sql_queries", []),
+                "layer":       "fast_path",
+            }
             if memory:
                 memory.update(original_query, fp_result)
-            return result
+            return _normalize_response(result, started)
 
-        LOGGER.info("[RID:%s] ══ Layer 1 MISS → Text2SQL", request_id)
+        LOGGER.info("[RID:%s] ══ Layer 1 MISS → Classifier", request_id)
     else:
-        LOGGER.info("[RID:%s] ══ Fast path DISABLED → Text2SQL", request_id)
+        LOGGER.info("[RID:%s] ══ Fast path DISABLED → Classifier", request_id)
 
     # ══════════════════════════════════════════════════════════════════════
-    # LAYER 2 — TEXT2SQL (Ollama fine-tuned models, local, no API cost)
-    #
-    # Both models fire in parallel — first valid SQL wins:
-    #   PRIMARY : Qwen2.5-Coder-3B  (fast, OLLAMA_PRIMARY_TIMEOUT)
-    #   FALLBACK: Arctic-7B         (accurate, OLLAMA_FALLBACK_TIMEOUT)
-    #
-    # This runs DIRECTLY after fast path — no Intent Router in between.
-    # The fine-tuned models understand natural language CRM queries and
-    # generate SQL from the CREATE TABLE schema provided in the prompt.
+    # CLASSIFY — LLM decides SIMPLE | MEDIUM | COMPLEX
     # ══════════════════════════════════════════════════════════════════════
-    with Timer("text2sql") as t2s_timer:
-        try:
-            t2s_result = text2sql.run(user_query, agent)
-        except Exception as exc:
-            LOGGER.warning("[RID:%s] Text2SQL error: %s", request_id, exc)
-            t2s_result = None
-    metrics["text2sql_ms"] = round(t2s_timer.elapsed_ms)
-
-    if t2s_result is not None:
-        LOGGER.info(
-            "[RID:%s] ══ Layer 2 HIT (text2sql) %.0fms | tables=%s",
-            request_id, t2s_timer.elapsed_ms, t2s_result.get("tables_used"),
-        )
-        with Timer("narrate") as nar_timer:
-            narrated = _narrate(original_query, t2s_result)
-        metrics["narrate_ms"] = round(nar_timer.elapsed_ms)
-        metrics["total_ms"]   = round((time.perf_counter() - started) * 1000)
-        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
-        result = _build_response(
-            narrated,
-            t2s_result.get("tables_used", []),
-            t2s_result.get("sql_queries", []),
-            t2s_result.get("confidence", 0.88),
-            started, layer="text2sql", metrics=metrics,
-        )
-        if memory:
-            memory.update(original_query, t2s_result)
-        return result
-
-    LOGGER.info("[RID:%s] ══ Text2SQL MISS → Classifier", request_id)
-
-    # ══════════════════════════════════════════════════════════════════════
-    # LAYER 3 — CLASSIFIER (Groq → Gemini → Ollama fallback)
-    # Decides: SIMPLE | COMPLEX
-    # SIMPLE  → Text2SQL retry with fallback model
-    # COMPLEX → Decompose → Parallel Execute → Synthesize
-    # ══════════════════════════════════════════════════════════════════════
-    with Timer("classifier") as cls_timer:
+    with Timer("classify") as cls_timer:
         classification = classify(user_query)
-    intent_type   = classification["type"]
-    intent_reason = classification["reason"]
-    metrics["classifier_ms"] = round(cls_timer.elapsed_ms)
+
+    intent_type = classification["type"]
     LOGGER.info(
         "[RID:%s] ══ Classifier: %s (%.0fms) | %s",
-        request_id, intent_type, cls_timer.elapsed_ms, intent_reason,
+        request_id, intent_type, cls_timer.elapsed_ms, classification.get("reason", ""),
     )
 
-    # ── SIMPLE retry — try Groq first, then Ollama fallback ─────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # ROUTE TO AGENT
+    # ══════════════════════════════════════════════════════════════════════
+    result: Optional[Dict[str, Any]] = None
+
     if intent_type == "SIMPLE":
-        LOGGER.info("[RID:%s] ══ SIMPLE: retry SQL generation", request_id)
-        from pipeline.text2sql import (
-            _build_fallback_prompt, _extract_sql, _validate_sql,
-            _call_ollama_chat, _extract_tables_from_sql, _format_result,
-            _generate_sql_groq, _generate_sql_gemini,
-        )
-        from pipeline.schema import run_sql, get_table_names as _gtn
+        LOGGER.info("[RID:%s] ══ Routing to SIMPLE agent", request_id)
         try:
-            table_names_retry = _gtn(agent)
-
-            # Try Groq first (fast ~2s)
-            fsql = _generate_sql_groq(user_query, table_names_retry)
-
-            # Try Gemini if Groq failed
-            if not fsql:
-                fsql = _generate_sql_gemini(user_query, table_names_retry)
-
-            # Fall through to Ollama if both cloud LLMs failed
-            if not fsql:
-                fsys, fuser = _build_fallback_prompt(user_query)
-                fraw = _call_ollama_chat(
-                    settings.ollama_fallback_model, fsys, fuser,
-                    timeout=min(settings.ollama_fallback_timeout, 15),  # cap at 15s
-                    max_tokens=800,
-                )
-                fsql = _extract_sql(fraw) if fraw else None
-            fok, ferr = _validate_sql(fsql, table_names_retry) if fsql else (False, "no SQL")
-            if fok and fsql:
-                _res = run_sql(agent, fsql)
-                if not _res.error:
-                    body = _format_result(_res.rows or [], fsql, user_query)
-                    retry_result = {
-                        "answer":      body,
-                        "tables_used": _extract_tables_from_sql(fsql),
-                        "confidence":  0.82,
-                        "sql_queries": [fsql],
-                    }
-                    with Timer("narrate") as nar_timer:
-                        narrated = _narrate(original_query, retry_result)
-                    metrics["narrate_ms"]  = round(nar_timer.elapsed_ms)
-                    metrics["total_ms"]    = round((time.perf_counter() - started) * 1000)
-                    LOGGER.info("[RID:%s] ══ SIMPLE retry HIT %.0fms", request_id, metrics["total_ms"])
-                    LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
-                    result = _build_response(
-                        narrated,
-                        retry_result.get("tables_used", []),
-                        retry_result.get("sql_queries", []),
-                        retry_result.get("confidence", 0.82),
-                        started, layer="text2sql_retry", metrics=metrics,
-                    )
-                    if memory:
-                        memory.update(original_query, retry_result)
-                    return result
+            from agents.simple_agent import run_simple_agent
+            result = run_simple_agent(user_query, classification)
         except Exception as exc:
-            LOGGER.warning("[RID:%s] SIMPLE retry error: %s", request_id, exc)
+            LOGGER.error("[RID:%s] Simple agent error: %s — falling back to MEDIUM", request_id, exc)
+            intent_type = "MEDIUM"
 
-        LOGGER.info("[RID:%s] ══ SIMPLE retry failed → COMPLEX path", request_id)
+    if intent_type == "MEDIUM":
+        LOGGER.info("[RID:%s] ══ Routing to MEDIUM agent", request_id)
+        try:
+            from agents.medium_agent import run_medium_agent
+            result = run_medium_agent(user_query, classification)
+        except Exception as exc:
+            LOGGER.error("[RID:%s] Medium agent error: %s — falling back to COMPLEX", request_id, exc)
+            intent_type = "COMPLEX"
 
-    # ══════════════════════════════════════════════════════════════════════
-    # COMPLEX PATH: Decompose → Parallel Execute → Synthesize
-    # ══════════════════════════════════════════════════════════════════════
-    LOGGER.info("[RID:%s] ══ COMPLEX: Decompose → Execute → Synthesize", request_id)
+    if intent_type == "COMPLEX" and result is None:
+        LOGGER.info("[RID:%s] ══ Routing to COMPLEX agent", request_id)
+        try:
+            from agents.complex_agent import run_complex_agent
+            result = run_complex_agent(user_query, classification)
+        except Exception as exc:
+            LOGGER.error("[RID:%s] Complex agent error: %s", request_id, exc, exc_info=True)
+            result = {
+                "answer": (
+                    "I encountered an error processing your query. "
+                    "Please try rephrasing or breaking it into simpler questions."
+                ),
+                "sql_queries": [],
+                "tables_used": [],
+                "confidence":  0.0,
+                "layer":       "error",
+            }
 
-    try:
-        table_names = get_table_names(agent)
-        schema_ctx  = build_text2sql_schema(agent)
-
-        # Step A — Decompose into sub-queries
-        with Timer("decompose") as dec_timer:
-            sub_queries = decompose(user_query, table_names, schema_context=schema_ctx)
-        metrics["decomposer_ms"] = round(dec_timer.elapsed_ms)
-        LOGGER.info(
-            "[RID:%s] Decomposed → %d sub-queries (%.0fms): %s",
-            request_id, len(sub_queries), dec_timer.elapsed_ms,
-            [sq.get("sub_query", "")[:40] for sq in sub_queries],
-        )
-
-        # Step B — Parallel execution (fast_path + text2sql per sub-query)
-        with Timer("parallel_exec") as exec_timer:
-            sub_results = run_parallel(sub_queries, agent, request_id=request_id)
-        metrics["executor_ms"] = round(exec_timer.elapsed_ms)
-        LOGGER.info(
-            "[RID:%s] Parallel done %.0fms | %d results",
-            request_id, exec_timer.elapsed_ms, len(sub_results),
-        )
-
-        # Step C — Build synthesis input
-        synthesis_input = []
-        for sq, sr in zip(sub_queries, sub_results):
-            if isinstance(sr, SubQueryResult):
-                synthesis_input.append({
-                    "sub_query": sr.sub_query,
-                    "intent":    sr.intent,
-                    "data":      sr.to_dict(),
-                })
-            elif isinstance(sr, dict):
-                synthesis_input.append(sr)
-            else:
-                synthesis_input.append({
-                    "sub_query": sq.get("sub_query", ""),
-                    "intent":    sq.get("intent", "general"),
-                    "data":      {"answer": "Data unavailable.", "error": "unexpected result type"},
-                })
-
-        # Step D — Synthesize (Groq 70b → Gemini → OpenRouter → Ollama)
-        with Timer("synthesize") as syn_timer:
-            final_answer = synthesize(user_query, synthesis_input)
-        metrics["synthesizer_ms"] = round(syn_timer.elapsed_ms)
-        LOGGER.info("[RID:%s] Synthesis done %.0fms", request_id, syn_timer.elapsed_ms)
-
-        # Aggregate metadata from all sub-results
-        all_tables = sorted({
-            t
-            for item in synthesis_input
-            for t in (item.get("data", {}).get("tables_used", [])
-                      if isinstance(item.get("data"), dict) else [])
-        })
-        all_sqls = [
-            sql
-            for item in synthesis_input
-            for sql in (item.get("data", {}).get("sql_queries", [])
-                        if isinstance(item.get("data"), dict) else [])
-        ]
-        conf_list = [
-            item.get("data", {}).get("confidence", 0.0)
-            for item in synthesis_input
-            if isinstance(item.get("data"), dict)
-        ]
-        avg_conf = sum(conf_list) / len(conf_list) if conf_list else 0.0
-
-        metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
-        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
-        LOGGER.info(
-            "[RID:%s] ══ Pipeline DONE %.0fms | parts=%d | tables=%s ══",
-            request_id, metrics["total_ms"], len(synthesis_input), all_tables,
-        )
-
-        result = _build_response(
-            final_answer, all_tables, all_sqls, avg_conf, started,
-            layer="complex", sub_results=synthesis_input, metrics=metrics,
-        )
-        if memory and all_tables:
-            memory.update(original_query, result)
-        return result
-
-    except Exception as exc:
-        LOGGER.error("[RID:%s] COMPLEX path failed: %s", request_id, exc, exc_info=True)
-        metrics["total_ms"] = round((time.perf_counter() - started) * 1000)
-        LOGGER.info("[RID:%s] METRICS %s", request_id, json.dumps(metrics))
-        return {
-            "answer": (
-                "I encountered an error processing your query. "
-                "Please try rephrasing or breaking it into simpler questions."
-            ),
-            "latency_ms":  round((time.perf_counter() - started) * 1000, 2),
-            "confidence":  0.0,
-            "tables_used": [],
+    if result is None:
+        result = {
+            "answer":      "No agent was able to process this query.",
             "sql_queries": [],
-            "layer":       "error",
-            "metrics":     metrics,
+            "tables_used": [],
+            "confidence":  0.0,
+            "layer":       "no_agent",
         }
+
+    # Update memory with successful result
+    if memory and result.get("tables_used"):
+        memory.update(original_query, result)
+
+    normalized = _normalize_response(result, started)
+    LOGGER.info(
+        "[RID:%s] ══ Pipeline DONE %.0fms | agent=%s | tables=%s ══",
+        request_id,
+        normalized.get("latency_ms", 0),
+        normalized.get("agent_type", intent_type.lower()),
+        normalized.get("tables_used", []),
+    )
+    return normalized

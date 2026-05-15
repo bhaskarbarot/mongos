@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "crm-database": {
+      "command": "python",
+      "args": ["mcp_server/crm_mcp.py"],
+      "env": {},
+      "description": "CRM PostgreSQL database — live schema, SQL execution, query examples"
+    }
+  }
+}

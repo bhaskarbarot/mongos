@@ -1,265 +1,216 @@
-"""classifier.py — Hybrid SIMPLE / COMPLEX intent classifier.
+"""classifier.py — LLM-driven query intent classifier.
 
-Stage 1: Rule-based pre-screen (0ms) — catches obvious COMPLEX patterns fast.
-Stage 2: Ollama LLM (qwen2.5:5b) — accurate semantic classification for
-         everything that passes the rule screen.
+Classifies every incoming query as SIMPLE, MEDIUM, or COMPLEX using a small
+LLM (Groq 8b → Gemini flash-lite → Ollama 3b). No hardcoded regex rules for
+classification — the LLM understands context and table relationships.
 
-Output:
-    {"type": "SIMPLE" | "COMPLEX", "reason": "<short explanation>"}
+Classification types:
+  SIMPLE  — single table, basic filter/count/aggregate, raw data output
+  MEDIUM  — 2–3 table joins, or analysis/calculation on top of data,
+             or simple period comparison
+  COMPLEX — 3+ tables, KPI dashboard, trend/anomaly detection, full reports
 
-SIMPLE  = single intent — one list, one count, one aggregation, one lookup
-COMPLEX = multiple intents, cross-entity analysis, KPIs, comparisons,
-          report-style requests, anything needing decomposition + synthesis
+Public API:
+    classify(query: str) -> dict
+        Returns: {
+          type: "SIMPLE" | "MEDIUM" | "COMPLEX",
+          reason: str,
+          tables_needed: list[str],
+          requires_calculation: bool,
+          requires_multi_period: bool,
+        }
 """
-
 from __future__ import annotations
 
 import json
 import logging
-import re
-import urllib.request
-from typing import Dict
+from typing import Dict, List, Optional
 
+from pipeline.db_schema import get_all_crm_tables
 from pipeline.llm import call as llm_call
-from pipeline.utils import normalize_text
 
 LOGGER = logging.getLogger("sql_chatbot")
 
-# ── Ollama config ──────────────────────────────────────────────────────────────
-_OLLAMA_BASE_URL   = "http://localhost:11434"
-_CLASSIFY_MODEL    = "qwen2.5:5b"
-_CLASSIFY_TIMEOUT  = 12          # seconds — fast model, should respond well within this
-_CLASSIFY_TEMP     = 0.0         # deterministic
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SYSTEM PROMPT  (given to the classifying LLM)
+# ══════════════════════════════════════════════════════════════════════════════
 
-# ── Shared system prompt for the LLM classifier ────────────────────────────────
-_SYSTEM_PROMPT = """You are a CRM query intent classifier. Your ONLY job is to decide
-if a user query needs a SIMPLE database lookup or COMPLEX multi-step reasoning.
+_SYSTEM_PROMPT = """You are a CRM query intent classifier. Your ONLY job is to decide if a query
+needs a SIMPLE lookup, MEDIUM analysis, or COMPLEX report.
 
-OUTPUT RULE: Respond with ONLY valid JSON. No explanation outside JSON.
-Format: {"type": "SIMPLE" | "COMPLEX", "reason": "<one sentence>"}
+OUTPUT RULE: Respond with ONLY a valid JSON object. No text outside the JSON.
+Format:
+{
+  "type": "SIMPLE" | "MEDIUM" | "COMPLEX",
+  "reason": "<one concise sentence explaining why>",
+  "tables_needed": ["<table1>", "<table2>"],
+  "requires_calculation": true | false,
+  "requires_multi_period": true | false
+}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SIMPLE = ALL of these are true:
-  • Single table or entity focus
-  • One action: list / count / total / filter / show / find / get
-  • No cross-entity analysis
-  • No comparison between time periods or entities
-  • No report generation
-  • No trend analysis
-  • No multi-step reasoning required
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLASSIFICATION GUIDE:
 
-Examples of SIMPLE:
-  "give me all closed won deals"              → list from deals table, one filter
-  "how many invoices this month"              → one count, one filter
-  "show all contacts for TechCorp"            → one lookup
-  "list all pending tasks"                    → one filter
-  "total revenue this year"                   → one aggregation
-  "get all users"                             → simple list
-  "what is the status of invoice INV-001"     → single record lookup
-  "show me top 10 customers by revenue"       → one sorted aggregation
-  "give me all companies in USA"              → one filter list
-  "how many open deals do we have"            → one count
+SIMPLE — ALL of these apply:
+  • Targets one main table (may join one lookup table for a name)
+  • Single action: list, count, filter, total, find, show
+  • No cross-entity analysis or comparison between time periods
+  • Answer is raw data — no trends, percentages, or growth rates needed
+  Examples:
+    "how many deals do we have"               → deals only, COUNT
+    "list all open deals"                     → deals only, filter
+    "total revenue this year"                 → invoices only, SUM
+    "show pending tasks"                      → createtasks only
+    "top 10 companies by deal count"          → deals + companies, GROUP BY
+    "find contact John Smith"                 → contacts, lookup
+    "all active vendors"                      → vendors only
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-COMPLEX = ANY of these are true:
-  • Multiple entities needed (e.g. deals + invoices + users together)
-  • Comparison between time periods ("last month vs this month")
-  • Report with multiple sections or KPIs in one query
-  • Trend / growth analysis
-  • Cross-entity analysis ("which users have pending tasks and overdue deals")
-  • Requires computed insights beyond raw data (growth %, conversion rate, etc.)
-  • Ambiguous intent needing AI interpretation
-  • Multi-step: "find X, then calculate Y based on X"
-  • Executive summary or overview requests
-  • "with report of that" / "give me analysis" / "full breakdown"
+MEDIUM — ANY of these apply:
+  • Needs 2–3 tables joined for meaningful analysis
+  • Needs LLM to interpret/analyze the data (risk assessment, categorize)
+  • Needs comparison between exactly 2 time periods (this month vs last month)
+  • Needs a derived metric (win rate, conversion %, growth rate)
+  Examples:
+    "which sales rep has the best win rate this quarter"   → users+deals+sales
+    "show deals that have not moved in 30 days"           → deals + calculation
+    "revenue this month compared to last month"           → invoices, 2 periods
+    "deals pipeline grouped by owner with department"     → deals+users+departments
+    "which companies have overdue invoices"               → companies+invoices
 
-Examples of COMPLEX:
-  "give me all closed lost deals with report of that"  → list + analysis report
-  "which user have task is pending"                    → cross-entity: users + tasks + analysis
-  "compare this month vs last month revenue"           → two time periods
-  "give me executive summary of pipeline"              → multi-KPI report
-  "which products are selling best and why"            → analysis + reasoning
-  "show conversion rate and revenue trend this year"   → multiple KPIs + trend
-  "which sales reps are underperforming vs target"     → targets + invoices + comparison
-  "pipeline health check"                              → multi-entity overview
-  "give me full customer 360 for TechCorp"             → many entities joined
-  "how are we doing this quarter"                      → vague, needs AI interpretation
+COMPLEX — ANY of these apply:
+  • Needs 3+ tables joined together
+  • Full KPI dashboard or executive summary with multiple metrics
+  • Trend analysis across 3+ time periods
+  • Anomaly detection or pattern finding across the dataset
+  • Multi-section report (pipeline + revenue + tasks + targets)
+  • Deep performance analysis (leaderboard with all metrics)
+  • "360 view" or "full report" style queries
+  Examples:
+    "full sales leaderboard with all metrics"             → users+sales+deals+tasks+targets
+    "quarterly performance report"                        → all major tables
+    "360 view of company X"                               → companies+deals+invoices+tasks+contacts
+    "why is deal conversion dropping last 3 months"       → deals, trend over 3 periods
+    "executive summary of business health"                → all tables, multiple KPIs
+    "compare performance of all sales reps this year"     → cross-rep, multi-metric
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRITICAL TRAPS (these LOOK simple but are COMPLEX):
-  • "which user/rep has [condition]" → needs JOIN + grouping = COMPLEX
-  • "tell me who has [X] pending/overdue" → cross-entity analysis = COMPLEX
-  • "performance of [team/user]" → needs targets + invoices compared = COMPLEX
-  • "any [risks/issues/problems]" → vague, needs AI judgment = COMPLEX
-  • "give me report of [anything]" → always COMPLEX
-  • "full details of [entity]" with analysis = COMPLEX
-  • queries with "and also", "as well as", "along with" for different entity types = COMPLEX
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMPORTANT NOTES:
+  • A query can be SIMPLE even if it's long or uses complex words
+  • A very short query can be COMPLEX ("360 view of TechCorp")
+  • "report of" or "full breakdown" = COMPLEX
+  • "vs" or "compared to" with 2 periods = MEDIUM minimum
+  • "trends" over 3+ periods = COMPLEX
+  • Always list the specific CRM tables needed in tables_needed
 """
 
 
-def _call_llm_classify(query: str) -> Dict[str, str] | None:
-    """
-    Call LLM for semantic classification via llm.py router.
-    Chain: Groq 8b (fast, ~0.5s) → Gemini → Ollama 1.5b (local fallback)
-    Returns parsed dict or None if all providers fail / parse fails.
-    """
-    user_msg = f'Classify this CRM query:\n\n"{query}"\n\nRespond ONLY with JSON.'
-    raw = llm_call("classify", _SYSTEM_PROMPT, user_msg, max_tokens=120)
+def _build_user_prompt(query: str, available_tables: List[str]) -> str:
+    """Build the classification request with live table context."""
+    tables_str = ", ".join(available_tables) if available_tables else "unknown"
+    return (
+        f"Available CRM tables: {tables_str}\n\n"
+        f'Query to classify: "{query}"\n\n'
+        "Respond ONLY with the JSON object."
+    )
+
+
+def _parse_llm_response(raw: str) -> Optional[Dict]:
+    """Parse and validate the LLM's JSON classification response."""
     if not raw:
         return None
 
-    try:
-        content = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-        content = re.sub(r"\s*```$", "", content).strip()
+    # Strip markdown fences
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        cleaned = "\n".join(
+            line for line in lines
+            if not line.startswith("```")
+        ).strip()
 
-        parsed      = json.loads(content)
-        intent_type = parsed.get("type", "").upper().strip()
-        reason      = parsed.get("reason", "LLM classified").strip()
-
-        if intent_type not in ("SIMPLE", "COMPLEX"):
-            LOGGER.warning("Classifier LLM returned unexpected type=%s", intent_type)
-            return None
-
-        return {"type": intent_type, "reason": reason}
-
-    except json.JSONDecodeError as exc:
-        LOGGER.warning("Classifier LLM JSON parse failed: %s | raw: %.100s", exc, raw)
+    # Find the JSON object
+    start = cleaned.find("{")
+    end   = cleaned.rfind("}") + 1
+    if start == -1 or end == 0:
         return None
 
+    try:
+        parsed = json.loads(cleaned[start:end])
+    except json.JSONDecodeError as exc:
+        LOGGER.debug("Classifier JSON parse failed: %s | raw: %.150s", exc, raw)
+        return None
 
-# ── Rule-based pre-screen (catches definitive COMPLEX signals instantly) ────────
+    intent_type = str(parsed.get("type", "")).upper().strip()
+    if intent_type not in ("SIMPLE", "MEDIUM", "COMPLEX"):
+        LOGGER.warning("Classifier returned unexpected type=%s", intent_type)
+        return None
 
-def _rule_prescreen(text: str, words: list[str]) -> Dict[str, str] | None:
-    """
-    Fast rule-based check. Only returns a result for HIGH-CONFIDENCE COMPLEX
-    signals that we'd never want to mis-classify. Returns None to let LLM decide
-    for everything ambiguous.
-
-    This is NOT a replacement for the LLM — it's only an early exit for
-    patterns that are unambiguously complex.
-    """
-
-    # Vague / open-ended semantic queries — LLM interpretation needed
-    if re.search(
-        r"^(how are we|is (the )?business|any (risks?|issues?|problems?)|"
-        r"what.?s the (overall|status|health)|how.?s (the )?business|"
-        r"are we (growing|improving|doing well)|give me insights?|"
-        r"what should (i|we) (focus|worry|look)|overall (health|status|performance))\b",
-        text,
-    ):
-        return {
-            "type":   "COMPLEX",
-            "reason": "vague open-ended query — needs AI to interpret intent and pull relevant KPIs",
-        }
-
-    # Explicit report / analysis keywords
-    if re.search(
-        r"\b(report of (that|this)|full report|give.*report|analysis|"
-        r"executive summary|pipeline health|360.?view|full breakdown|"
-        r"performance review|kpi dashboard)\b",
-        text,
-    ):
-        return {
-            "type":   "COMPLEX",
-            "reason": "explicit report/analysis request — multi-section output required",
-        }
-
-    # Direct time-period comparison
-    if re.search(
-        r"\b(vs|versus|compared? to|compare|month.?on.?month|year.?on.?year"
-        r"|last.*vs.*this|this.*vs.*last|growth rate|trend over)\b",
-        text,
-    ):
-        return {
-            "type":   "COMPLEX",
-            "reason": "comparison / trend query — requires multiple result sets",
-        }
-
-    # "which user/rep has X" — always cross-entity
-    if re.search(
-        r"\b(which (user|rep|person|employee|member)|who (has|have|is|are))\b.*"
-        r"\b(task|deal|target|overdue|pending|assigned|performance)\b",
-        text,
-    ):
-        return {
-            "type":   "COMPLEX",
-            "reason": "cross-entity user analysis — requires joins across users + task/deal tables",
-        }
-
-    # "and also" / "as well as" for different data requests
-    if re.search(
-        r"\band\s+(also|give me|show me|tell me|list|what|how many|find)\b", text
-    ):
-        return {
-            "type":   "COMPLEX",
-            "reason": "multi-part request — user wants data from multiple sources in one answer",
-        }
-
-    return None  # let LLM decide
+    return {
+        "type":                 intent_type,
+        "reason":               str(parsed.get("reason", "LLM classified")).strip(),
+        "tables_needed":        [str(t) for t in parsed.get("tables_needed", [])],
+        "requires_calculation": bool(parsed.get("requires_calculation", False)),
+        "requires_multi_period": bool(parsed.get("requires_multi_period", False)),
+    }
 
 
-# ── Public API ─────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# PUBLIC API
+# ══════════════════════════════════════════════════════════════════════════════
 
-def classify(query: str) -> Dict[str, str]:
-    """
-    Classify a user query as SIMPLE or COMPLEX.
+def classify(query: str) -> Dict:
+    """Classify a CRM query as SIMPLE, MEDIUM, or COMPLEX using an LLM.
 
-    Pipeline:
-      1. Rule pre-screen — catches obvious COMPLEX signals at 0ms
-      2. Ollama qwen2.5:5b — accurate semantic classification
-      3. Fallback to SIMPLE if Ollama unavailable (safe default — text2sql handles it)
+    The LLM receives the query plus the live list of CRM tables so it can
+    reason correctly about which tables are involved.
+
+    Fallback chain: Groq 8b-instant → Gemini flash-lite → Ollama 3b
+    If all LLMs fail, defaults to MEDIUM (safe middle ground).
 
     Args:
-        query: Raw user query string
+        query: Raw user query string.
 
     Returns:
-        {"type": "SIMPLE" | "COMPLEX", "reason": "<one sentence explanation>"}
+        {type, reason, tables_needed, requires_calculation, requires_multi_period}
     """
-    t     = normalize_text(query)
-    words = t.split()
+    if not query or not query.strip():
+        return {
+            "type":                  "SIMPLE",
+            "reason":                "Empty query — defaulting to SIMPLE",
+            "tables_needed":         [],
+            "requires_calculation":  False,
+            "requires_multi_period": False,
+        }
 
-    # Stage 1a — SIMPLE fast-screen (zero LLM cost for obvious single-intent queries)
-    # Catches: counts, single-table lists, single aggregations, single filters
-    _SIMPLE_PATTERNS = [
-        r"^how many \w",                                          # "how many deals"
-        r"^(give me|show me?|list|get|fetch|display) all \w",   # "give me all deals"
-        r"^(give me|show|list) (closed |open |pending |overdue )?\w",
-        r"^total (revenue|sales|amount|invoices?|deals?)",       # "total revenue this month"
-        r"^(count|number of) \w",
-        r"^(find|search for?) \w+",                              # "find John Smith"
-        r"^\w{3,20} (this|last) (month|week|year|quarter)",      # "revenue this month"
-        r"^show (me )?(all )?(pending|open|overdue|completed) \w",
-        r"^(top|best) \d+ \w+",                                  # "top 5 customers"
-        r"^get (all )?\w+ (by|for|in|with) \w+$",               # simple lookups
-    ]
-    if len(words) <= 8 and any(re.match(p, t) for p in _SIMPLE_PATTERNS):
-        LOGGER.info("Classifier SIMPLE fast-screen hit | query: %.60s", query)
-        return {"type": "SIMPLE", "reason": "clear single-intent pattern — no LLM needed"}
+    # Get live table list to give the LLM accurate context
+    available_tables: List[str] = []
+    try:
+        available_tables = get_all_crm_tables()
+    except Exception as exc:
+        LOGGER.debug("Classifier: could not load table list: %s", exc)
 
-    # Stage 1b — rule pre-screen for definitive COMPLEX patterns
-    rule_result = _rule_prescreen(t, words)
-    if rule_result is not None:
-        LOGGER.info(
-            "Classifier RULE hit → %s | reason: %s | query: %.60s",
-            rule_result["type"], rule_result["reason"], query,
-        )
-        return rule_result
+    user_prompt = _build_user_prompt(query, available_tables)
 
-    # Stage 2 — LLM semantic classification (Groq 8b → Gemini → Ollama 1.5b)
-    llm_result = _call_llm_classify(query)
-    if llm_result is not None:
-        LOGGER.info(
-            "Classifier LLM → %s | reason: %s | query: %.60s",
-            llm_result["type"], llm_result["reason"], query,
-        )
-        return llm_result
+    # Call via LLM router: Groq 8b → Gemini → Ollama
+    raw = llm_call("classify", _SYSTEM_PROMPT, user_prompt, max_tokens=200)
 
-    # Stage 3 — Fallback (all LLMs unavailable)
-    LOGGER.warning(
-        "Classifier fallback (all LLMs unavailable) → SIMPLE | query: %.60s", query
-    )
+    if raw:
+        result = _parse_llm_response(raw)
+        if result:
+            LOGGER.info(
+                "Classifier → %s | reason: %s | query: %.60s",
+                result["type"], result["reason"], query,
+            )
+            return result
+        LOGGER.warning("Classifier: LLM returned unparseable output: %.100s", raw)
+
+    # All LLMs failed — safe default
+    LOGGER.warning("Classifier: all LLMs unavailable — defaulting to MEDIUM | query: %.60s", query)
     return {
-        "type":   "SIMPLE",
-        "reason": "classifier unavailable — defaulting to simple path (text2sql handles)",
+        "type":                  "MEDIUM",
+        "reason":                "Classifier unavailable — defaulting to MEDIUM (safe fallback)",
+        "tables_needed":         [],
+        "requires_calculation":  False,
+        "requires_multi_period": False,
     }

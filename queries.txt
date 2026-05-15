@@ -1,0 +1,125 @@
+1. How many departments
+2. Give me names of departments
+3. Give me who have pending task?
+4. Share ke kartik’s task status
+5. Share me yesh bhide pending task list
+6. Give me deals with categories
+7. Share me deals with stages
+8. Give me all deals with year wise stages status count
+9. Share me revenue of september 2027
+10. Share me revenue of march 2025
+11. Give me list of customers which have pending invoices
+12. Give me summary of deals
+13. Share me top 10 invoices by that amount
+14. Share me paid invoices by that amount and top 10 only
+15. I want all details of pankaj
+16. I need to find details of negotiable deals with that total amount and count
+17. Who you are?
+18. Give me kpi report
+19. Share me all contacts list
+20. I want last 5 contacts
+21. I have to see last 5 contacts details with summary
+22. Compare last year revenue and current year and give me summary
+23. Give me open deals and that ratio of closed deals
+24. I need to see invoice 1st give me details
+25. Give me 1st invoice details
+26. Give me that invoices only that are paid and currency is INR only
+27. Give me USD currency invoices list only with total
+28. Show me unpaid invoices with that currency
+29. What tasks are pending for the users
+30. What tasks are pending for the sales team
+31. Pending tasks
+32. Which customers have not given business in 3 months
+33. Show me the top 10 customers by revenue
+34. Give me closed won deals
+35. Give me all deals
+36. How many deals are there
+37. Who is ketul
+38. Give me details of ketul
+39. Invoice by status
+40. List new leads from this week
+41. New leads this month
+42. Last 5 contacts details
+43. Show me the total sales for last month
+44. Total revenue this financial year
+45. Total revenue generated in 2025
+46. Total revenue of 2025 for Lead
+47. Pending invoices
+48. Overdue payments
+49. Total collection
+50. Overdue invoice aging and outstanding amount by company
+51. Sales pipeline by stage
+52. Show pipeline distribution by stage
+53. Which deals are stuck in the proposal stage
+54. Opportunities lost in July
+55. Lost deals last quarter
+56. Which sales rep closed the most deals this quarter
+57. Which leads have not been contacted in 7 days
+58. Conversion rate from lead to customer
+59. Any follow-ups overdue this week
+60. Top performing sales owners in last 6 months with monthly trend
+61. Funnel performance and conversion to closed won by owner
+62. High activity companies with weak payment conversion
+63. Best product and project type combinations by value, average deal size, and win rate
+64. Type of deals
+65. I want last 5 contacts by date
+66. Total revenue generated till date
+67. Give me todays status
+68. Give me yesterdays status
+69. Get companies by region
+70. Get companies list by region
+71. Get target vs achieved for all users
+72. List of all the companies
+73. Cybersecurity Expert details of this company
+74. Summarise cyber security experts
+75. Give me summary of the company
+76. Total no of contacts
+77. Get draft sales order
+78. Get companies by source
+79. Get contacts by job title
+80. Get revenue summary for last 6 months
+81. Get top products for this period
+82. Get all payment methods
+83. Get all industries
+84. Get company management settings
+85. Get file upload limit
+86. Get meetings for today
+87. Get meetings for 2026-05-12
+88. Get SMTP configuration details
+89. Show invoices overdue
+90. Get all details of accounts with country name
+91. Get all details of accounts with annual revenue greater than amount
+92. Share me ketul's pending task list
+93. Pending tasks by ketul
+94. What tasks does ketul have
+95. Tasks assigned to yash bhide
+96. Who has pending tasks
+97. Pending tasks per user
+98. Invoices not yet paid
+99. Show pending payment invoices
+100. Which payments are past due
+101. Invoices due next month
+102. Open deals
+103. Deals by ketul
+104. Deals by year and stage
+105. Contacts breakdown by designation
+106. Funnel performance
+107. High activity companies with weak payment
+108. Give me summary of kartik trivedi
+109. SO01241 line items
+110. Status of this SO00080
+111. SO00080 details
+112. Find ELSN/2026/020
+113. Search Automation Systems
+114. Overdue invoice aging
+115. Top 5 customers by revenue
+116. Pipeline by stage
+117. How many open deals
+118. What is our win rate this year
+119. Compare revenue this month vs last month
+120. Which deals are at risk of being lost
+121. Revenue by company this year
+122. Deals owned by ketul and their status
+123. Average deal size by stage
+124. Target vs achieved for this month
+125. Which contacts have no deals

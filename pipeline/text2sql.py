@@ -42,7 +42,7 @@ from pipeline.utils import (
 LOGGER = logging.getLogger("sql_chatbot")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-_MAX_SQL_RETRIES    = 1
+_MAX_SQL_RETRIES    = 3  # 3-attempt self-heal loop
 _PARALLEL_TIMEOUT_S = 20
 _MAX_RESULT_ROWS    = 500
 _SQL_EXEC_TIMEOUT_S = 20
@@ -1180,69 +1180,141 @@ def _format_result(rows: List[Any], sql: str, query: str) -> str:
 def run(query: str, agent) -> Optional[Dict[str, Any]]:
     """Generate SQL → execute → return formatted result dict.
 
-    Includes auto-repair: if the first SQL fails at execution, we retry
-    once with the error message fed back to the fallback model.
+    3-attempt self-heal loop:
+      Attempt 1: Normal SQL generation via router (compact schema)
+      Attempt 2: If column error → db_schema.find_correct_column() + rebuild prompt
+      Attempt 3: Wider schema (max_tables=10) + explicit column correction hint
 
     Returns result dict {answer, tables_used, confidence, sql_queries}
-    or None if SQL generation AND repair both fail entirely.
+    or None if all 3 attempts fail.
     """
+    from pipeline.db_schema import find_correct_column, get_all_crm_tables
+
     with Timer("text2sql_total") as timer:
         LOGGER.info("Text2SQL: processing: %.60s", query)
 
-        sql = generate_sql(query, agent)
-        if not sql:
-            LOGGER.warning("Text2SQL: no valid SQL generated for: %.60s", query)
-            return None
+        table_names  = get_table_names(agent)
+        all_crm      = get_all_crm_tables()
+        heal_hint:   str = ""
+        last_sql:    Optional[str] = None
+        current_query = query
 
-        _res = run_sql(agent, sql)
+        for attempt in range(1, _MAX_SQL_RETRIES + 1):
+            # ── Generate SQL ──────────────────────────────────────────────────
+            sql = _generate_sql_via_router(current_query, table_names)
 
-        # ── Auto-repair: retry with error hint if execution failed ────────────
-        if _res.error:
-            LOGGER.warning("Text2SQL exec failed: %s | SQL: %.120s", _res.error, sql)
-            try:
-                table_names_r = get_table_names(agent)
-                repair_query  = (
-                    f"{query}\n\n"
-                    f"[Previous SQL had error: {_res.error[:200]}. "
-                    f"Previous SQL was: {sql[:300]}. Write a corrected SQL.]"
-                )
-                fix_sql = _generate_sql_via_router(repair_query, table_names_r)
+            if not sql:
+                # Router failed — try Ollama parallel on first attempt only
+                if attempt == 1:
+                    primary_sys,  primary_user  = _build_primary_prompt(query)
+                    fallback_sys, fallback_user = _build_fallback_prompt(query)
+                    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="t2s") as pool:
+                        f_primary  = pool.submit(
+                            _run_model, settings.ollama_primary_model,
+                            primary_sys, primary_user,
+                            settings.ollama_primary_timeout, table_names, "primary",
+                        )
+                        f_fallback = pool.submit(
+                            _run_model, settings.ollama_fallback_model,
+                            fallback_sys, fallback_user,
+                            settings.ollama_fallback_timeout, table_names, "fallback",
+                        )
+                        for future in as_completed({f_primary, f_fallback}, timeout=_PARALLEL_TIMEOUT_S):
+                            try:
+                                candidate = future.result(timeout=2)
+                                if candidate:
+                                    sql = candidate
+                                    break
+                            except Exception:
+                                pass
 
-                if fix_sql and fix_sql != sql:
-                    ok2, _ = _validate_sql(fix_sql, table_names_r)
-                    if ok2:
-                        _res2 = run_sql(agent, fix_sql)
-                        if not _res2.error:
-                            LOGGER.info("Auto-repair succeeded: %.80s", fix_sql)
-                            sql  = fix_sql
-                            _res = _res2
-                        else:
-                            LOGGER.warning("Auto-repair also failed: %s", _res2.error)
-                            return None
-                    else:
-                        return None
-                else:
-                    return None
-            except Exception as exc:
-                LOGGER.warning("Auto-repair error: %s", exc)
+            if not sql:
+                LOGGER.warning("Text2SQL attempt %d: no SQL generated", attempt)
+                if attempt < _MAX_SQL_RETRIES:
+                    continue
                 return None
 
-        rows        = _res.rows
-        tables_used = _extract_tables_from_sql(sql)
-        body        = _format_result(rows, sql, query)
+            last_sql = sql
 
-        # Confidence reflects execution quality, not row count.
-        # An empty valid result is still a confident answer (0.88).
-        confidence = 0.90 if rows else 0.88
+            # ── Execute ───────────────────────────────────────────────────────
+            _res = run_sql(agent, sql)
 
-    LOGGER.info(
-        "Text2SQL: done %.0fms | rows=%d | tables=%s | sql=%.80s",
-        timer.elapsed_ms, len(rows) if rows else 0, tables_used, sql,
-    )
+            if not _res.error:
+                # Success
+                rows        = _res.rows
+                tables_used = _extract_tables_from_sql(sql)
+                body        = _format_result(rows, sql, query)
+                confidence  = 0.90 if rows else 0.88
 
-    return {
-        "answer":      body,
-        "tables_used": tables_used,
-        "confidence":  confidence,
-        "sql_queries": [sql],
-    }
+                LOGGER.info(
+                    "Text2SQL: done %.0fms (attempt %d) | rows=%d | tables=%s | sql=%.80s",
+                    timer.elapsed_ms, attempt, len(rows) if rows else 0, tables_used, sql,
+                )
+                return {
+                    "answer":      body,
+                    "tables_used": tables_used,
+                    "confidence":  confidence,
+                    "sql_queries": [sql],
+                }
+
+            # ── Self-heal on error ────────────────────────────────────────────
+            err_lower = _res.error.lower()
+            LOGGER.warning(
+                "Text2SQL attempt %d exec failed: %s | sql=%.120s",
+                attempt, _res.error, sql,
+            )
+
+            if attempt >= _MAX_SQL_RETRIES:
+                break  # exhausted all attempts
+
+            # ── Error-type diagnosis → targeted repair prompt ─────────────────
+            if "column" in err_lower and "exist" in err_lower:
+                # Find the bad column name from the error message
+                import re as _re
+                bad_col_match = _re.search(
+                    r'column\s+"?([^"\s]+)"?\s+(?:does not exist|of relation)',
+                    _res.error, _re.IGNORECASE,
+                )
+                bad_col = bad_col_match.group(1).strip().strip('"') if bad_col_match else None
+
+                if bad_col:
+                    correct = find_correct_column(bad_col, all_crm)
+                    if correct:
+                        heal_hint = (
+                            f"Column '{bad_col}' does not exist. "
+                            f"Use '{correct}' instead. "
+                        )
+                        LOGGER.info("Text2SQL self-heal: %s → %s", bad_col, correct)
+                    else:
+                        heal_hint = (
+                            f"Column '{bad_col}' does not exist in this DB. "
+                            "Check the schema for the correct column name."
+                        )
+                else:
+                    heal_hint = f"Column error: {_res.error[:200]}"
+
+            elif "ambiguous" in err_lower:
+                heal_hint = (
+                    "Column reference is ambiguous. Prefix ALL columns with the "
+                    "table alias (e.g. d.name, u.name — never bare 'name' in JOINs)."
+                )
+
+            elif "syntax" in err_lower or "parse" in err_lower:
+                heal_hint = (
+                    f"SQL syntax error: {_res.error[:150]}. "
+                    "Check parentheses, quoting of mixed-case column names, "
+                    "and NULLIF cast syntax."
+                )
+
+            else:
+                heal_hint = f"Fix this error: {_res.error[:200]}"
+
+            # Rebuild query with heal hint for next attempt
+            current_query = (
+                f"{query}\n\n"
+                f"[SELF-HEAL ATTEMPT {attempt+1}: {heal_hint} "
+                f"Previous SQL was: {sql[:300]}. Write corrected SQL.]"
+            )
+
+        LOGGER.warning("Text2SQL: all %d attempts failed for: %.60s", _MAX_SQL_RETRIES, query)
+        return None
