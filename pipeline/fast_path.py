@@ -390,8 +390,15 @@ def _classify_route(text: str) -> str:
     t = normalize_text(text)
 
     if re.search(r"\bwho\s+is\b|\bwho\s+are\b|\bfind\s+(user|person|contact|company)\b", t):
-        return "search"
-    if re.search(r"[A-Z]{2,}/\d{4}/\d+", text):
+        # Don't capture target/achievement queries ("who is not achieved targets")
+        if not re.search(r"\b(targets?|achiev|performance|kpi)\b", t):
+            return "search"
+    if re.search(r"[A-Za-z]{2,}/\d{4}/\d+", text, re.I):
+        return "invoice_lookup"
+    # "details/share/info of ELSN/2025/1" or "ELSN/2025/1 details" (lowercase prefix)
+    if re.search(r"\b(details?|share|info)\b.{0,40}[A-Za-z]{2,}/\d{4}/\d+", text, re.I):
+        return "invoice_lookup"
+    if re.search(r"[A-Za-z]{2,}/\d{4}/\d+.{0,30}\b(details?|info)\b", text, re.I):
         return "invoice_lookup"
     # Quarterly check: skip when the primary intent is target/achievement (time modifier only)
     if (re.search(r"\bquarter(ly)?\b|Q[1-4]\b", t, re.I)
@@ -579,6 +586,14 @@ def _classify_route(text: str) -> str:
             and re.search(r"\b(ratio|vs|and\s+closed)\b", t)):
         return "deals_ratio"
 
+    # ── Lost / Closed Lost deals (with or without date filter) ─────────────────
+    # Catches: "lost deals last month", "which deals lost last 6 months", "closed lost deals"
+    if re.search(r"\b(lost\s+deals?|deals?\s+lost|closed\s+lost\s+deals?)\b", t):
+        return "deals_filter"
+    if (re.search(r"\bdeals?\b", t)
+            and re.search(r"\b(lost|closed\s+lost)\b", t)):
+        return "deals_filter"
+
     return "general"
 
 
@@ -648,27 +663,132 @@ def _fp_revenue(agent, user_query: str) -> Optional[Dict]:
                 "tables_used": [table], "confidence": 0.0, "sql_queries": [total_sql]}
     rows      = _res.rows
     total     = coerce_number(rows[0][0] if rows else 0)
-    answer    = f"Total revenue for **{label}**: **{fmt_number(total)}**"
     sql_queries = [total_sql]
 
-    # Monthly breakdown when a range label is present
-    range_label = label if time_cond else ""
-    if any(x in range_label for x in ["month", "quarter", "year"]) and doc_date_field:
-        doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
-        b_sql = f"""SELECT to_char(date_trunc('month', {doc_date_expr}), 'Mon YYYY'),
-  COALESCE(SUM({coalesce_expr}), 0)
-FROM "{table}" {where}
-GROUP BY date_trunc('month', {doc_date_expr})
-ORDER BY date_trunc('month', {doc_date_expr})""".strip()
+    # ── Currency-aware totals ──────────────────────────────────────────────────
+    # Group by currency using the raw (non-USD-converted) amount field so each
+    # currency total is shown in its own denomination (INR, USD, AUD, …).
+    def _fmt_cur(amt: float, cur: str) -> str:
+        cur = (cur or "USD").upper().strip()
+        n   = fmt_number(amt)
+        if cur == "USD": return f"${n}"
+        if cur == "EUR": return f"€{n}"
+        if cur == "GBP": return f"£{n}"
+        return f"{cur} {n}"
+
+    currency_field   = next((f for f in fields if f.lower() == "currency"), None) or \
+                       next((f for f in fields if "currency" in f.lower()), None)
+    raw_amount_field = next((f for f in fields if f.lower() == "grand_total"), None) or \
+                       next((f for f in fields
+                             if "total" in f.lower() and "usd" not in f.lower()), None)
+
+    answer = f"Total revenue for **{label}**: **{fmt_number(total)}**"  # fallback
+
+    if currency_field and raw_amount_field:
+        # ── Per-currency totals ────────────────────────────────────────────────
+        cur_sql = (
+            f"SELECT UPPER(COALESCE(document->>'{currency_field}','USD')) AS cur,"
+            f" COALESCE(SUM(NULLIF(document->>'{raw_amount_field}','')::numeric),0) AS total"
+            f' FROM "{table}" {where}'
+            f" GROUP BY 1 ORDER BY total DESC"
+        ).strip()
         try:
-            _b_res = run_sql(agent, b_sql)
-            b_rows = _b_res.rows
-            if b_rows:
-                lines = ["\n**Monthly Breakdown:**", "| Month | Revenue |", "| --- | --- |"]
-                for r in b_rows:
-                    lines.append(f"| {r[0] or 'Unknown'} | {fmt_number(coerce_number(r[1]))} |")
-                answer += "\n" + "\n".join(lines)
-                sql_queries.append(b_sql)
+            _cur_res = run_sql(agent, cur_sql)
+            if not _cur_res.error and _cur_res.rows:
+                sql_queries.append(cur_sql)
+                items = [(r[0] or "USD", coerce_number(r[1])) for r in _cur_res.rows]
+
+                # ── Live USD conversion (Frankfurter API, cached 1h) ───────────
+                try:
+                    from pipeline.currency_converter import convert_multi_to_usd
+                    grand_usd, converted = convert_multi_to_usd(items)
+                    converted_count = sum(1 for _, _, u in converted if u is not None)
+                except Exception:
+                    grand_usd, converted = 0.0, [(c, a, None) for c, a in items]
+                    converted_count = 0
+
+                supported   = [(c, o, u) for c, o, u in converted if u is not None]
+                unsupported = [(c, o)    for c, o, u in converted if u is None]
+
+                if len(items) == 1:
+                    cur0, tot0 = items[0]
+                    usd0 = converted[0][2] if converted else None
+                    if cur0 == "USD":
+                        answer = f"Total revenue for **{label}**: **{_fmt_cur(tot0, cur0)}**"
+                    else:
+                        usd_note = f" (≈ **${fmt_number(usd0)} USD** at live rates)" if usd0 else ""
+                        answer = f"Total revenue for **{label}**: **{_fmt_cur(tot0, cur0)}**{usd_note}"
+
+                else:
+                    # Header: USD grand total only
+                    answer = (
+                        f"Total revenue for **{label}**: **${fmt_number(grand_usd)} USD**"
+                        + (f" *({converted_count} of {len(items)} currencies converted at live rates)*"
+                           if converted_count < len(items) else
+                           f" *(converted at live rates)*")
+                    )
+
+                    # Converted currencies table
+                    if supported:
+                        cur_lines = ["\n**Revenue by Currency:**",
+                                     "| Currency | Total | ≈ USD |",
+                                     "| --- | --- | --- |"]
+                        for cur, orig, usd_amt in supported:
+                            cur_lines.append(
+                                f"| {cur} | {_fmt_cur(orig, cur)} | ${fmt_number(usd_amt)} |"
+                            )
+                        cur_lines.append(f"| **Total** | | **${fmt_number(grand_usd)}** |")
+                        answer += "\n" + "\n".join(cur_lines)
+
+                    # Unsupported currencies listed separately
+                    if unsupported:
+                        uc_lines = ["\n*Could not convert (unsupported currencies):*",
+                                    "| Currency | Total |",
+                                    "| --- | --- |"]
+                        for cur, orig in unsupported:
+                            uc_lines.append(f"| {cur} | {_fmt_cur(orig, cur)} |")
+                        answer += "\n" + "\n".join(uc_lines)
+
+                # ── Monthly breakdown (USD-converted) ─────────────────────────
+                if doc_date_field:
+                    doc_date_expr = f"NULLIF(document->>'{doc_date_field}','')::timestamptz"
+                    null_cond     = f"{doc_date_expr} IS NOT NULL"
+                    month_where   = (where + f" AND ({null_cond})"
+                                     if where else f"WHERE {null_cond}")
+                    month_sql = (
+                        f"SELECT to_char(date_trunc('month', {doc_date_expr}), 'Mon YYYY'),"
+                        f" UPPER(COALESCE(document->>'{currency_field}','USD')),"
+                        f" COALESCE(SUM(NULLIF(document->>'{raw_amount_field}','')::numeric),0)"
+                        f' FROM "{table}" {month_where}'
+                        f" GROUP BY date_trunc('month', {doc_date_expr}), 2"
+                        f" ORDER BY date_trunc('month', {doc_date_expr})"
+                    ).strip()
+                    try:
+                        _m_res = run_sql(agent, month_sql)
+                        if not _m_res.error and _m_res.rows:
+                            from collections import defaultdict
+                            month_grp: Dict[str, List] = defaultdict(list)
+                            for m_row in _m_res.rows:
+                                if m_row[0]:
+                                    month_grp[m_row[0]].append(
+                                        (m_row[1] or "USD", coerce_number(m_row[2]))
+                                    )
+                            if month_grp:
+                                try:
+                                    from pipeline.currency_converter import convert_multi_to_usd as _cmu
+                                    m_lines = ["\n**Monthly Breakdown (USD):**",
+                                               "| Month | Revenue (USD) |",
+                                               "| --- | --- |"]
+                                    for mo, c_list in month_grp.items():
+                                        m_usd, _ = _cmu(c_list)
+                                        m_lines.append(f"| {mo} | ${fmt_number(m_usd)} |")
+                                    answer += "\n" + "\n".join(m_lines)
+                                    sql_queries.append(month_sql)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
         except Exception:
             pass
 
@@ -1092,7 +1212,12 @@ def _fp_deals_filter(agent, user_query: str) -> Optional[Dict]:
     stage_field   = next((f for f in fields if f.lower() == "stage"), None) or \
                     next((f for f in fields if "stage" in f.lower()), "stage")
     name_field    = next((f for f in fields if f.lower() == "name"), "name")
-    close_field   = next((f for f in fields if "close" in f.lower()), None)
+    close_field   = (
+        next((f for f in fields if f.lower() in
+              ["closedate", "close_date", "closeddate", "closed_date", "closeat", "close_at"]), None)
+        or next((f for f in fields if "close" in f.lower()), None)
+        or next((f for f in fields if f.lower() in ["date", "wonAt", "lost_at", "lostat"]), None)
+    )
     amount_field  = next((f for f in fields if f.lower() in ["grand_total", "grand_total_in_usd"]), None)
     deleted_field = next((f for f in fields if f.lower() == "deleted"), None)
     # Fields used by open-deal detection (preferred over stage NOT IN approach)
@@ -1600,9 +1725,12 @@ def _fp_list_records(agent, user_query: str) -> Optional[Dict]:
         _offset = 0
         order   = _date_desc()
     else:
-        limit   = 500
+        # Default: show 50 most recently-updated records.
+        # Use the native updated_at column (always populated) so records added/modified
+        # in 2026 sort above older ones whose document-date field might be 2025.
+        limit   = 50
         _offset = 0
-        order   = _date_desc()
+        order   = "updated_at DESC"
 
     count_sql   = f'SELECT COUNT(*)::int FROM "{table}" {where}'.strip()
     _cnt_res    = run_sql(agent, count_sql)
@@ -1833,6 +1961,20 @@ def _fp_targets(agent, user_query: str) -> Optional[Dict]:
     if "targets" not in table_names:
         return None
 
+    # ── Intent detection ──────────────────────────────────────────────────────
+    # Check "not achieved / pending" FIRST so "who is not achieved" isn't also flagged as achieved
+    wants_pending  = bool(re.search(
+        r"\bpending\b|\bnot\s+achiev|\bhaven.?t\s+achiev|\bbelow\s+target\b"
+        r"|\bunder\s+target\b|\bnot\s+met\b|\bnot\s+complet|\bincomplete\b"
+        r"|\bremaining\b|\bwho\s+(?:have\s+)?(?:not|haven.?t)\b",
+        text,
+    ))
+    wants_achieved = (not wants_pending) and bool(re.search(
+        r"\bachiev|\bcomplet|\bwho\s+met\b|\bfulfill|\bsuccess\b"
+        r"|\bwho\s+(?:have\s+)?(?:achiev|complet|met)\b",
+        text,
+    ))
+
     year_m        = re.search(r"\b(20\d{2})\b", text)
     month_y       = _extract_month_year(text)
     period_filter = ""
@@ -1850,7 +1992,6 @@ def _fp_targets(agent, user_query: str) -> Optional[Dict]:
         period_label  = year_m.group(1)
 
     user_filter = ""
-    # Accept single names ("kartik") and full names ("kartik trivedi")
     user_m = re.search(r"(?:for|by|of)\s+([a-zA-Z][a-zA-Z]*(?:\s+[a-zA-Z][a-zA-Z]*)?)", user_query, re.I)
     if user_m:
         uname = sanitize_sql_value(user_m.group(1).strip())
@@ -1903,16 +2044,69 @@ ORDER BY NULLIF(t.document->>'year','')::int DESC,
             "sql_queries": [sql],
         }
 
-    lines = [
+    # ── Python-side intent filtering (idx: 3=target_usd, 4=achieved_usd, 5=achievement_pct)
+    def _pct(r): return coerce_number(r[5]) if r[5] is not None else 0.0
+    def _tgt(r): return coerce_number(r[3]) if r[3] is not None else 0.0
+
+    achieved_rows = [r for r in rows if _tgt(r) > 0 and _pct(r) >= 100]
+    pending_rows  = [r for r in rows if _tgt(r) > 0 and _pct(r) < 100]
+    total_with_target = len([r for r in rows if _tgt(r) > 0])
+
+    if wants_achieved:
+        display_rows = achieved_rows
+    elif wants_pending:
+        display_rows = pending_rows
+    else:
+        display_rows = rows
+
+    # ── Empty result message
+    if not display_rows:
+        if wants_achieved:
+            msg = f"No users have fully achieved their targets for **{period_label}**. All targets are still pending."
+        elif wants_pending:
+            msg = f"All users with targets for **{period_label}** have already achieved them. "
+        else:
+            msg = f"No target data found for {period_label}."
+        return {"answer": msg, "tables_used": ["targets", "users"],
+                "confidence": 0.9, "sql_queries": [sql]}
+
+    # ── Build table
+    tbl_lines = [
         "| User | Team | Period | Target (USD) | Achieved (USD) | Achievement % |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-    for r in rows:
-        vals = ["—" if v is None else str(v) for v in r]
-        lines.append("| " + " | ".join(vals) + " |")
+    for r in display_rows:
+        tgt  = fmt_number(coerce_number(r[3])) if r[3] is not None else "—"
+        ach  = fmt_number(coerce_number(r[4])) if r[4] is not None else "—"
+        pct  = f"{_pct(r)}%" if r[5] is not None else "—"
+        name = r[0] or "—"
+        team = r[1] or "—"
+        per  = r[2] or "—"
+        tbl_lines.append(f"| {name} | {team} | {per} | {tgt} | {ach} | {pct} |")
+
+    # ── Summary
+    if wants_achieved:
+        title   = f"Achieved Targets — {period_label}"
+        summary = (
+            f"**{len(achieved_rows)} user(s)** have fully achieved their targets for **{period_label}**.\n"
+            f"{len(pending_rows)} user(s) still have pending targets."
+        )
+    elif wants_pending:
+        title   = f"Pending Targets — {period_label}"
+        summary = (
+            f"**{len(pending_rows)} user(s)** have not yet achieved their targets for **{period_label}**.\n"
+            f"They need to complete the remaining amount to meet their goals."
+        )
+    else:
+        success_pct = round(len(achieved_rows) / total_with_target * 100, 1) if total_with_target > 0 else 0.0
+        title   = f"Target vs Achieved — {period_label}"
+        summary = (
+            f"**{len(achieved_rows)} of {total_with_target} user(s)** achieved their targets "
+            f"({success_pct}% success rate) for **{period_label}**."
+        )
 
     return {
-        "answer":      f"**Target vs Achieved — {period_label}:**\n\n" + "\n".join(lines),
+        "answer":      f"**{title}**\n\n{summary}\n\n" + "\n".join(tbl_lines),
         "tables_used": ["targets", "users"] + (["sales"] if sales_exists else []),
         "confidence":  0.97,
         "sql_queries": [sql],
@@ -2131,9 +2325,19 @@ def _fp_lookup_list(agent, user_query: str) -> Optional[Dict]:
     ]
     matched_table, matched_field = None, None
     for pattern, t_name, field in LOOKUP_MAP:
-        if re.search(pattern, text, re.I) and t_name in table_names:
-            matched_table, matched_field = t_name, field
-            break
+        if re.search(pattern, text, re.I):
+            if t_name in table_names:
+                matched_table, matched_field = t_name, field
+                break
+            # Flexible fallback: find any table whose normalised name contains the key
+            t_key = t_name.replace("_", "").lower()
+            for tbl in table_names:
+                tbl_norm = tbl.replace("_", "").lower()
+                if t_key in tbl_norm or tbl_norm in t_key:
+                    matched_table, matched_field = tbl, field
+                    break
+            if matched_table:
+                break
     if not matched_table:
         return None
 
@@ -3843,15 +4047,21 @@ def _fp_invoice_lookup(agent, user_query: str) -> Optional[Dict]:
     inv_num = m.group(1).upper()
 
     table_names = get_table_names(agent)
-    inv_table   = next((t for t in table_names if t.lower() == "invoices"), None)
+    inv_table   = (
+        next((t for t in table_names if t.lower() == "invoices"), None)
+        or next((t for t in table_names if t.lower() == "invoice"), None)
+        or next((t for t in table_names if "invoice" in t.lower()), None)
+    )
     if not inv_table:
         return None
 
     fields    = get_document_fields(agent, inv_table)
-    num_field = next(
-        (f for f in fields if "invoice_number" in f.lower()
-         or f.lower().replace("_", "") == "invoicenumber"),
-        "invoice_number",
+    # Prefer exact "invoice_number" over fields that merely contain the substring
+    # (e.g. "ecomva_invoice_number", "indian_invoice_number" must NOT be picked first).
+    num_field = (
+        next((f for f in fields if f.lower() == "invoice_number"), None)
+        or next((f for f in fields if f.lower().replace("_", "") == "invoicenumber"), None)
+        or "invoice_number"
     )
     safe_num  = sanitize_sql_value(inv_num)
 
@@ -3863,59 +4073,136 @@ def _fp_invoice_lookup(agent, user_query: str) -> Optional[Dict]:
         "payment_mode", "tax_amount", "discount_amount", "payment_fee_amount",
         "invoiceFor", "notes",
     ]
-    fl = {f.lower(): f for f in fields}
+    fl       = {f.lower(): f for f in fields}
+    fl_nosep = {f.lower().replace("_", "").replace("-", ""): f for f in fields}
     select_parts = []
     for pf in _PRIORITY:
-        actual = fl.get(pf.lower())
+        # Try exact lowercase match first, then strip underscores for camelCase fields
+        actual = (fl.get(pf.lower())
+                  or fl_nosep.get(pf.lower().replace("_", "").replace("-", "")))
         if actual:
             select_parts.append(f"document->>'{actual}' AS \"{pf.lower()[:30]}\"")
 
     if not select_parts:
+        # Last resort: add all non-internal fields up to 12 columns
+        for f in fields[:12]:
+            select_parts.append(f"document->>'{f}' AS \"{f.lower()[:30]}\"")
+    if not select_parts:
         return None
 
+    # Step 1: Simple invoice fetch — no correlated subquery (keeps SQL reliable)
     sql = (
-        f'SELECT {", ".join(select_parts)}, document->\'payment_history\' AS payment_history '
+        f'SELECT {", ".join(select_parts)}, '
+        f"document->'payment_history' AS payment_history "
         f'FROM "{inv_table}" '
-        f"WHERE document->>'{num_field}' ILIKE '%{safe_num}%' LIMIT 1"
+        f"WHERE TRIM(document->>'{num_field}') ILIKE '{safe_num}' LIMIT 1"
     )
     _res = run_sql(agent, sql)
     if _res.error or not _res.rows:
         return {
-            "answer":      f"No invoice found matching **{inv_num}**.",
+            "answer":      f"## Executive Summary\n\nNo invoice found matching **{inv_num}**. Please verify the invoice number and try again.",
             "tables_used": [inv_table],
             "confidence":  0.9,
             "sql_queries": [sql],
         }
 
-    row      = _res.rows[0]
+    row       = _res.rows[0]
     col_names = [p.split(" AS ")[-1].strip('"') for p in select_parts] + ["payment_history"]
-    lines = []
+
+    # Step 2: Resolve company MongoDB ID → company name (separate simple query)
+    companies_tbl = next((t for t in table_names if t.lower() == "companies"), None)
+    company_fld   = fl.get("company") or fl_nosep.get("company")
+    company_name_resolved: Optional[str] = None
+    if companies_tbl and company_fld:
+        # Find which position in row holds the company ID
+        try:
+            comp_idx = col_names.index("company")
+            comp_id  = str(row[comp_idx]).strip() if row[comp_idx] else ""
+            if comp_id and re.match(r'^[0-9a-f]{24}$', comp_id, re.I):
+                comp_sql = (
+                    f"SELECT document->>'companyName' FROM \"{companies_tbl}\" "
+                    f"WHERE document->>'_id' = '{comp_id}' LIMIT 1"
+                )
+                _comp_res = run_sql(agent, comp_sql)
+                if not _comp_res.error and _comp_res.rows and _comp_res.rows[0][0]:
+                    company_name_resolved = str(_comp_res.rows[0][0]).strip()
+        except (ValueError, IndexError):
+            pass
+
+    _INFO_COLS   = {"invoice_number", "companyname", "company", "invoicefor"}
+    _DATE_COLS   = {"invoice_date", "due_date", "payment_date"}
+    _MONEY_COLS  = {"grand_total", "grandtotal_in_usd", "subtotal", "currency",
+                    "tax_amount", "discount_amount", "payment_fee_amount", "payment_mode"}
+    _STATUS_COLS = {"payment_status", "approval_status"}
+
+    # MongoDB ObjectIDs are 24 hex chars — skip raw IDs from display
+    _MONGO_ID = re.compile(r'^[0-9a-f]{24}$', re.I)
+
+    info_lines: List[str] = []
+    date_lines: List[str] = []
+    money_lines: List[str] = []
+    status_lines: List[str] = []
+    other_lines: List[str] = []
     ph_raw = None
+
+    # Inject resolved company name as the first info line (if found)
+    if company_name_resolved:
+        info_lines.append(f"**Company:** {company_name_resolved}")
+
     for col, val in zip(col_names, row):
         if col == "payment_history":
             ph_raw = val
             continue
-        if val and str(val).strip():
-            lines.append(f"**{col.replace('_', ' ').title()}:** {val}")
+        if not val or not str(val).strip():
+            continue
+        # Skip raw MongoDB ObjectIDs — not readable by users
+        if _MONGO_ID.match(str(val).strip()):
+            continue
+        label = col.replace("_", " ").title()
+        entry = f"**{label}:** {val}"
+        if col in _INFO_COLS:
+            info_lines.append(entry)
+        elif col in _DATE_COLS:
+            date_lines.append(entry)
+        elif col in _MONEY_COLS:
+            money_lines.append(entry)
+        elif col in _STATUS_COLS:
+            status_lines.append(entry)
+        else:
+            other_lines.append(entry)
 
-    # Parse payment_history JSONB array
+    answer_parts: List[str] = [f"### Invoice: {inv_num}\n"]
+    for title, items in [
+        ("Basic Information", info_lines),
+        ("Dates", date_lines),
+        ("Financial Details", money_lines),
+        ("Status", status_lines),
+        ("Other", other_lines),
+    ]:
+        if items:
+            answer_parts.append(f"**{title}:**\n" + "\n".join(f"• {i}" for i in items))
+
+    # Payment history
     if ph_raw:
         import json as _json
         try:
             ph_list = _json.loads(str(ph_raw)) if isinstance(ph_raw, str) else ph_raw
             if isinstance(ph_list, list) and ph_list:
-                lines.append("\n**Payment History:**")
+                ph_lines = ["**Payment History:**"]
                 for ph in ph_list:
                     if isinstance(ph, dict):
-                        lines.append(
-                            f"- Date: {ph.get('payment_date', '—')} | "
+                        ph_lines.append(
+                            f"• Date: {ph.get('payment_date', '—')} | "
                             f"Amount: {fmt_number(coerce_number(ph.get('payment_amount', 0)))}"
                         )
+                answer_parts.append("\n".join(ph_lines))
         except Exception:
             pass
 
+    # Prefix with "## Executive Summary" so narrate_response returns this unchanged
+    # (prevents the LLM from replacing correct invoice data with a wrong summary)
     return {
-        "answer":      f"**Invoice: {inv_num}**\n\n" + "\n\n".join(lines),
+        "answer":      "## Executive Summary\n\n" + "\n\n".join(answer_parts),
         "tables_used": [inv_table],
         "confidence":  0.97,
         "sql_queries": [sql],
@@ -5412,6 +5699,7 @@ _SPECIALIZED: Dict[str, Any] = {
     # New routes added in this enhancement
     "invoice_lookup":           _fp_invoice_lookup,
     "company_detail":           _fp_company_detail,
+    "deals_filter":             _fp_deals_filter,
 }
 
 # General handlers tried in priority order when no specialized route matched
