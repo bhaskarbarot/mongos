@@ -40,12 +40,12 @@ class Settings:
 
     # classify  → fastest small model (binary output, tiny prompt)
     groq_classify_model:  str = os.getenv("GROQ_CLASSIFY_MODEL",  "llama-3.1-8b-instant")
-    # decompose → mid-size smart model (understands CRM domain)
+    # decompose → scout 17B mid-size (smart, generous TPM budget)
     groq_decompose_model: str = os.getenv("GROQ_DECOMPOSE_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
-    # synthesize→ largest model (KPI report, complex multi-step answers)
+    # synthesize→ 70B only for final answer (highest quality)
     groq_synthesis_model: str = os.getenv("GROQ_SYNTHESIS_MODEL", "llama-3.3-70b-versatile")
-    # sql       → high-accuracy for SQL-generating subtasks inside LLM calls
-    groq_sql_model:       str = os.getenv("GROQ_SQL_MODEL",       "llama-3.3-70b-versatile")
+    # sql       → scout 17B (compact schema = ~500 tok/req, 60+ qpm per key)
+    groq_sql_model:       str = os.getenv("GROQ_SQL_MODEL",       "meta-llama/llama-4-scout-17b-16e-instruct")
 
     # ── Gemini — secondary fallback (30 RPM / 1M TPD free) ───────────────────
     gemini_api_key:        str = os.getenv("GEMINI_API_KEY",        "")
@@ -56,7 +56,8 @@ class Settings:
     # ── OpenRouter — tertiary fallback (free tier) ────────────────────────────
     openrouter_api_key:        str = os.getenv("OPENROUTER_API_KEY",     "")
     openrouter_decompose_model:str = os.getenv("OR_DECOMPOSE_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
-    openrouter_synthesis_model:str = os.getenv("OR_SYNTHESIS_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    openrouter_synthesis_model:str = os.getenv("OR_SYNTHESIS_MODEL", "deepseek/deepseek-chat-v3-0324:free")
+    openrouter_sql_model:      str = os.getenv("OR_SQL_MODEL",       "deepseek/deepseek-chat-v3-0324:free")
 
     # ── Misc ──────────────────────────────────────────────────────────────────
     strict_grounded_mode: bool = os.getenv("STRICT_GROUNDED_MODE", "false").lower() == "true"

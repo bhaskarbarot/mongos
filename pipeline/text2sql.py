@@ -1,18 +1,17 @@
-"""text2sql.py — Dual-model Text2SQL engine with parallel execution.
+"""text2sql.py — SQL generation engine.
 
-Model priority:
-  1. PRIMARY:  debopam/Text-to-SQL__Qwen2.5-Coder-3B-FineTuned  (fast, 8s)
-  2. FALLBACK: a-kore/Arctic-Text2SQL-R1-7B                      (accurate, 30s)
-
-Both fire in parallel — first valid SQL wins.
-If parallel fails → retry with fallback model alone (more thorough).
+SQL generation priority (via llm_router):
+  1. Groq Scout-17b    (compact schema, ~1-2s, high TPM budget)
+  2. Gemini flash-lite (fallback when Groq blocked)
+  3. OpenRouter DeepSeek (second fallback)
+  4. Ollama local models (always-available last resort)
 
 Key design:
-  • CREATE TABLE schema format (what fine-tuned Text2SQL models expect)
-  • Ollama /api/chat endpoint so each model uses its correct template
-  • Accepts BOTH direct column access AND document->>'field' JSONB access
-    (both work: flat columns AND document JSONB column are populated)
-  • JOIN key: always use _id (the actual PK text column)
+  • Compact dynamic schema (schema_compact.py) — only relevant tables sent
+    Reduces tokens from ~3500 → ~400-700 per SQL call (83% reduction)
+  • llm_router.py — per-key backoff, rotation, SQL cache, no global sleeps
+  • temperature=0, max_tokens=250 for deterministic SQL
+  • Auto-repair: if SQL fails at execution, retry with error hint via router
 
 Public API:
     run(query, agent)          -> Optional[Dict]
@@ -43,11 +42,10 @@ from pipeline.utils import (
 LOGGER = logging.getLogger("sql_chatbot")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-_MAX_SQL_RETRIES    = 1     # retry once with fallback model on failure
-_PARALLEL_TIMEOUT_S = 20    # max wait for the parallel pool (was 35)
-_MAX_RESULT_ROWS    = 500   # return all rows; user can add "top N" to limit
-_SQL_EXEC_TIMEOUT_S = 20    # SQL execution timeout (was 30)
-_GROQ_SQL_TIMEOUT   = 15    # Groq SQL generation timeout
+_MAX_SQL_RETRIES    = 1
+_PARALLEL_TIMEOUT_S = 20
+_MAX_RESULT_ROWS    = 500
+_SQL_EXEC_TIMEOUT_S = 20
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -63,16 +61,24 @@ _CREATE_TABLE_SCHEMA = """-- ═════════════════
 -- PostgreSQL CRM Database — Full Schema
 -- ══════════════════════════════════════════════════════════════════════
 -- PRIMARY KEY  : _id TEXT (every table)
--- SOFT DELETE  : WHERE NOT deleted   (most tables, BOOLEAN column)
---                outreaches: WHERE NOT "isDeleted"
+-- SOFT DELETE  : WHERE NOT deleted   (deals, invoices, sales, companies, contacts, createtasks, bills)
+--                outreaches ONLY: WHERE NOT "isDeleted"
+--                vendors: NO deleted column — no soft delete filter needed
 -- JOIN KEY     : always use _id flat column
 -- ⚠️  JSONB RULE : mixed-case fields MUST use d.document->>'field'
 --                 In JOINs ALWAYS prefix with alias: d.document, i.document, etc.
 --                 NEVER write document->>'field' without table alias in a JOIN!
 -- NUMERIC COLS : grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal,
---                grand_total, "targetInUSD", month, year — no cast needed
--- DATE COLS    : stored as TEXT → cast: NULLIF(col,'')::timestamptz
---                For month filter: DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE '2025-09-01'
+--                "targetInUSD", "netPayableAmount" — already NUMERIC, no cast needed
+-- TARGETS COLS : targets.year and targets.month are NUMERIC integers (1-12 / 2025/2026)
+--                NEVER cast them to timestamptz. Use: WHERE t.year = 2026 or EXTRACT(YEAR FROM CURRENT_DATE)
+-- DATE COLS    : stored as TEXT → always use NULLIF to avoid empty-string errors:
+--                NULLIF(col,'')::timestamptz  NOT  col::timestamptz (fails on empty strings!)
+--                Month filter : DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE '2025-09-01'
+--                Year filter  : EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = 2026
+--                This year    : EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)
+--                This month   : DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE)
+--                Last N months: NULLIF(col,'')::timestamptz >= CURRENT_DATE - INTERVAL '3 months'
 
 -- ─── CORE CRM TABLES ────────────────────────────────────────────────────────
 
@@ -226,14 +232,24 @@ CREATE TABLE "targets" (
     _id TEXT PRIMARY KEY,
     "userId" TEXT,          -- → users._id
     "targetInUSD" NUMERIC,  -- monthly sales target in USD
-    month NUMERIC,          -- 1–12
-    year NUMERIC,           -- e.g. 2025, 2026
+    month NUMERIC,          -- INTEGER 1–12  ← NOT a date column, NO timestamptz cast!
+    year NUMERIC,           -- INTEGER e.g. 2026 ← NOT a date column, NO timestamptz cast!
     "teamName" TEXT,        -- e.g. 'Accounts Team'
     "createdAt" TEXT,
     document JSONB
 );
--- ✓ Current month: WHERE t.month = EXTRACT(MONTH FROM CURRENT_DATE) AND t.year = EXTRACT(YEAR FROM CURRENT_DATE)
+-- ✓ This year targets:  WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)
+-- ✓ This month targets: WHERE t.month = EXTRACT(MONTH FROM CURRENT_DATE) AND t.year = EXTRACT(YEAR FROM CURRENT_DATE)
 -- ✓ With user: LEFT JOIN "users" u ON u._id = t."userId"
+-- ✓ Target vs achieved (sales rep this year):
+--   FROM "targets" t
+--   LEFT JOIN "users" u ON u._id = t."userId"
+--   LEFT JOIN "sales" s ON s."salesOwner" = t."userId"
+--     AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year
+--     AND s.status = 'Confirm' AND NOT s.deleted
+--   WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)
+--   GROUP BY u.name, t."targetInUSD"
+--   → achieved = COALESCE(SUM(s.grand_total_in_usd), 0), gap = target - achieved
 
 CREATE TABLE "meetings" (
     _id TEXT PRIMARY KEY,
@@ -295,9 +311,11 @@ CREATE TABLE "vendors" (
     "createdBy" TEXT,       -- → users._id
     "createdAt" TEXT,
     document JSONB
+    -- ⚠️ NO deleted column — vendors has no soft-delete. Omit WHERE NOT deleted for vendors.
 );
--- ✓ Count: SELECT COUNT(*) FROM "vendors"
+-- ✓ Count all vendors: SELECT COUNT(*) FROM "vendors"
 -- ✓ Active vendors: WHERE v.stage = 'Active'
+-- ✓ With bill count: LEFT JOIN "bills" b ON b.vendor = v._id  → COUNT(b._id), SUM(b."netPayableAmount")
 
 CREATE TABLE "bills" (
     _id TEXT PRIMARY KEY,
@@ -451,6 +469,34 @@ CREATE TABLE "projecttypes" (
     name TEXT   -- 'Dedicated' | 'Fixed Price' | 'T&M' etc.
 );
 
+CREATE TABLE "notes" (
+    _id TEXT PRIMARY KEY,
+    "outreachId" TEXT,      -- → outreaches._id
+    "contactMethod" TEXT,   -- e.g. 'Email' | 'Call' | 'Meeting'
+    message TEXT,
+    "reminderDate" TEXT,
+    "createdBy" TEXT,       -- → users._id
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Outreach notes: WHERE n."outreachId" = outreach_id
+
+CREATE TABLE "publicleads" (
+    _id TEXT PRIMARY KEY,
+    "firstName" TEXT,
+    "lastName" TEXT,
+    email TEXT,
+    "phoneNumber" TEXT,
+    source TEXT,
+    "leadStatus" TEXT,
+    "lifecycleStage" TEXT,
+    "userType" TEXT,
+    description TEXT,
+    "createdAt" TEXT,
+    document JSONB
+);
+-- ✓ Public leads: list of inbound/web form leads
+
 -- ─── KEY JOIN PATTERNS (use table alias prefix on ALL columns in JOINs) ─────
 -- Deals + owner:     FROM "deals" d LEFT JOIN "users" u ON u._id = d.owner
 --                    SELECT d.name, d.stage, u.name AS owner_name WHERE NOT d.deleted
@@ -464,6 +510,54 @@ CREATE TABLE "projecttypes" (
 -- Outreaches + camp: FROM "outreaches" o LEFT JOIN "campaigns" c ON c._id = o.campaign
 -- Bills + vendor:    FROM "bills" b LEFT JOIN "vendors" v ON v._id = b.vendor
 -- Contacts + co:     FROM "contacts" ct LEFT JOIN "companies" c ON c._id = ct.company
+-- Emails + user:     FROM "emails" e LEFT JOIN "users" u ON u._id = e."user"
+--
+-- ─── COMPLEX MULTI-TABLE PATTERNS ───────────────────────────────────────────
+--
+-- SALES LEADERBOARD (rank, rep, dept, revenue, deals won, pending tasks):
+--   SELECT RANK() OVER (ORDER BY COALESCE(SUM(s.grand_total_in_usd),0) DESC) AS rank,
+--     u.name AS rep, d.name AS department,
+--     COALESCE(SUM(s.grand_total_in_usd),0) AS revenue,
+--     COUNT(DISTINCT CASE WHEN dl."dealWonAt" IS NOT NULL THEN dl._id END) AS deals_won,
+--     COUNT(DISTINCT CASE WHEN t.status='Pending' THEN t._id END) AS pending_tasks
+--   FROM "users" u
+--   LEFT JOIN "departments" d ON d._id = u.department
+--   LEFT JOIN "sales" s ON s."salesOwner" = u._id AND s.status='Confirm' AND NOT s.deleted
+--   LEFT JOIN "deals" dl ON dl.owner = u._id AND NOT dl.deleted
+--   LEFT JOIN "createtasks" t ON t."createdBy" = u._id AND NOT t.deleted
+--   WHERE u."isActive" = true
+--   GROUP BY u._id, u.name, d.name ORDER BY revenue DESC
+--
+-- COMPANY HEALTH (deals + invoices + tasks per company):
+--   SELECT c."companyName",
+--     COUNT(DISTINCT d._id) AS open_deals,
+--     COUNT(DISTINCT CASE WHEN i.payment_status NOT IN ('paid','cancelled') THEN i._id END) AS pending_invoices,
+--     COUNT(DISTINCT CASE WHEN t.status='Pending' THEN t._id END) AS open_tasks
+--   FROM "companies" c
+--   LEFT JOIN "deals" d ON d.company = c._id AND NOT d.deleted
+--   LEFT JOIN "invoices" i ON i.company = c._id AND NOT i.deleted
+--   LEFT JOIN "createtasks" t ON t.company = c._id AND NOT t.deleted
+--   WHERE NOT c.deleted GROUP BY c._id, c."companyName"
+--
+-- CUSTOMER 360 (company + deals + revenue + unpaid + tasks):
+--   SELECT c."companyName",
+--     COUNT(DISTINCT d._id) AS deal_count,
+--     COALESCE(SUM(CASE WHEN i.payment_status='paid' THEN i.grandtotal_in_usd END),0) AS paid_revenue,
+--     COALESCE(SUM(CASE WHEN i.payment_status NOT IN ('paid','cancelled') THEN i.grandtotal_in_usd END),0) AS unpaid,
+--     COUNT(DISTINCT CASE WHEN t.status='Pending' THEN t._id END) AS open_tasks
+--   FROM "companies" c
+--   LEFT JOIN "deals" d ON d.company = c._id AND NOT d.deleted
+--   LEFT JOIN "invoices" i ON i.company = c._id AND NOT i.deleted
+--   LEFT JOIN "createtasks" t ON t.company = c._id AND NOT t.deleted
+--   WHERE NOT c.deleted GROUP BY c._id, c."companyName"
+--
+-- DEPT USER COUNT + PENDING TASKS:
+--   SELECT d.name AS department, COUNT(DISTINCT u._id) AS user_count,
+--     COUNT(CASE WHEN t.status='Pending' AND NOT t.deleted THEN 1 END) AS pending_tasks
+--   FROM "departments" d
+--   LEFT JOIN "users" u ON u.department = d._id AND u."isActive" = true
+--   LEFT JOIN "createtasks" t ON t."createdBy" = u._id
+--   GROUP BY d._id, d.name ORDER BY pending_tasks DESC
 --
 -- ⚠️ JOIN RULE: In any JOIN query, ALWAYS write d.document, i.document, c.document etc.
 --    NEVER write bare 'document' — it is AMBIGUOUS when multiple tables are joined.
@@ -582,18 +676,48 @@ DATE FILTERING — CRITICAL RULES:
   For LAST MONTH:
     WHERE DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
 
-  For a YEAR (e.g. "2025"):
-    WHERE DATE_TRUNC('year', NULLIF(col,'')::timestamptz) = DATE '2025-01-01'
+  For a YEAR filter on TEXT date columns (e.g. sales_date, payment_date, invoice_date):
+    ✓ EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = 2026
+    ✓ EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)
+    ✗ NEVER: DATE_TRUNC('year', ...) = '2026'::timestamptz  ← casting string year FAILS
+
+  For LAST N MONTHS:
+    WHERE NULLIF(col,'')::timestamptz >= CURRENT_DATE - INTERVAL '3 months'
 
   For BETWEEN dates:
     WHERE NULLIF(col,'')::timestamptz BETWEEN '2025-01-01' AND '2025-12-31'
+
+TARGETS TABLE — year/month are INTEGER columns, NOT date columns:
+  ✓ WHERE t.year = 2026                            ← integer comparison
+  ✓ WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE) ← correct
+  ✓ WHERE t.month = 5 AND t.year = 2026
+  ✗ NEVER: NULLIF(t.year,'')::timestamptz          ← year is NUMERIC, not TEXT!
+  ✗ NEVER: DATE_TRUNC('year', t.year)              ← year is already an integer!
+
+  Target vs Achieved pattern:
+  SELECT u.name, t."targetInUSD",
+    COALESCE(SUM(s.grand_total_in_usd),0) AS achieved,
+    t."targetInUSD" - COALESCE(SUM(s.grand_total_in_usd),0) AS gap
+  FROM "targets" t
+  LEFT JOIN "users" u ON u._id = t."userId"
+  LEFT JOIN "sales" s ON s."salesOwner" = t."userId"
+    AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year
+    AND s.status = 'Confirm' AND NOT s.deleted
+  WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)
+  GROUP BY u.name, t."targetInUSD"
+
+VENDORS TABLE — NO deleted column:
+  ✗ NEVER add WHERE NOT v.deleted  ← vendors has no deleted column, will CRASH!
+  ✓ SELECT COUNT(*) FROM "vendors"            (no filter needed)
+  ✓ WHERE v.stage = 'Active'                  (use stage for status filter)
 
 NULL HANDLING — always wrap TEXT-to-number casts:
   NULLIF(document->>'grand_total', '')::numeric   ← safe
   (document->>'grand_total')::numeric             ← FAILS on NULL/empty rows
 
-NUMERIC COLUMNS (no casting needed — already numeric):
-  grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, "targetInUSD"
+NUMERIC COLUMNS (already NUMERIC — never cast to timestamptz):
+  grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, "targetInUSD",
+  "netPayableAmount", targets.year, targets.month
 
 OPEN/WON/LOST DEALS — use JSONB (avoids mixed-case quoting):
   Open:  document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL AND NOT deleted
@@ -727,10 +851,20 @@ def _validate_sql(sql: str, table_names: Optional[List[str]] = None) -> Tuple[bo
     if re.search(r"\bIFNULL\b|\bNVL\b|\bDATEDIFF\b|\bSTRFTIME\b", sql, re.I):
         return False, "wrong SQL dialect (MySQL/SQLite function)"
 
-    # Unknown table reference check
+    # Unknown table reference check — skip SQL keywords/functions that appear after FROM
+    _SQL_PSEUDO_TABLES = {
+        "nullif","coalesce","current_date","current_timestamp","now","extract",
+        "date_trunc","date_part","interval","rank","row_number","dense_rank",
+        "lateral","unnest","generate_series","values","dual","information_schema",
+        "pg_tables","json_array_elements","jsonb_array_elements",
+    }
     if table_names:
         used_tables = re.findall(r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?', sql, re.I)
-        unknown = [t for t in used_tables if t.lower() not in [x.lower() for x in table_names]]
+        known_lower = {x.lower() for x in table_names}
+        unknown = [
+            t for t in used_tables
+            if t.lower() not in known_lower and t.lower() not in _SQL_PSEUDO_TABLES
+        ]
         if unknown:
             return False, f"unknown tables: {unknown}"
 
@@ -769,156 +903,94 @@ def _run_model(
     return sql
 
 
-def _generate_sql_groq(query: str, table_names: List[str]) -> Optional[str]:
-    """Generate SQL using Groq (fast cloud model, ~2s).
 
-    This is the PRIMARY path — tried before Ollama because Groq is ~10x faster.
-    Falls back gracefully when Groq is unavailable or rate-limited.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SQL GENERATION  (via llm_router — compact schema, multi-provider fallback)
+# ══════════════════════════════════════════════════════════════════════════════
+
+from pipeline.llm_router import call as _router_call, sql_cache_get, sql_cache_set
+from pipeline.schema_compact import get_compact_schema, COMPACT_SYSTEM_PROMPT
+
+
+def _generate_sql_via_router(query: str, table_names: List[str]) -> Optional[str]:
+    """Generate SQL using the centralized llm_router.
+
+    Chain: Groq Scout-17b → Gemini flash-lite → OpenRouter DeepSeek → Ollama
+    Uses compact dynamic schema (~400-700 tokens vs 3500 before).
+    Results are cached for 5 minutes to avoid redundant API calls.
     """
-    try:
-        from config import settings
-        groq_keys = settings.groq_api_keys
-        if not groq_keys:
-            return None
+    # Cache check (avoids re-calling LLM for repeated identical queries)
+    cached = sql_cache_get(query)
+    if cached:
+        ok, _ = _validate_sql(cached, table_names)
+        if ok:
+            return cached
 
-        import json as _json
-        import urllib.request as _ur
-        import urllib.error as _ue
+    # Build compact schema — only relevant tables
+    compact_schema = get_compact_schema(query, extra_tables=table_names or [])
 
-        # Compact schema (enough for SQL generation, avoids token waste)
-        compact_schema = _CREATE_TABLE_SCHEMA
+    user_prompt = (
+        f"Schema:\n{compact_schema}\n\n"
+        f"Question: {query}\n\n"
+        "SQL:"
+    )
 
-        sys_prompt = _SYSTEM_SQL_EXPERT
-        user_prompt = (
-            f"Database Schema:\n{compact_schema}\n\n"
-            f"Question: {query}\n\n"
-            "Write ONLY the SQL query (no explanation, no markdown):"
-        )
-
-        payload = {
-            "model":       settings.groq_sql_model,
-            "messages":    [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            "temperature": 0,
-            "max_tokens":  600,
-        }
-
-        _GROQ_HEADERS = {
-            "Content-Type": "application/json",
-            "User-Agent":   "groq-python/0.9.0",
-            "Authorization": f"Bearer {groq_keys[0]}",
-        }
-
-        import time as _time
-        import re as _re
-
-        def _parse_retry_after(exc: "_ue.HTTPError") -> float:
-            """Extract wait seconds from Groq 429 response headers/body."""
-            try:
-                # Try retry-after header first
-                ra = exc.headers.get("retry-after") or exc.headers.get("Retry-After")
-                if ra:
-                    return max(1.0, float(ra) + 0.5)
-                # Try parsing body: "Please try again in 5.1s"
-                body = exc.read().decode(errors="ignore")
-                m = _re.search(r"try again in ([\d.]+)s", body)
-                if m:
-                    return max(1.0, float(m.group(1)) + 0.5)
-            except Exception:
-                pass
-            return 10.0  # safe default
-
-        def _try_key(key: str):
-            """Returns (sql_or_sentinel, wait_seconds_if_rate_limited)."""
-            _GROQ_HEADERS["Authorization"] = f"Bearer {key}"
-            try:
-                req = _ur.Request(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    data=_json.dumps(payload).encode(),
-                    headers=_GROQ_HEADERS,
-                    method="POST",
-                )
-                with _ur.urlopen(req, timeout=_GROQ_SQL_TIMEOUT) as resp:
-                    data = _json.loads(resp.read())
-                    raw = data["choices"][0]["message"]["content"].strip()
-                    sql = _extract_sql(raw)
-                    if not sql:
-                        LOGGER.debug("Groq SQL: could not extract SQL from response")
-                        return "INVALID", 0
-                    ok, err = _validate_sql(sql, table_names)
-                    if ok:
-                        LOGGER.info("Groq SQL generated (%d chars): %.80s", len(sql), sql)
-                        return sql, 0
-                    LOGGER.debug("Groq SQL invalid: %s | sql=%.80s", err, sql)
-                    return "INVALID", 0
-            except _ue.HTTPError as e:
-                if e.code == 429:
-                    wait = _parse_retry_after(e)
-                    LOGGER.warning("Groq SQL: 429 on key ...%s (retry in %.1fs)", key[-6:], wait)
-                    return "RATE_LIMIT", wait
-                LOGGER.warning("Groq SQL HTTP %d", e.code)
-                return "ERROR", 0
-            except Exception as exc:
-                LOGGER.debug("Groq SQL error: %s", exc)
-                return "ERROR", 0
-
-        # Try each key; if rate-limited, track the max wait needed
-        max_wait = 0.0
-        all_rate_limited = True
-        for key in groq_keys:
-            result, wait = _try_key(key)
-            if result not in ("RATE_LIMIT", "INVALID", "ERROR"):
-                return result
-            if result != "RATE_LIMIT":
-                all_rate_limited = False
-            else:
-                max_wait = max(max_wait, wait)
-                _time.sleep(0.2)  # brief pause before next key
-
-        # All keys rate-limited → wait for the longest reset, then retry once
-        if all_rate_limited and max_wait > 0:
-            LOGGER.warning("Groq SQL: all keys rate-limited — waiting %.1fs", max_wait)
-            _time.sleep(max_wait)
-            for key in groq_keys:
-                result, wait = _try_key(key)
-                if result not in ("RATE_LIMIT", "INVALID", "ERROR"):
-                    return result
-                if result == "RATE_LIMIT":
-                    _time.sleep(0.2)
-
+    raw = _router_call("sql", COMPACT_SYSTEM_PROMPT, user_prompt)
+    if not raw:
         return None
-    except Exception as exc:
-        LOGGER.debug("Groq SQL path error: %s", exc)
+
+    sql = _extract_sql(raw)
+    if not sql:
+        LOGGER.debug("Router SQL: could not extract SQL from: %.80s", raw)
         return None
+
+    ok, err = _validate_sql(sql, table_names)
+    if ok:
+        LOGGER.info("Router SQL generated (%d chars): %.80s", len(sql), sql)
+        sql_cache_set(query, sql)
+        return sql
+
+    LOGGER.debug("Router SQL invalid: %s | sql=%.80s", err, sql)
+    return None
+
+
+# Keep these names so main.py SIMPLE-retry still imports them without change
+def _generate_sql_groq(query: str, table_names: List[str]) -> Optional[str]:
+    """Alias → routes through llm_router (Groq Scout first)."""
+    return _generate_sql_via_router(query, table_names)
+
+
+def _generate_sql_gemini(query: str, table_names: List[str]) -> Optional[str]:
+    """Legacy alias — router already includes Gemini in fallback chain."""
+    return _generate_sql_via_router(query, table_names)
 
 
 def generate_sql(query: str, agent) -> Optional[str]:
     """Generate SQL for a query.
 
-    Strategy (fastest first):
-      0. Groq cloud (llama-3.3-70b) — ~2s. PRIMARY path when API key available.
-      1. Ollama PRIMARY (Qwen 3B) + FALLBACK (Arctic 7B) in parallel — ~8-20s
-      2. Retry with FALLBACK model alone — up to 15s
+    Strategy:
+      1. llm_router: Groq Scout → Gemini → OpenRouter → Ollama  (~1-5s)
+      2. Ollama parallel (PRIMARY Qwen + FALLBACK Arctic) — if router fails
+      3. Ollama Arctic alone with extra time
 
     Returns validated SQL string, or None if all attempts fail.
     """
     table_names = get_table_names(agent)
 
-    # ── Step 0: Groq fast path (~2s) ─────────────────────────────────────────
-    with Timer("groq_sql") as groq_timer:
-        groq_sql = _generate_sql_groq(query, table_names)
-    if groq_sql:
-        LOGGER.info("SQL via Groq in %.0fms: %.80s", groq_timer.elapsed_ms, groq_sql)
-        return groq_sql
+    # ── Step 1: Router (cloud LLMs with compact schema) ──────────────────────
+    with Timer("router_sql") as router_timer:
+        router_sql = _generate_sql_via_router(query, table_names)
+    if router_sql:
+        LOGGER.info("SQL via router in %.0fms: %.80s", router_timer.elapsed_ms, router_sql)
+        return router_sql
 
-    LOGGER.info("Groq SQL unavailable (%.0fms) → trying Ollama", groq_timer.elapsed_ms)
+    LOGGER.info("Router SQL unavailable (%.0fms) → Ollama parallel", router_timer.elapsed_ms)
 
     primary_sys,  primary_user  = _build_primary_prompt(query)
     fallback_sys, fallback_user = _build_fallback_prompt(query)
 
-    # ── Parallel execution ────────────────────────────────────────────────────
+    # ── Step 2: Ollama parallel ───────────────────────────────────────────────
     with Timer("text2sql_parallel") as timer:
         primary_sql:  Optional[str] = None
         fallback_sql: Optional[str] = None
@@ -927,22 +999,17 @@ def generate_sql(query: str, agent) -> Optional[str]:
             f_primary = pool.submit(
                 _run_model,
                 settings.ollama_primary_model,
-                primary_sys,
-                primary_user,
+                primary_sys, primary_user,
                 settings.ollama_primary_timeout,
-                table_names,
-                "primary(Qwen3B)",
+                table_names, "primary(Qwen3B)",
             )
             f_fallback = pool.submit(
                 _run_model,
                 settings.ollama_fallback_model,
-                fallback_sys,
-                fallback_user,
+                fallback_sys, fallback_user,
                 settings.ollama_fallback_timeout,
-                table_names,
-                "fallback(Arctic7B)",
+                table_names, "fallback(Arctic7B)",
             )
-
             futures = {f_primary: "primary", f_fallback: "fallback"}
             for future in as_completed(futures, timeout=_PARALLEL_TIMEOUT_S):
                 label = futures[future]
@@ -953,56 +1020,30 @@ def generate_sql(query: str, agent) -> Optional[str]:
                             primary_sql = sql
                         else:
                             fallback_sql = sql
-                        LOGGER.info(
-                            "Text2SQL: %s model produced SQL (%.0fms): %.80s",
-                            label, timer.elapsed_ms, sql,
-                        )
+                        LOGGER.info("Text2SQL %s SQL (%.0fms): %.80s", label, timer.elapsed_ms, sql)
                 except Exception as exc:
                     LOGGER.debug("Text2SQL %s future error: %s", label, exc)
 
-    # Prefer primary if both succeeded; otherwise use whichever worked
     best_sql = primary_sql or fallback_sql
     if best_sql:
-        LOGGER.info("Text2SQL parallel: selected %s SQL", "primary" if primary_sql else "fallback")
         return best_sql
 
-    # ── Retry with fallback model (more powerful, more time) ─────────────────
-    LOGGER.info("Text2SQL parallel both failed → retry with Arctic-7B fallback")
-    retry_sys, retry_user = _build_fallback_prompt(query)
+    # ── Step 3: Ollama Arctic alone (last resort) ─────────────────────────────
+    LOGGER.info("Text2SQL parallel failed → Arctic fallback")
     retry_raw = _call_ollama_chat(
-        settings.ollama_fallback_model,
-        retry_sys,
-        retry_user,
-        timeout=settings.ollama_fallback_timeout,
-        max_tokens=800,
+        settings.ollama_fallback_model, fallback_sys, fallback_user,
+        timeout=settings.ollama_fallback_timeout, max_tokens=800,
     )
     if retry_raw:
         retry_sql = _extract_sql(retry_raw)
         if retry_sql:
             ok, err = _validate_sql(retry_sql, table_names)
             if ok:
-                LOGGER.info("Text2SQL retry success: %.80s", retry_sql)
                 return retry_sql
-            # One more attempt with error feedback
-            LOGGER.debug("Text2SQL retry SQL invalid (%s) — trying with error hint", err)
-            fix_sys, fix_user = _build_fallback_prompt(query, retry_sql, err)
-            fix_raw = _call_ollama_chat(
-                settings.ollama_fallback_model,
-                fix_sys,
-                fix_user,
-                timeout=settings.ollama_fallback_timeout,
-                max_tokens=800,
-            )
-            if fix_raw:
-                fix_sql = _extract_sql(fix_raw)
-                if fix_sql:
-                    ok2, _ = _validate_sql(fix_sql, table_names)
-                    if ok2:
-                        LOGGER.info("Text2SQL fix-retry success: %.80s", fix_sql)
-                        return fix_sql
 
     LOGGER.warning("Text2SQL: all attempts failed for query: %.60s", query)
     return None
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1157,45 +1198,33 @@ def run(query: str, agent) -> Optional[Dict[str, Any]]:
 
         # ── Auto-repair: retry with error hint if execution failed ────────────
         if _res.error:
-            LOGGER.warning(
-                "Text2SQL exec failed (attempt 1/2): %s | SQL: %.120s",
-                _res.error, sql,
-            )
-            # Feed the error back to the fallback model and retry once
+            LOGGER.warning("Text2SQL exec failed: %s | SQL: %.120s", _res.error, sql)
             try:
                 table_names_r = get_table_names(agent)
-                fix_sys, fix_user = _build_fallback_prompt(query, sql, _res.error)
-                fix_raw = _call_ollama_chat(
-                    settings.ollama_fallback_model,
-                    fix_sys, fix_user,
-                    timeout=settings.ollama_fallback_timeout,
-                    max_tokens=800,
+                repair_query  = (
+                    f"{query}\n\n"
+                    f"[Previous SQL had error: {_res.error[:200]}. "
+                    f"Previous SQL was: {sql[:300]}. Write a corrected SQL.]"
                 )
-                if fix_raw:
-                    fix_sql = _extract_sql(fix_raw)
-                    if fix_sql:
-                        ok2, _ = _validate_sql(fix_sql, table_names_r)
-                        if ok2:
-                            _res2 = run_sql(agent, fix_sql)
-                            if not _res2.error:
-                                LOGGER.info(
-                                    "Text2SQL auto-repair succeeded: %.80s", fix_sql
-                                )
-                                sql   = fix_sql
-                                _res  = _res2
-                            else:
-                                LOGGER.warning(
-                                    "Text2SQL repair also failed: %s", _res2.error
-                                )
-                                return None
+                fix_sql = _generate_sql_via_router(repair_query, table_names_r)
+
+                if fix_sql and fix_sql != sql:
+                    ok2, _ = _validate_sql(fix_sql, table_names_r)
+                    if ok2:
+                        _res2 = run_sql(agent, fix_sql)
+                        if not _res2.error:
+                            LOGGER.info("Auto-repair succeeded: %.80s", fix_sql)
+                            sql  = fix_sql
+                            _res = _res2
                         else:
+                            LOGGER.warning("Auto-repair also failed: %s", _res2.error)
                             return None
                     else:
                         return None
                 else:
                     return None
             except Exception as exc:
-                LOGGER.warning("Text2SQL auto-repair error: %s", exc)
+                LOGGER.warning("Auto-repair error: %s", exc)
                 return None
 
         rows        = _res.rows

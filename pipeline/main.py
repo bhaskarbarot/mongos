@@ -326,16 +326,20 @@ def run(
         from pipeline.text2sql import (
             _build_fallback_prompt, _extract_sql, _validate_sql,
             _call_ollama_chat, _extract_tables_from_sql, _format_result,
-            _generate_sql_groq,
+            _generate_sql_groq, _generate_sql_gemini,
         )
         from pipeline.schema import run_sql, get_table_names as _gtn
         try:
             table_names_retry = _gtn(agent)
 
-            # Groq retry first (fast)
+            # Try Groq first (fast ~2s)
             fsql = _generate_sql_groq(user_query, table_names_retry)
 
-            # Fall through to Ollama if Groq failed
+            # Try Gemini if Groq failed
+            if not fsql:
+                fsql = _generate_sql_gemini(user_query, table_names_retry)
+
+            # Fall through to Ollama if both cloud LLMs failed
             if not fsql:
                 fsys, fuser = _build_fallback_prompt(user_query)
                 fraw = _call_ollama_chat(

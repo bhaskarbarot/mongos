@@ -22,6 +22,8 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait as futures_wait
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import threading
+
 from pipeline import fast_path, text2sql
 
 LOGGER = logging.getLogger("sql_chatbot")
@@ -29,6 +31,10 @@ LOGGER = logging.getLogger("sql_chatbot")
 # ── Concurrency config ─────────────────────────────────────────────────────────
 _MAX_WORKERS             = 6   # max concurrent SQL threads
 PER_QUERY_TIMEOUT_SECONDS = 45  # E8: wall-clock seconds for the entire parallel batch
+
+# Semaphore: limit concurrent Groq SQL calls so parallel sub-queries don't
+# exhaust the Groq rate limit simultaneously. DB execution still runs in parallel.
+_GROQ_SQL_SEMAPHORE = threading.Semaphore(2)  # max 2 concurrent Groq SQL calls
 
 
 @dataclass
