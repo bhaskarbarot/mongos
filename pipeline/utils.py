@@ -396,6 +396,25 @@ def sanitize_user_input(query: str) -> tuple[str, bool]:
     return query[:500], was_truncated
 
 
+_SYSTEM_CONFIG_PATTERNS = [
+    re.compile(r"\b(smtp|email\s*config|mail\s*server|mail\s*setting)\b",      re.IGNORECASE),
+    re.compile(r"\b(file\s*upload\s*limit|upload\s*limit|max\s*file\s*size)\b", re.IGNORECASE),
+    re.compile(r"\b(app\s*setting|application\s*setting|system\s*config|server\s*config)\b", re.IGNORECASE),
+]
+
+_SYSTEM_CONFIG_ANSWER = (
+    "This information is stored in **application configuration**, not in the CRM database.\n\n"
+    "Settings like SMTP credentials, file upload limits, and server configuration are managed "
+    "in the application's environment variables or admin panel — they are not queryable via SQL.\n\n"
+    "Please check your application settings or contact your system administrator."
+)
+
+
+def is_system_config_query(text: str) -> bool:
+    """Check if the query asks for application/server config not in PostgreSQL."""
+    return any(p.search(text.strip()) for p in _SYSTEM_CONFIG_PATTERNS)
+
+
 def is_vague_query(text: str) -> bool:
     """Check if query is too vague to produce meaningful results."""
     t = normalize_text(text)

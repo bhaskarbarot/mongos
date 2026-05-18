@@ -172,7 +172,21 @@ RULES:
 11. MIXED-CASE COLUMNS need double quotes: s."salesOwner" NOT s.salesOwner (will fail!)
     Examples: s."salesOwner", t."userId", t."targetInUSD", c."companyName", u."isActive"
 12. Only SELECT — never UPDATE/DELETE/INSERT/DROP.
-13. MULTI-CURRENCY RULE — applies to ALL revenue/total/amount queries (invoices, sales, deals):
+13. NEVER use :param or $1 placeholders. Write concrete SQL only (use EXTRACT, CURRENT_DATE, literals).
+14. FK COLUMN NAMES — use EXACT names, never guess with Id/id suffix:
+    invoices  → company      (LEFT JOIN "companies" c ON c._id = i.company)
+    deals     → company      (LEFT JOIN "companies" c ON c._id = d.company)
+    sales     → company      (LEFT JOIN "companies" c ON c._id = s.company)
+    companies → source       (LEFT JOIN "sources"   s ON s._id = c.source)
+    companies → region       (LEFT JOIN "regions"   r ON r._id = c.region)
+    createtasks→ companyId   (createtasks is the ONLY table with companyId column)
+    ✗ NEVER write: i.companyId, d.companyId, s.companyId, c.sourceId, c.regionId
+15. COLUMN EXISTENCE RULES (these columns do NOT exist — never generate them):
+    ✗ companies.currency  — currency is on invoices/deals/sales, NOT on companies
+    ✗ sales.closeDate     — sales uses sales_date (TEXT). closeDate is on deals only.
+    ✗ invoices.productId  — invoices have no direct product FK column
+    ✗ outreaches.leadId   — outreaches use assignedTo or email to link contacts
+16. MULTI-CURRENCY RULE — applies to ALL revenue/total/amount queries (invoices, sales, deals):
     ALWAYS select: currency column  +  native amount (NOT *_in_usd columns)
     ALWAYS GROUP BY currency so the system can convert each currency to USD automatically.
     invoices  → SELECT UPPER(COALESCE(i.currency,'USD')) AS currency, COALESCE(SUM(i.grand_total),0) AS amount FROM "invoices" i ... GROUP BY 1 ORDER BY 2 DESC
@@ -180,4 +194,33 @@ RULES:
     deals     → SELECT UPPER(COALESCE(d.currency,'USD')) AS currency, COALESCE(SUM(d.grand_total),0) AS amount FROM "deals" d ... GROUP BY 1 ORDER BY 2 DESC
     bills     → SELECT 'USD' AS currency, COALESCE(SUM(b."netPayableAmount"),0) AS amount FROM "bills" b ... GROUP BY 1
     invoices native amount column: grand_total  (not grandtotal, not grandtotal_in_usd)
-    ✗ NEVER use grandtotal_in_usd / grand_total_in_usd for SUM — use native grand_total + currency."""
+    ✗ NEVER use grandtotal_in_usd / grand_total_in_usd for SUM — use native grand_total + currency.
+
+17. ORDINAL SEARCHES ("first", "1st", "last N", "2nd", "second", "last 5"):
+    "first" / "1st" / "oldest"   → ORDER BY "createdAt" ASC  LIMIT 1
+    "last"  / "latest" / "recent" → ORDER BY "createdAt" DESC LIMIT 1
+    "last N" / "recent N"         → ORDER BY "createdAt" DESC LIMIT N
+    "2nd" / "second"              → ORDER BY "createdAt" ASC  OFFSET 1 LIMIT 1
+    ✗ NEVER write WHERE _id = 1 or WHERE _id = '1' — _id is a MongoDB ObjectId TEXT string, never an integer.
+    Example: "give me 1st invoice" → SELECT ... FROM "invoices" i WHERE NOT i.deleted ORDER BY i."createdAt" ASC LIMIT 1
+
+18. ENTITY NAME SEARCH — ALWAYS use ILIKE for user-provided names (case-insensitive):
+    Company name : WHERE c."companyName" ILIKE '%Wiegand LLC%'
+    Contact name : WHERE (c."firstName" ILIKE '%ketul%' OR c."lastName" ILIKE '%ketul%')
+    User name    : WHERE u.name ILIKE '%kartik%'
+    Invoice no.  : WHERE i.invoice_number ILIKE '%ELSN%'
+    Sales order  : WHERE s.sales_number ILIKE '%SO00080%'
+    ✗ NEVER exact-match user-provided names: WHERE u.name = 'ketul' → use ILIKE '%ketul%' instead
+
+19. PRODUCTS — embedded in JSONB on sales/invoices only; deals has NO items column:
+    ✗ NEVER write: d.product, s.product, i.productId, d.items — these DO NOT exist
+    ✓ Only sales.items and invoices.items are JSONB line-item arrays
+    Top products from sales JSONB items:
+      SELECT jsonb_array_elements(s.items)->>'name' AS product_name, COUNT(*) AS order_count
+      FROM "sales" s WHERE s.status='Confirm' AND NOT s.deleted GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+    For "product + project type" analysis using deals:
+      deals.type is a deal-category TEXT ('Cross-sell','Upsell','New Business') — NOT a product FK
+      SELECT d.type AS deal_type, COUNT(*) AS deal_count, COALESCE(SUM(d.grand_total),0) AS total_value,
+             ROUND(100.0*SUM(CASE WHEN d."dealWonAt" IS NOT NULL THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0),1) AS win_rate_pct
+      FROM "deals" d WHERE NOT d.deleted GROUP BY d.type ORDER BY total_value DESC
+    Products standalone list: SELECT name, unit_cost, currency FROM "products" WHERE "isActive"=true"""

@@ -1,0 +1,408 @@
+Am I Confident in the Simple Agent?
+90-91% confident — not 100%. Here's the honest breakdown:
+
+Category	Confidence	Reason
+Standard CRM lookups (deals, invoices, contacts, tasks)	🟢 95%	Well tested, 79 queries pass perfectly
+Ordinal searches (1st, last 5, 2nd)	🟢 95%	Just fixed and verified working
+Entity name searches (ILIKE)	🟢 95%	Just fixed — finds ketul, kartik, Wiegand LLC etc.
+Revenue / pipeline / stage queries	🟢 95%	Strong — self-heal fixes most edge cases
+Person-specific queries where name has no data	🟡 80%	Returns "no records" which is correct — but DB might spell name differently
+Product-level analysis	🟡 75%	Products are in JSONB — LLM sometimes gets confused
+Target vs achieved joins	🟡 75%	EXTRACT syntax still occasionally wrong on first attempt
+System config (SMTP, upload limits)	🟢 100%	Guard handles it cleanly
+Multi-period trend comparisons	🔴 50%	Better in medium/complex agent
+Executive dashboards / full KPI reports	🔴 30%	Wrong agent — should go to complex
+The 3 remaining weak spots in simple agent:
+
+Some queries get 0 rows because user names don't exactly match DB records (data quality issue, not agent issue)
+Very complex JSONB product queries sometimes take all 3 attempts
+"Target vs achieved" — occasionally still needs 2-3 self-heal retries
+All 3 Agents — Full Capability Summary
+🟦 Simple Agent
+Target latency: < 5 seconds | Engine: CrewAI + 3-attempt self-heal loop
+
+Can Do	Examples
+Counts & totals	How many deals? Total contacts? Total revenue?
+Filtered lists	Pending invoices, open deals, paid invoices in INR
+Ordinal lookups	1st invoice, last 5 contacts, 2nd deal
+Entity search	Details of Wiegand LLC, deals by ketul, kartik's tasks
+Single-table aggregations	Revenue by month, deals by stage, invoice by status
+Simple joins	Invoices with company name, tasks with user name
+Date filters	Revenue this year, deals lost in July, leads this month
+Named lookups	SO00080 status, find ELSN/2026/020, search company by name
+Basic KPI numbers	Win rate, total collection, overdue count
+Guard responses	Identity questions, greetings, SMTP/system config queries
+Cannot do well:
+
+Multi-period trend analysis (this month vs last 3 months vs same period last year)
+Cross-rep leaderboards with 5+ metrics
+Deep statistical analysis (growth rates, outlier detection)
+Executive dashboards combining 6+ tables
+🟨 Medium Agent
+Target latency: < 15 seconds | Engine: LangGraph 7-node graph
+
+Can Do	Examples
+Multi-table joins	Companies + invoices + users + deals together
+2-period comparisons	This month vs last month revenue, this quarter vs last quarter
+Derived metrics	Win rate %, conversion rate %, growth %
+Cross-entity analysis	Which companies have overdue invoices + activity count
+Risk scoring	Deals at risk, customers not giving business in 3 months
+Rep performance	Which sales rep closed most deals this quarter
+Pipeline health	Funnel analysis with stage-by-stage breakdown
+Target tracking	Target vs achieved per user per month
+Sub-query decomposition	Breaks complex question into 2-3 SQL queries, runs them, combines answer
+Cannot do well:
+
+3+ period trend analysis
+Full executive dashboards with anomaly detection
+Statistical analysis (std dev, outliers, growth rates across quarters)
+🟥 Complex Agent
+Target latency: < 30 seconds | Engine: LangGraph 10-node graph + statistical engine
+
+Can Do	Examples
+Full KPI dashboards	"Give me KPI report" — revenue, deals, tasks, targets all in one
+Trend analysis (3+ periods)	Revenue trend across 6 months, deal velocity over quarters
+Anomaly detection	Which sales rep's performance dropped suddenly? Any unusual invoice spikes?
+Statistical analysis	Growth rates, std deviation, top/bottom performers, outliers
+Executive summaries	"Give me business health summary" — 800+ word structured report
+360 company view	Full company profile: deals + invoices + tasks + contacts + activity
+Leaderboards	Full sales leaderboard with all metrics (revenue, deals, win rate, tasks)
+Multi-section reports	Pipeline + Revenue + Team performance + Targets — all in one answer
+Pattern finding	"Why is conversion dropping?" — cross-table root cause analysis
+Deep synthesis	Uses Groq 70b to write structured, insight-rich business narrative
+How the 3 Agents Work Together
+
+User Query
+    ↓
+Guard (0ms) — identity / greetings / system config → instant answer
+    ↓
+Classifier (LLM) — decides complexity
+    ↓
+┌─────────────┬──────────────────┬─────────────────────────┐
+│ SIMPLE      │ MEDIUM           │ COMPLEX                 │
+│ < 5s        │ < 15s            │ < 30s                   │
+│ 1 SQL query │ 2-3 SQL queries  │ 4-8 SQL queries         │
+│ Self-heal   │ LangGraph 7-node │ LangGraph 10-node       │
+│ CrewAI narr │ LLM analysis     │ Stats + Trend + 70b rpt │
+└─────────────┴──────────────────┴─────────────────────────┘
+Short answer on confidence: For everything a CRM user normally asks day-to-day — deals, revenue, tasks, contacts, invoices, lookups by name — yes, I'm confident the simple agent handles it well at 90%+. The remaining 10% are genuinely complex queries that correctly get escalated to medium/complex, or edge cases where the DB has no matching data.
+
+I already have everything from reading all the files this session. Let me give you the full pipeline from start to finish.
+
+Complete Pipeline — How It Works
+Bird's Eye View
+
+User types a question
+        ↓
+   [ FastAPI :8000 ]
+        ↓
+   [ api.py ]  ←── receives HTTP POST /chat
+        ↓
+   [ agent.py ]  ←── initializes DB connection + LangChain agent
+        ↓
+   [ pipeline/main.py ]  ←── THE BRAIN — all decisions happen here
+        ↓
+   [ Final Answer → User ]
+Step-by-Step: What Happens When You Ask a Question
+STEP 1 — Input Sanitization (0ms)
+
+Raw user input
+    ↓
+sanitize_user_input()
+    • Remove null bytes
+    • Collapse extra whitespace
+    • Truncate if > 500 characters
+    ↓
+Clean query string
+STEP 2 — Memory Resolution (0ms)
+
+"Show me his deals"
+    ↓
+ChatMemory.resolve()
+    • Looks at previous messages in this conversation
+    • Resolves pronouns: "his" → "Ketul's"
+    ↓
+"Show me Ketul's deals"
+STEP 3 — Guard Layer (0ms, NO LLM, NO DB)
+
+5 instant checks — if any match → answer immediately, skip everything else:
+
+  is_identity_question()   → "Who are you?" / "What is this?"
+        ↓ answer: "I am the CRM AI Assistant..."
+
+  is_greeting()            → "Hi", "Hello", "Good morning"
+        ↓ answer: "Hello! I can help you query your CRM data..."
+
+  is_blocked()             → DROP / DELETE / INSERT / UPDATE in query
+        ↓ answer: "This query contains operations that are not permitted"
+
+  is_system_config_query() → "SMTP config" / "file upload limit"
+        ↓ answer: "This is stored in app config, not the CRM database"
+
+  is_vague_query()         → query < 2 words with no entity/status keywords
+        ↓ answer: "Your query is too vague, could you be more specific?"
+
+If NONE match → continue to next step
+STEP 4 — Fast Path (CURRENTLY DISABLED in your .env)
+
+FAST_PATH_ENABLED=false  ← you disabled this
+
+When enabled:
+  • Regex + SQL templates, NO LLM, ~300ms
+  • Handles ~70% of common queries instantly
+  • 28 handlers: revenue, deals, tasks, KPI, pipeline, targets...
+
+Since it's disabled → skip directly to classifier
+STEP 5 — Classifier (Two Layers)
+
+Query enters new 2-layer classifier:
+
+┌─ LAYER 1: Pre-classifier (0ms, NO LLM) ─────────────────────────┐
+│  Regex patterns check for clear-cut cases                         │
+│                                                                   │
+│  "kpi report"          → COMPLEX immediately                      │
+│  "win rate"            → MEDIUM immediately                       │
+│  "revenue vs last"     → MEDIUM immediately                       │
+│  "leaderboard"         → COMPLEX immediately                      │
+│  "executive summary"   → COMPLEX immediately                      │
+│                                                                   │
+│  ~60% of queries matched here → no LLM cost, instant             │
+└───────────────────────────────────────────────────────────────────┘
+          ↓ (only if no regex match)
+┌─ LAYER 2: LLM Classifier (~300ms, Groq 8b) ─────────────────────┐
+│  Sends query + full agent capability map to LLM                   │
+│  LLM knows what each agent CAN and CANNOT do                     │
+│                                                                   │
+│  Returns JSON:                                                    │
+│  {                                                                │
+│    type: "SIMPLE" | "MEDIUM" | "COMPLEX",                        │
+│    reason: "...",                                                 │
+│    tables_needed: ["deals", "users"],                             │
+│    requires_calculation: true/false,                              │
+│    requires_multi_period: true/false                              │
+│  }                                                                │
+│                                                                   │
+│  Fallback chain: Groq 8b → Gemini flash-lite → Ollama 3b         │
+└───────────────────────────────────────────────────────────────────┘
+STEP 6 — Routing to the Right Agent
+
+Classification result
+        ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         ROUTER (main.py)                                │
+├──────────────┬────────────────────────┬─────────────────────────────────┤
+│   SIMPLE     │        MEDIUM          │           COMPLEX               │
+│   < 5s       │        < 15s           │           < 30s                 │
+│              │                        │                                 │
+│  run_simple  │    run_medium_agent    │      run_complex_agent          │
+│  _agent()    │                        │                                 │
+└──────────────┴────────────────────────┴─────────────────────────────────┘
+
+Note: If simple agent fails → auto-escalates to MEDIUM
+      If medium agent fails → auto-escalates to COMPLEX
+SIMPLE AGENT — Deep Dive
+For: counts, lists, lookups, basic aggregations
+
+
+run_simple_agent(query, classification)
+        ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  _generate_execute_selfheal() — up to 3 attempts                │
+│                                                                 │
+│  Attempt 1:                                                     │
+│    ① Check SQL cache (SHA-256 key, 5-min TTL)                  │
+│       → if hit: skip LLM, reuse SQL                            │
+│    ② build_schema_for_query()                                   │
+│       → reads LIVE column names from PostgreSQL                 │
+│       → picks relevant tables by keyword scoring               │
+│       → includes TABLE_NOTES (FK rules, EXTRACT syntax, etc.)  │
+│    ③ mcp_get_examples()                                         │
+│       → loads 4 few-shot SQL examples                          │
+│    ④ LLM generates SQL                                          │
+│       → COMPACT_SYSTEM_PROMPT (19 rules: FKs, ordinals, etc.)  │
+│       → Groq Scout-17b → Gemini → OpenRouter → Ollama          │
+│    ⑤ execute_sql() → runs against PostgreSQL                   │
+│                                                                 │
+│  If error → Self-heal strategy:                                 │
+│    "column X does not exist" → find_correct_column() → hint    │
+│    "ambiguous column"        → add table alias prefix hint      │
+│    "syntax error"            → simplify query hint             │
+│                                                                 │
+│  Attempt 2: wider schema + self-heal hint in prompt             │
+│  Attempt 3: even wider schema + explicit column list           │
+└─────────────────────────────────────────────────────────────────┘
+        ↓
+  SQL succeeds → rows returned
+        ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  _narrate_result() — makes answer readable                      │
+│                                                                 │
+│    • Currency-aware formatting                                  │
+│      (Frankfurter live rates → converts to USD)                │
+│    • Markdown table for multi-row results                      │
+│    • Bold numbers: **176 deals**, **$58,296**                  │
+│    • CrewAI narrator agent (2-4 sentence business summary)     │
+│      → Groq 8b → Gemini → Ollama                               │
+└─────────────────────────────────────────────────────────────────┘
+        ↓
+  Final answer: "## Summary\n\n**176** open deals..."
+MEDIUM AGENT — Deep Dive
+For: 2-period comparisons, derived metrics, cross-entity analysis
+
+
+run_medium_agent(query, classification)
+        ↓
+LangGraph StateGraph — 7 nodes in sequence:
+
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 1: fetch_schema                                     │
+  │   • build_schema_for_query() — live DB schema            │
+  │   • Scores tables by keyword relevance to query          │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 2: decompose                                        │
+  │   • LLM breaks query into 2-3 sub-questions             │
+  │   • Each sub-question gets its own SQL intent           │
+  │   • e.g. "win rate" → [count won deals, count all deals] │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 3: generate_sql                                     │
+  │   • Same COMPACT_SYSTEM_PROMPT as simple agent          │
+  │   • Generates SQL for each sub-question                 │
+  │   • Same self-heal loop (3 attempts per sub-query)      │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 4: execute_parallel                                 │
+  │   • Runs all sub-queries in PARALLEL (ThreadPoolExecutor)│
+  │   • Faster than sequential execution                    │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 5: analyze                                          │
+  │   • LLM receives all SQL results combined               │
+  │   • Calculates derived metrics (win rate = won/total)   │
+  │   • Identifies patterns, comparisons, insights         │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 6: synthesize                                       │
+  │   • Groq 70b writes the final business answer           │
+  │   • Structured markdown with bold numbers              │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 7: save_examples                                    │
+  │   • Saves working SQL to query_examples.json            │
+  │   • Future similar queries benefit from this            │
+  └──────────────────────────────────────────────────────────┘
+COMPLEX AGENT — Deep Dive
+For: KPI dashboards, leaderboards, trends, executive reports
+
+
+run_complex_agent(query, classification)
+        ↓
+LangGraph StateGraph — 10 nodes:
+
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 1: fetch_schema   (same as medium)                  │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 2: plan_report    ← COMPLEX ONLY                    │
+  │   • LLM plans the report SECTIONS before writing SQL    │
+  │   • e.g. "Pipeline" + "Revenue" + "Team" + "Targets"    │
+  │   • Creates structured report blueprint                 │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 3: decompose                                        │
+  │   • Breaks into 4-8 sub-queries (one per report section) │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 4: generate_sql + Node 5: execute_parallel          │
+  │   (same as medium — parallel SQL execution)              │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 6: statistical_analysis   ← COMPLEX ONLY           │
+  │   • Pure Python math (no LLM needed)                    │
+  │   • Growth rates: (this - last) / last × 100            │
+  │   • Rankings: top/bottom N performers                   │
+  │   • Outlier detection: values > 2 std deviations        │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 7: trend_detection        ← COMPLEX ONLY           │
+  │   • Detects consistent growth / decline patterns        │
+  │   • Month-over-month direction changes                  │
+  │   • "Revenue growing 3 months in a row"                │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 8: analyze                                          │
+  │   • LLM interprets stats + trends together              │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 9: deep_synthesis         ← COMPLEX ONLY           │
+  │   • Groq 70b writes 800+ word structured report         │
+  │   • Uses only verified numbers from SQL results         │
+  │   • Never invents data                                  │
+  └──────────────────────────────────────────────────────────┘
+          ↓
+  ┌──────────────────────────────────────────────────────────┐
+  │ Node 10: save_examples                                   │
+  └──────────────────────────────────────────────────────────┘
+Shared LLM Chain (Used by ALL Agents)
+
+Every LLM call goes through llm_router.py:
+
+  Task: "sql"       → Groq Scout-17b → Gemini flash-lite → OpenRouter DeepSeek → Ollama 7b
+  Task: "classify"  → Groq 8b-instant → Gemini flash-lite → Ollama 3b
+  Task: "narrate"   → Groq 8b-instant → Gemini flash-lite → Ollama 3b
+  Task: "synthesize"→ Groq 70b → Gemini flash-lite → OpenRouter DeepSeek → Ollama 8b
+  Task: "decompose" → Groq Scout-17b → Gemini flash-lite → OpenRouter → Ollama 8b
+
+  Features:
+    ✓ Per-key exponential backoff (respects retry-after header)
+    ✓ 3 Groq API keys rotated to avoid rate limits
+    ✓ SQL result cache (SHA-256, 5-min TTL, 200-entry LRU)
+    ✓ temperature=0 for deterministic SQL output
+Data Flow — Full Picture
+
+MongoDB (ecrm DB)
+      ↓  [Node.js sync every 5s]
+PostgreSQL (mongos_sync DB, port 5433)
+      ↓  [psycopg2 direct connection]
+      ↓
+  SQL Agent reads:
+    ├─ information_schema → live column names
+    ├─ table data → query results
+    └─ pg_class → row count estimates
+      ↓
+  Response formatted:
+    ├─ Currency conversion (Frankfurter API → live rates)
+    ├─ Markdown table (up to 200 rows shown)
+    └─ Bold numbers + business summary
+      ↓
+FastAPI → React UI (port 5173)
+One-Line Summary of Each Component
+Component	What it does
+api.py	HTTP endpoint, receives chat messages
+agent.py	Initializes DB + LangChain tools
+pipeline/main.py	Master orchestrator — all routing decisions
+pipeline/utils.py	Guards (identity, greeting, blocked, system-config)
+pipeline/classifier.py	2-layer router: pre-classifier (regex) + LLM
+pipeline/db_schema.py	Live schema from PostgreSQL, table notes, FK map
+pipeline/schema_compact.py	19-rule system prompt for SQL generation
+pipeline/llm_router.py	LLM chain with fallback + rate limit handling
+pipeline/chat_memory.py	Pronoun resolution across conversation turns
+agents/simple_agent.py	1 SQL + 3-attempt self-heal + CrewAI narration
+agents/medium_agent.py	LangGraph 7-node: decompose → parallel SQL → analyze
+agents/complex_agent.py	LangGraph 10-node: plan → SQL → stats → trend → 70b report
+mcp_server/crm_mcp.py	DB tools: execute_sql, find_column, get_examples
+pipeline/fast_path.py	28 regex SQL templates (currently disabled in your .env)

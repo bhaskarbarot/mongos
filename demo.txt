@@ -1,5 +1,0 @@
-
-SELECT document->>'sales_number' AS sales_number, document->>'status' AS status, NULLIF(document->>'grand_total','')::numeric AS amount, document->>'sales_date' AS date FROM "sales" WHERE (COALESCE(document->>'deleted','false') != 'true') ORDER BY NULLIF(document->>'sales_date','')::timestamptz DESC NULLS LAST LIMIT 20
-give me sales order?
-
-see into fast path remove all limits it gies again limit remove all limits

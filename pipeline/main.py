@@ -37,10 +37,12 @@ from pipeline.schema import build_text2sql_schema, discover_schema_links, get_ta
 from pipeline.utils import (
     Timer,
     _IDENTITY_ANSWER,
+    _SYSTEM_CONFIG_ANSWER,
     format_final_answer,
     is_blocked,
     is_greeting,
     is_identity_question,
+    is_system_config_query,
     is_vague_query,
     sanitize_user_input,
 )
@@ -188,6 +190,13 @@ def run(
             "I can only run read-only (SELECT) queries on your CRM data.",
             started, "guard_blocked",
         )
+        return result
+
+    if is_system_config_query(user_query):
+        LOGGER.info("[RID:%s] Guard: system-config: %.60s", request_id, user_query)
+        result = _guard_response(_SYSTEM_CONFIG_ANSWER, started, "guard_system_config")
+        if memory:
+            memory.update(original_query, result)
         return result
 
     if is_vague_query(user_query):
