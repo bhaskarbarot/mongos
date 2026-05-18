@@ -66,7 +66,8 @@ async function apiGet(base, path, timeout = 5000) {
 }
 
 // signal is passed from outside (for stop button support)
-async function apiPost(base, path, body, signal, timeout = 60000) {
+// timeout=180000 (3 min) — complex agent reports can take up to 90s
+async function apiPost(base, path, body, signal, timeout = 180000) {
   const timer = new AbortController();
   const id = setTimeout(() => timer.abort(), timeout);
   // Combine external stop signal + internal timeout signal when both exist
@@ -483,6 +484,21 @@ function MessageBubble({ msg }) {
           <div className={`message-avatar message-avatar--${isUser ? "user" : "bot"}`}>{isUser ? "U" : "AI"}</div>
           <span className="message-sender-name">{isUser ? "You" : "ECRM Agent"}</span>
           {!isUser && <TimingBadge ms={msg.processing_time_ms} />}
+          {!isUser && msg.agent_type && (() => {
+            const at = (msg.agent_type || "").toLowerCase();
+            const label = at.includes("fast") ? "⚡ Fast Path"
+              : at.includes("complex") ? "🔬 Complex"
+              : at.includes("medium")  ? "🔧 Medium"
+              : at.includes("simple")  ? "✦ Simple"
+              : at.includes("guard")   ? "🛡 Guard"
+              : null;
+            const color = at.includes("fast") ? "green"
+              : at.includes("complex") ? "purple"
+              : at.includes("medium")  ? "amber"
+              : at.includes("simple")  ? "blue"
+              : "slate";
+            return label ? <Badge color={color}>{label}</Badge> : null;
+          })()}
           {!isUser && msg.confidence != null && msg.confidence < 1 && (
             <Badge color={msg.confidence >= 0.7 ? "amber" : "red"}>
               {Math.round(msg.confidence * 100)}% conf
@@ -910,6 +926,7 @@ export default function DataAnalysisChat() {
         agent_time_ms: resp.agent_time_ms,
         query_used: resp.query_used,
         query_plan: resp.query_plan,
+        agent_type: resp.agent_type,
         _userQuery: trimmed,
       };
       const finalMessages = [...nextMessages, botMsg];

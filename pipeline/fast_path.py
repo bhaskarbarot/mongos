@@ -5769,6 +5769,11 @@ def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]
     # e.g. "status of this S000080" → "status of S000080"
     query = re.sub(r'\bthis\s+([A-Z][A-Z0-9/]{3,})\b', r'\1', query)
 
+    # Minimum confidence required to use a fast-path result.
+    # If a handler returns with lower confidence (uncertain match or empty SQL),
+    # skip fast path entirely and let the LLM agents handle it properly.
+    _MIN_CONF = 0.88
+
     route = _classify_route(query)
     LOGGER.info("FastPath route: %s | query: %.60s", route, query)
 
@@ -5777,10 +5782,18 @@ def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]
         try:
             result = _SPECIALIZED[route](agent, query)
             if result is not None:
-                LOGGER.info("FastPath HIT (specialized=%s)", route)
-                if apply_delay:
-                    _natural_delay()
-                return result
+                conf = result.get("confidence", 0.0)
+                if conf < _MIN_CONF:
+                    LOGGER.info(
+                        "FastPath LOW_CONF specialized=%s conf=%.2f < %.2f — escalating",
+                        route, conf, _MIN_CONF,
+                    )
+                    # Don't return — fall through to LLM pipeline
+                else:
+                    LOGGER.info("FastPath HIT (specialized=%s conf=%.2f)", route, conf)
+                    if apply_delay:
+                        _natural_delay()
+                    return result
         except Exception as exc:
             LOGGER.warning("FastPath specialized %s failed: %s", route, exc)
 
@@ -5789,7 +5802,14 @@ def run(query: str, agent, apply_delay: bool = False) -> Optional[Dict[str, Any]
         try:
             result = fp(agent, query)
             if result is not None:
-                LOGGER.info("FastPath HIT (%s)", fp.__name__)
+                conf = result.get("confidence", 0.0)
+                if conf < _MIN_CONF:
+                    LOGGER.info(
+                        "FastPath LOW_CONF handler=%s conf=%.2f < %.2f — escalating",
+                        fp.__name__, conf, _MIN_CONF,
+                    )
+                    continue  # try next handler or fall through to LLM
+                LOGGER.info("FastPath HIT (%s conf=%.2f)", fp.__name__, conf)
                 if apply_delay:
                     _natural_delay()
                 return result

@@ -90,11 +90,29 @@ python3 -c "import fastapi, uvicorn, langchain_community, psycopg2" 2>/dev/null 
   && ok "Python dependencies OK" \
   || { err "Missing Python packages. Run: pip install -r requirements.txt"; exit 1; }
 
-# Check Node.js
-if ! command -v node >/dev/null 2>&1; then
+# Check Node.js — Vite requires Node 14+; use nvm Node 20 if available
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"   # load nvm if installed
+
+NODE_VER=$(node --version 2>/dev/null | sed 's/v//')
+NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
+
+if [ -z "$NODE_VER" ]; then
   err "Node.js not found. Install Node.js 14+ from https://nodejs.org"; exit 1
 fi
-ok "Node.js $(node --version)"
+
+if [ "$NODE_MAJOR" -lt 14 ] 2>/dev/null; then
+  warn "Node.js v$NODE_VER is too old for Vite (need 14+). Trying nvm Node 20…"
+  if command -v nvm >/dev/null 2>&1; then
+    nvm use 20 >/dev/null 2>&1 || nvm use 18 >/dev/null 2>&1
+    NODE_VER=$(node --version 2>/dev/null | sed 's/v//')
+    ok "Switched to Node.js v$NODE_VER via nvm"
+  else
+    err "nvm not found — install Node.js 20 from https://nodejs.org"; exit 1
+  fi
+else
+  ok "Node.js v$NODE_VER"
+fi
 
 # Install automation deps if needed
 if [ ! -d "$ROOT/automation/node_modules" ]; then
@@ -211,7 +229,15 @@ fuser -k 5173/tcp 2>/dev/null || true
 sleep 1
 
 cd "$ROOT/chat-ui"
-npm run dev >> "$ROOT/logs/frontend.log" 2>&1 &
+# Use nvm Node 20 if system node < 14
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
+if [ "${NODE_MAJOR:-0}" -lt 14 ] 2>/dev/null; then
+  nvm exec 20 npm run dev >> "$ROOT/logs/frontend.log" 2>&1 &
+else
+  npm run dev >> "$ROOT/logs/frontend.log" 2>&1 &
+fi
 FRONTEND_PID=$!
 cd "$ROOT"
 sleep 4

@@ -193,7 +193,8 @@ def _build_query_plan(result: dict) -> dict:
     """Map pipeline metadata to the UI's query_plan schema."""
     tables      = result.get("tables_used", [])
     sub_results = result.get("_sub_results", [])
-    layer       = result.get("layer", "fast_path")
+    layer       = result.get("layer", "")
+    agent_type  = result.get("agent_type", "")
     answer      = result.get("answer", "")
 
     # Detect output format from answer content
@@ -204,13 +205,26 @@ def _build_query_plan(result: dict) -> dict:
     else:
         output_fmt = "text"
 
+    # Determine which agent/layer handled the query
+    if "fast_path" in layer or "fast_path" in agent_type:
+        intent = "FAST_PATH"
+    elif "complex" in agent_type or "complex" in layer:
+        intent = "COMPLEX"
+    elif "medium" in agent_type or "medium" in layer:
+        intent = "MEDIUM"
+    elif "simple" in agent_type or "simple" in layer:
+        intent = "SIMPLE"
+    elif "guard" in layer:
+        intent = "GUARD"
+    else:
+        intent = "COMPLEX" if sub_results else "SIMPLE"
+
     plan: dict = {
-        "intent":        "COMPLEX" if sub_results else "SIMPLE",
+        "intent":        intent,
         "collection":    ", ".join(tables) if tables else "—",
         "output_format": output_fmt,
     }
 
-    # Add active filters if detectable
     filters: dict = {}
     if sub_results:
         plan["sub_queries"] = [s.get("sub_query", "") for s in sub_results[:6]]
@@ -342,12 +356,9 @@ async def sources(request: Request):
     """Return available DB tables so the sidebar can show data sources."""
     _check_rate(request, 60, request_id=str(uuid.uuid4())[:8])
     tables = _get_table_names_safe()
-    return {
-        "PostgreSQL (CRM)": {
-            "type":  "database",
-            "items": sorted(tables),
-        }
-    } if tables else {}
+    # UI iterates: Object.entries(sources).map(([stype, items]) => items?.length)
+    # so the value must be a plain array, not an object.
+    return {"PostgreSQL (CRM)": sorted(tables)} if tables else {}
 
 
 @app.get("/feedback/learnings")
@@ -419,6 +430,8 @@ async def chat(req: ChatRequest, request: Request):
         if len(sql_queries) > 3:
             query_used += f"\n\n… and {len(sql_queries)-3} more queries"
 
+    agent_type = result.get("agent_type") or result.get("layer", "unknown")
+
     return {
         "answer":              clean,
         "data":                _extract_structured_data(result),
@@ -428,6 +441,7 @@ async def chat(req: ChatRequest, request: Request):
         "agent_time_ms":       round(latency_ms),
         "query_used":          query_used,
         "query_plan":          _build_query_plan(result),
+        "agent_type":          agent_type,
         "request_id":          request_id,
         "metrics":             result.get("metrics"),
     }
