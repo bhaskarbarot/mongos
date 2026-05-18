@@ -339,6 +339,14 @@ _TABLE_NOTES = {
         "-- Top products from sales: SELECT jsonb_array_elements(s.items)->>'name' AS product_name, COUNT(*) FROM \"sales\" s WHERE s.status='Confirm' AND NOT s.deleted GROUP BY 1 ORDER BY 2 DESC LIMIT 10",
         "-- Direct product list: SELECT name, unit_cost, currency FROM \"products\" WHERE \"isActive\"=true ORDER BY unit_cost DESC",
     ],
+    "activitylogs": [
+        "-- ⚠ createdAt is TEXT — ALWAYS cast: NULLIF(al.\"createdAt\",'')::timestamptz",
+        "-- ✗ WRONG: al.\"createdAt\" > (CURRENT_DATE - INTERVAL '7 day')  — TEXT vs timestamp fails!",
+        "-- ✓ CORRECT: NULLIF(al.\"createdAt\",'')::timestamptz > NOW() - INTERVAL '7 days'",
+        "-- Filter recent activity: WHERE NULLIF(al.\"createdAt\",'')::timestamptz >= NOW() - INTERVAL '7 days'",
+        "-- Deals that changed stage: JOIN activitylogs al ON al.\"recordId\" = d._id AND al.module='deals'",
+        "-- NO deleted column on activitylogs — omit soft-delete filter",
+    ],
 }
 
 # Soft delete info per table (from real DB introspection)

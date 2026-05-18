@@ -245,7 +245,7 @@
     "saved_at": "2026-05-15T11:13:38.996169"
   },
   {
-    "natural_query": "Share ke kartik’s task status",
+    "natural_query": "Share ke kartik\u2019s task status",
     "sql": "SELECT t.\"Task\", t.status \nFROM \"createtasks\" t \nLEFT JOIN \"users\" u ON u._id = t.\"createdBy\" \nWHERE u.name = 'Kartik' AND NOT t.deleted",
     "tables": [
       "createtasks",
@@ -1033,7 +1033,7 @@
     "saved_at": "2026-05-18T04:29:14.006079"
   },
   {
-    "natural_query": "overdue invoices with company name — FK join invoices to companies",
+    "natural_query": "overdue invoices with company name \u2014 FK join invoices to companies",
     "sql": "SELECT c.\"companyName\", i.invoice_number, i.grand_total, i.currency, NULLIF(i.due_date,'')::timestamptz AS due_date, i.payment_status\nFROM \"invoices\" i\nLEFT JOIN \"companies\" c ON c._id = i.company\nWHERE i.payment_status NOT IN ('paid','cancelled')\n  AND NULLIF(i.due_date,'')::timestamptz < NOW()\n  AND NOT i.deleted\nORDER BY due_date ASC",
     "tables": [
       "invoices",
@@ -1042,7 +1042,7 @@
     "saved_at": "2026-05-18T09:00:00.000000"
   },
   {
-    "natural_query": "get companies by source — FK join companies to sources",
+    "natural_query": "get companies by source \u2014 FK join companies to sources",
     "sql": "SELECT c.\"companyName\", s.\"sourceName\", c.\"lifecycleStage\"\nFROM \"companies\" c\nLEFT JOIN \"sources\" s ON s._id = c.source\nWHERE NOT c.deleted\nORDER BY s.\"sourceName\", c.\"companyName\"",
     "tables": [
       "companies",
@@ -1051,7 +1051,7 @@
     "saved_at": "2026-05-18T09:00:01.000000"
   },
   {
-    "natural_query": "target vs achieved for all users this year — use sales_date NOT closeDate",
+    "natural_query": "target vs achieved for all users this year \u2014 use sales_date NOT closeDate",
     "sql": "SELECT u.name, t.year, t.month, t.\"targetInUSD\",\n  COALESCE(SUM(s.grand_total),0) AS achieved\nFROM \"users\" u\nLEFT JOIN \"targets\" t ON t.\"userId\" = u._id\nLEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id\n  AND s.status = 'Confirm'\n  AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year\n  AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = t.month\nWHERE u.\"isActive\" = true\nGROUP BY u._id, u.name, t.year, t.month, t.\"targetInUSD\"\nORDER BY u.name, t.year, t.month",
     "tables": [
       "users",
@@ -1061,7 +1061,7 @@
     "saved_at": "2026-05-18T09:00:02.000000"
   },
   {
-    "natural_query": "customers with no invoices in last 3 months — TEXT date cast required",
+    "natural_query": "customers with no invoices in last 3 months \u2014 TEXT date cast required",
     "sql": "SELECT c.\"companyName\",\n  MAX(NULLIF(i.invoice_date,'')::timestamptz) AS last_invoice_date\nFROM \"companies\" c\nLEFT JOIN \"invoices\" i ON i.company = c._id AND NOT i.deleted\nWHERE c.\"lifecycleStage\" = 'Customer' AND NOT c.deleted\nGROUP BY c._id, c.\"companyName\"\nHAVING MAX(NULLIF(i.invoice_date,'')::timestamptz) < NOW() - INTERVAL '3 months'\n   OR MAX(NULLIF(i.invoice_date,'')::timestamptz) IS NULL\nORDER BY last_invoice_date ASC",
     "tables": [
       "companies",
@@ -1070,7 +1070,7 @@
     "saved_at": "2026-05-18T09:00:03.000000"
   },
   {
-    "natural_query": "top 10 customers by revenue — join invoices to companies, no c.currency",
+    "natural_query": "top 10 customers by revenue \u2014 join invoices to companies, no c.currency",
     "sql": "SELECT c.\"companyName\",\n  UPPER(COALESCE(i.currency,'USD')) AS currency,\n  COALESCE(SUM(i.grand_total),0) AS total_revenue\nFROM \"invoices\" i\nLEFT JOIN \"companies\" c ON c._id = i.company\nWHERE i.payment_status = 'paid' AND NOT i.deleted\nGROUP BY c._id, c.\"companyName\", i.currency\nORDER BY total_revenue DESC\nLIMIT 10",
     "tables": [
       "invoices",
@@ -1133,7 +1133,7 @@
     "saved_at": "2026-05-18T04:54:11.597067"
   },
   {
-    "natural_query": "give me 1st invoice details — ordinal uses ORDER BY createdAt ASC LIMIT 1",
+    "natural_query": "give me 1st invoice details \u2014 ordinal uses ORDER BY createdAt ASC LIMIT 1",
     "sql": "SELECT i.invoice_number, i.\"companyName\", i.grand_total, i.currency,\n  NULLIF(i.invoice_date,'')::timestamptz AS invoice_date,\n  i.payment_status\nFROM \"invoices\" i\nWHERE NOT i.deleted\nORDER BY i.\"createdAt\" ASC\nLIMIT 1",
     "tables": [
       "invoices"
@@ -1141,7 +1141,7 @@
     "saved_at": "2026-05-18T10:00:00.000000"
   },
   {
-    "natural_query": "give me last 5 invoices — ordinal last N uses ORDER BY createdAt DESC LIMIT N",
+    "natural_query": "give me last 5 invoices \u2014 ordinal last N uses ORDER BY createdAt DESC LIMIT N",
     "sql": "SELECT i.invoice_number, i.\"companyName\", i.grand_total, i.currency,\n  i.payment_status,\n  NULLIF(i.invoice_date,'')::timestamptz AS invoice_date\nFROM \"invoices\" i\nWHERE NOT i.deleted\nORDER BY i.\"createdAt\" DESC\nLIMIT 5",
     "tables": [
       "invoices"
@@ -1149,7 +1149,7 @@
     "saved_at": "2026-05-18T10:00:01.000000"
   },
   {
-    "natural_query": "give me details of Wiegand LLC Systems — company entity search uses ILIKE",
+    "natural_query": "give me details of Wiegand LLC Systems \u2014 company entity search uses ILIKE",
     "sql": "SELECT c.\"companyName\", c.industry, c.country, c.\"lifecycleStage\",\n  c.\"leadStatus\", c.\"clientHealth\",\n  u.name AS owner_name\nFROM \"companies\" c\nLEFT JOIN \"users\" u ON u._id = c.\"companyOwner\"\nWHERE c.\"companyName\" ILIKE '%Wiegand%'\n  AND NOT c.deleted",
     "tables": [
       "companies",
@@ -1158,7 +1158,7 @@
     "saved_at": "2026-05-18T10:00:02.000000"
   },
   {
-    "natural_query": "give me details of ketul — contact name search uses ILIKE on firstName or lastName",
+    "natural_query": "give me details of ketul \u2014 contact name search uses ILIKE on firstName or lastName",
     "sql": "SELECT c.\"firstName\", c.\"lastName\", c.email, c.\"jobTitle\",\n  c.\"phoneNumber\", c.\"lifecycleStage\", c.\"leadStatus\",\n  u.name AS contact_owner\nFROM \"contacts\" c\nLEFT JOIN \"users\" u ON u._id = c.\"contactOwner\"\nWHERE (c.\"firstName\" ILIKE '%ketul%' OR c.\"lastName\" ILIKE '%ketul%')\n  AND NOT c.deleted",
     "tables": [
       "contacts",
@@ -1167,7 +1167,7 @@
     "saved_at": "2026-05-18T10:00:03.000000"
   },
   {
-    "natural_query": "deals by ketul — user name search always uses ILIKE not exact match",
+    "natural_query": "deals by ketul \u2014 user name search always uses ILIKE not exact match",
     "sql": "SELECT d.name, d.stage, d.grand_total, d.currency\nFROM \"deals\" d\nLEFT JOIN \"users\" u ON u._id = d.owner\nWHERE u.name ILIKE '%ketul%'\n  AND NOT d.deleted\nORDER BY d.grand_total DESC NULLS LAST",
     "tables": [
       "deals",
@@ -1176,7 +1176,7 @@
     "saved_at": "2026-05-18T10:00:04.000000"
   },
   {
-    "natural_query": "top products for this period — products embedded in sales.items JSONB",
+    "natural_query": "top products for this period \u2014 products embedded in sales.items JSONB",
     "sql": "SELECT jsonb_array_elements(s.items)->>'name' AS product_name,\n  COUNT(*) AS order_count,\n  COALESCE(SUM(s.grand_total),0) AS total_revenue,\n  UPPER(COALESCE(s.currency,'USD')) AS currency\nFROM \"sales\" s\nWHERE s.status = 'Confirm'\n  AND NOT s.deleted\n  AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY 1, 4\nORDER BY order_count DESC\nLIMIT 10",
     "tables": [
       "sales"
@@ -1184,7 +1184,7 @@
     "saved_at": "2026-05-18T10:00:05.000000"
   },
   {
-    "natural_query": "best product and project type combinations — use deals.type joined to projecttypes, no d.product column",
+    "natural_query": "best product and project type combinations \u2014 use deals.type joined to projecttypes, no d.product column",
     "sql": "SELECT d.type AS deal_type, pt.name AS project_type,\n  COUNT(*) AS deal_count,\n  UPPER(COALESCE(d.currency,'USD')) AS currency,\n  COALESCE(SUM(d.grand_total),0) AS total_value,\n  ROUND(100.0*SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0),1) AS win_rate_pct\nFROM \"deals\" d\nLEFT JOIN \"projecttypes\" pt ON pt._id = d.type\nWHERE NOT d.deleted\nGROUP BY d.type, pt.name, d.currency\nORDER BY total_value DESC\nLIMIT 10",
     "tables": [
       "deals",
@@ -1193,7 +1193,7 @@
     "saved_at": "2026-05-18T10:00:06.000000"
   },
   {
-    "natural_query": "get target vs achieved for all users — CORRECT EXTRACT: cast timestamptz INSIDE NULLIF",
+    "natural_query": "get target vs achieved for all users \u2014 CORRECT EXTRACT: cast timestamptz INSIDE NULLIF",
     "sql": "SELECT u.name AS user_name,\n  t.year, t.month, t.\"targetInUSD\",\n  COALESCE(SUM(s.grand_total),0) AS achieved\nFROM \"users\" u\nLEFT JOIN \"targets\" t ON t.\"userId\" = u._id\nLEFT JOIN \"sales\" s\n  ON s.\"salesOwner\" = u._id\n  AND s.status = 'Confirm'\n  AND NOT s.deleted\n  AND EXTRACT(YEAR  FROM NULLIF(s.sales_date,'')::timestamptz) = t.year\n  AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = t.month\nWHERE u.\"isActive\" = true\nGROUP BY u._id, u.name, t.year, t.month, t.\"targetInUSD\"\nORDER BY u.name, t.year, t.month",
     "tables": [
       "users",
@@ -1271,5 +1271,1166 @@
       "contacts"
     ],
     "saved_at": "2026-05-18T05:09:42.465831"
+  },
+  {
+    "natural_query": "COUNT(CASE WHEN d.stage = 'won' THEN 1 END) BY u.name",
+    "sql": "SELECT u.name, COUNT(CASE WHEN d.stage = 'Closed Won' THEN 1 END) AS won_deals\nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE NOT d.deleted \nGROUP BY u._id, u.name \nORDER BY won_deals DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:48:39.876594"
+  },
+  {
+    "natural_query": "COUNT(d._id) BY u.name",
+    "sql": "SELECT u.name, COUNT(d._id) AS deal_count \nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE NOT d.deleted \nGROUP BY u._id, u.name \nORDER BY deal_count DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:48:39.879640"
+  },
+  {
+    "natural_query": "deals closed last quarter with total value",
+    "sql": "SELECT \n  UPPER(COALESCE(d.currency,'USD')) AS currency, \n  COALESCE(SUM(d.grand_total),0) AS total_value\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \n  AND d.\"dealWonAt\" IS NOT NULL \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND EXTRACT(QUARTER FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE) - 1\nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:48:56.970104"
+  },
+  {
+    "natural_query": "deals closed this quarter with total value",
+    "sql": "SELECT \n  UPPER(COALESCE(d.currency,'USD')) AS currency, \n  COALESCE(SUM(d.grand_total),0) AS total_value\nFROM \"deals\" d \nWHERE \n  d.\"dealWonAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND EXTRACT(QUARTER FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)\nGROUP BY 1 \nORDER BY 2 DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:48:56.973704"
+  },
+  {
+    "natural_query": "SUM(invoices.grandtotal_in_usd) BY currency WHERE EXTRACT(YEAR FROM NULLIF(invoices.createdAt,''::timestamptz))=2024",
+    "sql": "SELECT UPPER(COALESCE(i.currency, 'USD')) AS currency, COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE NOT i.deleted AND EXTRACT(YEAR FROM NULLIF(i.\"createdAt\", '')::timestamptz) = 2024 \nGROUP BY 1 \nORDER BY 2 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:49:30.818738"
+  },
+  {
+    "natural_query": "SUM(invoices.grandtotal_in_usd) BY currency WHERE EXTRACT(YEAR FROM NULLIF(invoices.createdAt,''::timestamptz))=2025",
+    "sql": "SELECT \n  UPPER(COALESCE(i.currency, 'USD')) AS currency, \n  COALESCE(SUM(i.grand_total), 0) AS total_revenue\nFROM \n  \"invoices\" i\nWHERE \n  NOT i.deleted \n  AND EXTRACT(YEAR FROM NULLIF(i.\"createdAt\", '')::timestamptz) = 2025\nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:49:30.821688"
+  },
+  {
+    "natural_query": "SELECT u.name, t.targets, t.month, t.year",
+    "sql": "SELECT \n  u.name, \n  COALESCE(SUM(t.\"targetInUSD\"), 0) AS targets, \n  t.month, \n  t.year \nFROM \"users\" u \nLEFT JOIN \"targets\" t ON t.\"userId\" = u._id \nWHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE) \nGROUP BY u._id, u.name, t.month, t.year \nORDER BY t.year, t.month, targets DESC",
+    "tables": [
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:50:03.804383"
+  },
+  {
+    "natural_query": "SELECT u.name, SUM(s.grand_total_in_usd) AS total_sales",
+    "sql": "SELECT \n  u.name, \n  COALESCE(SUM(s.grand_total_in_usd), 0) AS total_sales \nFROM \n  \"users\" u \n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id \nWHERE \n  u.\"isActive\" = true \nGROUP BY \n  u._id, \n  u.name \nORDER BY \n  total_sales DESC",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:50:03.809770"
+  },
+  {
+    "natural_query": "COUNT(*) FROM contacts WHERE \"lifecycleStage\" = 'Lead' AND EXTRACT(MONTH FROM NULLIF(\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM (CURRENT_DATE - INTERVAL '1 month')) AND EXTRACT(YEAR FROM NULLIF(\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM (CURRENT_DATE - INTERVAL '1 month'))",
+    "sql": "SELECT COUNT(*) AS contact_count \nFROM \"contacts\" \nWHERE \"lifecycleStage\" = 'Lead' \nAND EXTRACT(MONTH FROM NULLIF(\"createdAt\",'')::timestamptz) = \n  EXTRACT(MONTH FROM (CURRENT_DATE - INTERVAL '1 month')) \nAND EXTRACT(YEAR FROM NULLIF(\"createdAt\",'')::timestamptz) = \n  EXTRACT(YEAR FROM (CURRENT_DATE - INTERVAL '1 month')) \nAND NOT deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-18T05:51:08.660913"
+  },
+  {
+    "natural_query": "COUNT(*) FROM contacts WHERE \"lifecycleStage\" = 'Lead' AND EXTRACT(MONTH FROM NULLIF(\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "sql": "SELECT COUNT(*) AS contact_count \nFROM \"contacts\" \nWHERE \"lifecycleStage\" = 'Lead' \n  AND EXTRACT(MONTH FROM NULLIF(\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(YEAR FROM NULLIF(\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND NOT deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-18T05:51:08.663983"
+  },
+  {
+    "natural_query": "COUNT(deals._id) FILTER WHEN lifecycle_stage = 'customer'",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nLEFT JOIN \"companies\" c ON c._id = d.company \nWHERE NOT d.deleted \nAND c.\"lifecycleStage\" = 'Customer'",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:51:41.861967"
+  },
+  {
+    "natural_query": "COUNT(deals._id) FILTER WHEN lifecycle_stage != 'customer'",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nLEFT JOIN \"companies\" c ON c._id = d.company \nWHERE NOT d.deleted \nAND c.\"lifecycleStage\" != 'Customer'",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:51:41.866415"
+  },
+  {
+    "natural_query": "SUM(invoices.grandtotal_in_usd) BY company",
+    "sql": "SELECT \n  c.\"companyName\", \n  COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue\nFROM \n  \"companies\" c \n  LEFT JOIN \"invoices\" i ON i.company = c._id \nWHERE \n  NOT c.deleted AND \n  NOT i.deleted \nGROUP BY \n  c._id, \n  c.\"companyName\" \nORDER BY \n  total_revenue DESC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:52:17.059983"
+  },
+  {
+    "natural_query": "Find companies with overdue invoices",
+    "sql": "SELECT \n  c.\"companyName\", \n  i.invoice_number, \n  NULLIF(i.due_date,'')::timestamptz AS due_date,\n  i.grand_total,\n  i.currency\nFROM \n  \"companies\" c \n  LEFT JOIN \"invoices\" i ON i.company = c._id \nWHERE \n  NOT c.deleted \n  AND NOT i.deleted \n  AND i.payment_status NOT IN ('paid','cancelled') \n  AND NULLIF(i.due_date,'')::timestamptz < NOW()\nORDER BY \n  due_date ASC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:52:51.246800"
+  },
+  {
+    "natural_query": "Calculate total outstanding amount for each overdue invoice",
+    "sql": "SELECT \n  i.invoice_number, \n  i.grand_total, \n  UPPER(COALESCE(i.currency,'USD')) AS currency, \n  NULLIF(i.due_date,'')::timestamptz AS due_date,\n  COALESCE(i.grand_total, 0) AS outstanding_amount\nFROM \n  \"invoices\" i \nWHERE \n  i.payment_status NOT IN ('paid','cancelled') \n  AND NOT i.deleted \n  AND NULLIF(i.due_date,'')::timestamptz < NOW() \nORDER BY \n  due_date ASC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:52:51.251308"
+  },
+  {
+    "natural_query": "Average deal size by deal type and owner",
+    "sql": "SELECT \n  d.type AS deal_type, \n  u.name AS owner_name, \n  COALESCE(AVG(d.grand_total), 0) AS avg_deal_size\nFROM \n  \"deals\" d \n  LEFT JOIN \"users\" u ON u._id = d.owner \nWHERE \n  NOT d.deleted \nGROUP BY \n  d.type, \n  u._id, \n  u.name \nORDER BY \n  avg_deal_size DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:53:24.852167"
+  },
+  {
+    "natural_query": "SELECT SUM(s.grand_total_in_usd) AS total_revenue, u.name AS sales_owner FROM sales s JOIN users u ON s.\"salesOwner\" = u._id WHERE EXTRACT(YEAR FROM NULLIF(s.\"createdAt\", ''::timestamptz)) = EXTRACT(YEAR FROM CURRENT_DATE) GROUP BY u.name ORDER BY total_revenue DESC LIMIT 5",
+    "sql": "SELECT COALESCE(SUM(s.grand_total_in_usd), 0) AS total_revenue, u.name AS sales_owner \nFROM \"sales\" s \nLEFT JOIN \"users\" u ON u._id = s.\"salesOwner\" \nWHERE NOT s.deleted AND EXTRACT(YEAR FROM NULLIF(s.\"createdAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \nGROUP BY u._id, u.name \nORDER BY total_revenue DESC \nLIMIT 5",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:53:56.895167"
+  },
+  {
+    "natural_query": "deals where \"closeDate\" < CURRENT_DATE and stage != 'Closed Lost' and stage != 'Closed Won'",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  NULLIF(d.\"closeDate\",'')::timestamptz AS close_date\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \n  AND NULLIF(d.\"closeDate\",'')::timestamptz < CURRENT_DATE \n  AND d.stage != 'Closed Lost' \n  AND d.stage != 'Closed Won' \nORDER BY \n  d.\"createdAt\" DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:54:29.875299"
+  },
+  {
+    "natural_query": "SUM(CASE WHEN EXTRACT(QUARTER FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(QUARTER FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(YEAR FROM CURRENT_DATE) THEN grandtotal_in_usd ELSE 0 END)",
+    "sql": "SELECT COALESCE(SUM(CASE WHEN EXTRACT(QUARTER FROM NULLIF(i.invoice_date,'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(i.invoice_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) THEN i.grand_total ELSE 0 END),0) AS revenue_this_quarter \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:55:03.629309"
+  },
+  {
+    "natural_query": "SUM(CASE WHEN EXTRACT(QUARTER FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(QUARTER FROM CURRENT_DATE) - 1 AND EXTRACT(YEAR FROM NULLIF(invoice_date,''::timestamptz)) = CASE WHEN EXTRACT(QUARTER FROM CURRENT_DATE) = 1 THEN EXTRACT(YEAR FROM CURRENT_DATE) - 1 ELSE EXTRACT(YEAR FROM CURRENT_DATE) END THEN grandtotal_in_usd ELSE 0 END)",
+    "sql": "SELECT COALESCE(SUM(CASE \n  WHEN EXTRACT(QUARTER FROM NULLIF(i.\"invoice_date\",'')::timestamptz) = \n    EXTRACT(QUARTER FROM CURRENT_DATE) - 1 \n  AND \n    EXTRACT(YEAR FROM NULLIF(i.\"invoice_date\",'')::timestamptz) = \n    CASE \n      WHEN EXTRACT(QUARTER FROM CURRENT_DATE) = 1 \n      THEN EXTRACT(YEAR FROM CURRENT_DATE) - 1 \n      ELSE EXTRACT(YEAR FROM CURRENT_DATE) \n    END \n  THEN i.grand_total ELSE 0 END), 0) AS revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:55:03.633292"
+  },
+  {
+    "natural_query": "How many deals has each user closed this year vs last year?",
+    "sql": "SELECT \n  u.name AS rep_name,\n  EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) AS won_year,\n  COUNT(*) AS deals_won\nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted\nWHERE \n  d.\"dealWonAt\" IS NOT NULL \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) IN (EXTRACT(YEAR FROM CURRENT_DATE), EXTRACT(YEAR FROM CURRENT_DATE) - 1)\nGROUP BY \n  u._id, \n  u.name, \n  EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz)\nORDER BY \n  won_year, \n  deals_won DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:55:37.369741"
+  },
+  {
+    "natural_query": "Which users have no confirmed sales in the last 3 months?",
+    "sql": "SELECT u._id, u.name, u.email \nFROM \"users\" u \nWHERE u.\"isActive\" = true \n  AND u._id NOT IN (\n    SELECT s.\"salesOwner\" \n    FROM \"sales\" s \n    WHERE s.status = 'Confirm' \n      AND NOT s.deleted \n      AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) >= EXTRACT(MONTH FROM (CURRENT_DATE - INTERVAL '3 month')) \n      AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = \n        CASE \n          WHEN EXTRACT(MONTH FROM CURRENT_DATE) < 3 THEN EXTRACT(YEAR FROM CURRENT_DATE) - 1 \n          ELSE EXTRACT(YEAR FROM CURRENT_DATE) \n        END\n  ) \n  OR u._id NOT IN (SELECT s.\"salesOwner\" FROM \"sales\" s)",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:56:12.173809"
+  },
+  {
+    "natural_query": "Payment collection rate by company with paid vs total invoices",
+    "sql": "SELECT \n  c.\"companyName\", \n  COALESCE(SUM(CASE WHEN i.payment_status = 'paid' THEN i.grand_total ELSE 0 END), 0) AS paid_amount,\n  COALESCE(SUM(i.grand_total), 0) AS total_amount,\n  ROUND(100.0 * COALESCE(SUM(CASE WHEN i.payment_status = 'paid' THEN i.grand_total ELSE 0 END), 0) / \n         NULLIF(COALESCE(SUM(i.grand_total), 0), 0), 2) AS payment_collection_rate\nFROM \n  \"invoices\" i \n  LEFT JOIN \"companies\" c ON c._id = i.company \nWHERE \n  NOT i.deleted \nGROUP BY \n  c._id, \n  c.\"companyName\" \nORDER BY \n  payment_collection_rate DESC \nLIMIT 50",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:56:45.661436"
+  },
+  {
+    "natural_query": "owner names",
+    "sql": "SELECT u.name AS owner_name \nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE NOT d.deleted \nGROUP BY u._id, u.name \nORDER BY u.name ASC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:57:18.392083"
+  },
+  {
+    "natural_query": "deal count by stage",
+    "sql": "SELECT \n  d.stage AS deal_stage, \n  COUNT(*) AS deal_count \nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \nGROUP BY \n  d.stage \nORDER BY \n  deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:57:18.396172"
+  },
+  {
+    "natural_query": "sum of grand_total_in_usd by stage",
+    "sql": "SELECT \n  d.stage, \n  COALESCE(SUM(d.grand_total_in_usd), 0) AS total_grand_total_in_usd\nFROM \n  \"deals\" d\nWHERE \n  NOT d.deleted\nGROUP BY \n  d.stage\nORDER BY \n  total_grand_total_in_usd DESC NULLS LAST",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:57:18.400327"
+  },
+  {
+    "natural_query": "Which contacts have no associated deals in the system?",
+    "sql": "SELECT c._id, c.\"firstName\", c.\"lastName\", c.email \nFROM \"contacts\" c \nWHERE NOT c.deleted \nAND c._id NOT IN (SELECT d.company FROM \"deals\" d WHERE NOT d.deleted) \nAND c.company IS NOT NULL",
+    "tables": [
+      "contacts",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:57:53.341378"
+  },
+  {
+    "natural_query": "EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - d.\"closeDate\") > 30*24*3600 AND d.stage = 'Analysis - To be Quoted'",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - NULLIF(d.\"closeDate\",'')::timestamptz)) AS time_diff \nFROM \n  \"deals\" d \nWHERE \n  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - NULLIF(d.\"closeDate\",'')::timestamptz)) > 30*24*3600 \n  AND d.stage = 'Analysis - To be Quoted' \n  AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T05:58:27.382798"
+  },
+  {
+    "natural_query": "Target achievement percentage per sales rep this month",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COALESCE(SUM(CASE WHEN s.status='Confirm' THEN s.grand_total ELSE 0 END), 0) AS achieved_amount,\n  t.\"targetInUSD\" AS target_amount,\n  ROUND(100.0*COALESCE(SUM(CASE WHEN s.status='Confirm' THEN s.grand_total ELSE 0 END), 0) / t.\"targetInUSD\", 2) AS achievement_pct\nFROM \n  \"users\" u \n  LEFT JOIN \"targets\" t ON t.\"userId\" = u._id \n  AND t.year = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND t.month = EXTRACT(MONTH FROM CURRENT_DATE) \n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id \n  AND EXTRACT(YEAR FROM NULLIF(s.sales_date, '')::timestamptz) = t.year \n  AND EXTRACT(MONTH FROM NULLIF(s.sales_date, '')::timestamptz) = t.month \n  AND NOT s.deleted \nWHERE \n  u.\"isActive\" = true \nGROUP BY \n  u._id, u.name, t.\"targetInUSD\" \nORDER BY \n  achievement_pct DESC",
+    "tables": [
+      "sales",
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-18T05:59:01.261242"
+  },
+  {
+    "natural_query": "COUNT(*) FROM invoices WHERE payment_status = 'overdue' AND EXTRACT(MONTH FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(MONTH FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month') AND EXTRACT(YEAR FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(YEAR FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')",
+    "sql": "SELECT COUNT(*) AS overdue_invoices_count \nFROM \"invoices\" i \nWHERE i.payment_status NOT IN ('paid', 'cancelled') \n  AND NULLIF(i.due_date, '')::timestamptz < CURRENT_DATE \n  AND EXTRACT(MONTH FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(MONTH FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')\n  AND EXTRACT(YEAR FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(YEAR FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')\n  AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:59:37.168867"
+  },
+  {
+    "natural_query": "SUM(grandtotal_in_usd) FROM invoices WHERE payment_status = 'overdue' AND EXTRACT(MONTH FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(MONTH FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month') AND EXTRACT(YEAR FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(YEAR FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_overdue \nFROM \"invoices\" i \nWHERE i.payment_status IN ('partial_payment', 'draft', 'confirmed', 'cancelled') \n  AND NOT i.deleted \n  AND NULLIF(i.due_date, '')::timestamptz < NOW() \n  AND EXTRACT(MONTH FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(MONTH FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month') \n  AND EXTRACT(YEAR FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(YEAR FROM DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month')",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:59:37.178996"
+  },
+  {
+    "natural_query": "COUNT(*) FROM invoices WHERE payment_status = 'overdue' AND EXTRACT(MONTH FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "sql": "SELECT COUNT(*) AS overdue_invoice_count \nFROM \"invoices\" i \nWHERE i.payment_status NOT IN ('paid', 'cancelled') \n  AND NULLIF(i.due_date, '')::timestamptz < CURRENT_DATE \n  AND EXTRACT(MONTH FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(YEAR FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:59:37.188764"
+  },
+  {
+    "natural_query": "SUM(grandtotal_in_usd) FROM invoices WHERE payment_status = 'overdue' AND EXTRACT(MONTH FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(invoice_date,''::timestamptz)) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "sql": "SELECT COALESCE(SUM(i.grand_total), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status IN ('partial_payment', 'confirmed') \nAND NULLIF(i.due_date, '')::timestamptz < CURRENT_DATE \nAND EXTRACT(MONTH FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \nAND EXTRACT(YEAR FROM NULLIF(i.invoice_date, '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \nAND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T05:59:37.198213"
+  },
+  {
+    "natural_query": "SUM(invoices.grandtotal_in_usd) by regions.name",
+    "sql": "SELECT \n  r.\"regionName\", \n  COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue\nFROM \n  \"regions\" r \n  LEFT JOIN \"companies\" c ON c._id = r._id \n  LEFT JOIN \"invoices\" i ON i.company = c._id \nWHERE \n  NOT i.deleted \nGROUP BY \n  r.\"regionName\" \nORDER BY \n  total_revenue DESC",
+    "tables": [
+      "companies",
+      "invoices",
+      "regions"
+    ],
+    "saved_at": "2026-05-18T06:00:09.625273"
+  },
+  {
+    "natural_query": "companies where lifecycleStage = 'customer' and leadStatus = 'lead' and EXTRACT(MONTH FROM NULLIF(\"leadWonAt\",''::timestamptz)) = EXTRACT(MONTH FROM CURRENT_DATE)",
+    "sql": "SELECT c.\"companyName\", c.industry, c.country \nFROM \"companies\" c \nWHERE c.\"lifecycleStage\" = 'Customer' \n  AND c.\"leadStatus\" = 'Lead' \n  AND EXTRACT(MONTH FROM NULLIF(c.\"leadWonAt\", '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND NOT c.deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-18T06:00:41.513419"
+  },
+  {
+    "natural_query": "Sales rep ranking by win rate this year with deal counts",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COUNT(DISTINCT CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN d._id ELSE NULL END) AS won_deals,\n  COUNT(DISTINCT d._id) AS total_deals,\n  ROUND(100.0*COUNT(DISTINCT CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN d._id ELSE NULL END)/NULLIF(COUNT(DISTINCT d._id),0),1) AS win_rate_pct\nFROM \n  \"users\" u \n  LEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE \n  NOT d.deleted \n  AND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  u._id, \n  u.name \nORDER BY \n  win_rate_pct DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:01:16.748972"
+  },
+  {
+    "natural_query": "Companies with overdue invoices",
+    "sql": "SELECT \n  c.\"companyName\", \n  i.invoice_number, \n  NULLIF(i.due_date,'')::timestamptz AS due_date, \n  NULLIF(i.payment_date,'')::timestamptz AS payment_date\nFROM \n  \"companies\" c \n  LEFT JOIN \"invoices\" i ON i.company = c._id \nWHERE \n  NOT c.deleted \n  AND NOT i.deleted \n  AND i.payment_status NOT IN ('paid','cancelled') \n  AND NULLIF(i.due_date,'')::timestamptz < CURRENT_DATE \nORDER BY \n  due_date ASC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:01:49.855275"
+  },
+  {
+    "natural_query": "Companies with open deals",
+    "sql": "SELECT DISTINCT c._id, c.\"companyName\" \nFROM \"companies\" c \nLEFT JOIN \"deals\" d ON d.company = c._id \nWHERE d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted AND NOT c.deleted",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:01:49.860873"
+  },
+  {
+    "natural_query": "COUNT(*) FROM companies WHERE \"lifecycleStage\" = 'customer' AND EXTRACT(QUARTER FROM NULLIF(\"leadWonAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)",
+    "sql": "SELECT COUNT(*) AS customer_count \nFROM \"companies\" c \nWHERE c.\"lifecycleStage\" = 'Customer' \n  AND EXTRACT(QUARTER FROM NULLIF(c.\"leadWonAt\",'')::timestamptz) = \n      EXTRACT(QUARTER FROM CURRENT_DATE) \n  AND NOT c.deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-18T06:02:22.312158"
+  },
+  {
+    "natural_query": "Companies associated with overdue tasks",
+    "sql": "SELECT DISTINCT c.\"companyName\", c._id \nFROM \"companies\" c \nLEFT JOIN \"createtasks\" ct ON ct.\"companyId\" = c._id \nWHERE ct.status != 'Completed' \nAND NULLIF(ct.due_date,'')::timestamptz < NOW() \nAND NOT ct.deleted \nAND NOT c.deleted",
+    "tables": [
+      "companies",
+      "createtasks"
+    ],
+    "saved_at": "2026-05-18T06:02:57.530392"
+  },
+  {
+    "natural_query": "Count of deals for each overdue task",
+    "sql": "SELECT \n  COUNT(DISTINCT d._id) AS deal_count,\n  ct.\"Task\" AS task_name\nFROM \n  \"createtasks\" ct\n  LEFT JOIN \"deals\" d ON d._id = ct.\"dealsId\"\nWHERE \n  ct.status != 'Completed'\n  AND NOT ct.deleted\n  AND NULLIF(ct.due_date, '')::timestamptz < NOW()\nGROUP BY \n  ct.\"Task\", ct._id\nORDER BY \n  deal_count DESC",
+    "tables": [
+      "createtasks",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:02:57.537378"
+  },
+  {
+    "natural_query": "Users with overdue tasks",
+    "sql": "SELECT u._id, u.name, u.email \nFROM \"users\" u \nLEFT JOIN \"createtasks\" ct ON ct.\"createdBy\" = u._id \nWHERE ct.status != 'Completed' AND ct.deleted = false AND NULLIF(ct.due_date,'')::timestamptz < NOW() \nGROUP BY u._id, u.name, u.email \nHAVING COUNT(*) > 0",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:02:57.542550"
+  },
+  {
+    "natural_query": "deals _id, name, grand_total_in_usd, \"closeDate\" where stage != 'Closed Lost' and \"closeDate\" < CURRENT_DATE",
+    "sql": "SELECT \n  d._id, \n  d.name, \n  d.grand_total_in_usd, \n  NULLIF(d.\"closeDate\", '')::timestamptz AS \"closeDate\"\nFROM \n  \"deals\" d \nWHERE \n  d.stage != 'Closed Lost' \n  AND NULLIF(d.\"closeDate\", '')::timestamptz < CURRENT_DATE \n  AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:03:30.795622"
+  },
+  {
+    "natural_query": "Which industries have the highest deal win rate?",
+    "sql": "SELECT \n  c.\"industry\" AS industry,\n  COUNT(*) AS deal_count,\n  COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END), 0) AS won_deals,\n  ROUND(100.0*COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END), 0)/NULLIF(COUNT(*),0),1) AS win_rate_pct\nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \nWHERE \n  NOT d.deleted\nGROUP BY \n  c.\"industry\" \nORDER BY \n  win_rate_pct DESC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:04:05.188117"
+  },
+  {
+    "natural_query": "Invoice aging breakdown \u2014 overdue 30, 60, 90 plus days with amounts",
+    "sql": "SELECT \n  CASE \n    WHEN NULLIF(i.due_date,'')::timestamptz < NOW() - INTERVAL '30 day' THEN 'Overdue > 90 days'\n    WHEN NULLIF(i.due_date,'')::timestamptz < NOW() - INTERVAL '60 day' THEN 'Overdue 60-90 days'\n    WHEN NULLIF(i.due_date,'')::timestamptz < NOW() - INTERVAL '30 day' THEN 'Overdue 30-60 days'\n    ELSE 'Current'\n  END AS aging_category,\n  UPPER(COALESCE(i.currency,'USD')) AS currency,\n  COALESCE(SUM(i.grand_total), 0) AS amount\nFROM \n  \"invoices\" i\nWHERE \n  i.payment_status NOT IN ('paid','cancelled') \n  AND NOT i.deleted\nGROUP BY \n  1, 2\nORDER BY \n  2, 3 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:04:38.747305"
+  },
+  {
+    "natural_query": "SUM(CASE WHEN d.dealstage='Cross-sell' THEN d.grandtotal_in_usd ELSE 0 END) AS cross_sell_revenue",
+    "sql": "SELECT \n  COALESCE(SUM(CASE WHEN d.stage = 'Cross-sell' THEN d.grand_total ELSE 0 END), 0) AS cross_sell_revenue \nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:05:11.665631"
+  },
+  {
+    "natural_query": "SUM(CASE WHEN d.dealstage='Upsell' THEN d.grandtotal_in_usd ELSE 0 END) AS upsell_revenue",
+    "sql": "SELECT COALESCE(SUM(CASE WHEN d.stage = 'Upsell' THEN d.grand_total ELSE 0 END), 0) AS upsell_revenue \nFROM \"deals\" d \nWHERE NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:05:11.676545"
+  },
+  {
+    "natural_query": "SUM(CASE WHEN d.dealstage='New Business' THEN d.grandtotal_in_usd ELSE 0 END) AS new_business_revenue",
+    "sql": "SELECT COALESCE(SUM(CASE WHEN d.stage = 'New Business' THEN d.grand_total ELSE 0 END), 0) AS new_business_revenue \nFROM \"deals\" d \nWHERE NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:05:11.697483"
+  },
+  {
+    "natural_query": "Calculate days in current stage for each deal",
+    "sql": "SELECT \n  d.name AS deal_name, \n  d.stage AS current_stage, \n  COALESCE(NULLIF(d.\"closeDate\",'')::timestamptz - NULLIF(d.\"createdAt\",'')::timestamptz, \n           CURRENT_DATE - NULLIF(d.\"createdAt\",'')::timestamptz) AS days_in_current_stage\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \nORDER BY \n  days_in_current_stage DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:05:45.187866"
+  },
+  {
+    "natural_query": "Identify deals in same stage for over 60 days",
+    "sql": "SELECT d.name, d.stage, d.\"createdAt\", d.\"closeDate\" \nFROM \"deals\" d \nWHERE NOT d.deleted \n  AND d.stage = 'Analysis - To be Quoted' \n  AND d.\"closeDate\" IS NOT NULL \n  AND d.\"createdAt\" IS NOT NULL \n  AND (NULLIF(d.\"closeDate\",'')::timestamptz - NULLIF(d.\"createdAt\",'')::timestamptz) > INTERVAL '60 days'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:05:45.196009"
+  },
+  {
+    "natural_query": "Get current stage and date for each deal",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  NULLIF(d.\"closeDate\",'')::timestamptz AS close_date, \n  NULLIF(d.\"dealWonAt\",'')::timestamptz AS won_date, \n  NULLIF(d.\"dealLostAt\",'')::timestamptz AS lost_date \nFROM \"deals\" d \nWHERE NOT d.deleted \nORDER BY d.\"createdAt\" DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:05:45.204768"
+  },
+  {
+    "natural_query": "SUM(invoices.grandtotal_in_usd) by EXTRACT(MONTH FROM invoices.invoice_date)",
+    "sql": "SELECT EXTRACT(MONTH FROM NULLIF(i.\"invoice_date\",'')::timestamptz) AS month, \n       COALESCE(SUM(i.\"grand_total\"),0) AS total_revenue,\n       UPPER(COALESCE(i.currency,'USD')) AS currency\nFROM \"invoices\" i \nWHERE NOT i.deleted \nGROUP BY 1, 3 \nORDER BY 1",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:06:18.627354"
+  },
+  {
+    "natural_query": "Top 10 companies by total open deal pipeline value",
+    "sql": "SELECT \n  c.\"companyName\", \n  UPPER(COALESCE(d.currency,'USD')) AS currency, \n  COALESCE(SUM(d.grand_total),0) AS pipeline_value\nFROM \n  \"companies\" c \n  LEFT JOIN \"deals\" d ON d.company = c._id \nWHERE \n  NOT c.deleted \n  AND d.\"dealWonAt\" IS NULL \n  AND d.\"dealLostAt\" IS NULL \n  AND NOT d.deleted \nGROUP BY \n  c._id, \n  c.\"companyName\", \n  d.currency \nORDER BY \n  pipeline_value DESC \nLIMIT 10",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:06:52.407289"
+  },
+  {
+    "natural_query": "Which sales reps have the highest average deal size this year?",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COALESCE(AVG(d.grand_total), 0) AS avg_deal_size\nFROM \n  \"users\" u \n  LEFT JOIN \"deals\" d ON d.owner = u._id \n  AND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND NOT d.deleted \n  AND d.\"dealWonAt\" IS NOT NULL \n  AND d.\"dealLostAt\" IS NULL \n  AND d.stage NOT IN ('Closed Lost', 'Closed Won')\nGROUP BY \n  u._id, u.name \nORDER BY \n  avg_deal_size DESC \nLIMIT 10",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:07:25.307299"
+  },
+  {
+    "natural_query": "Lead source performance \u2014 which source generates most converted customers?",
+    "sql": "SELECT \n  s.\"sourceName\", \n  COUNT(DISTINCT CASE WHEN c.\"lifecycleStage\" = 'Customer' THEN c._id END) AS converted_customers\nFROM \n  \"sources\" s\n  LEFT JOIN \"companies\" c ON c.source = s._id AND NOT c.deleted\nGROUP BY \n  s.\"sourceName\"\nORDER BY \n  converted_customers DESC\nLIMIT 1",
+    "tables": [
+      "companies",
+      "sources"
+    ],
+    "saved_at": "2026-05-18T06:07:58.341810"
+  },
+  {
+    "natural_query": "Deals lost this year broken down by stage and owner",
+    "sql": "SELECT \n  d.stage AS deal_stage, \n  u.name AS owner_name, \n  COUNT(*) AS lost_deals_count, \n  COALESCE(SUM(d.grand_total), 0) AS total_lost_value\nFROM \n  \"deals\" d \n  LEFT JOIN \"users\" u ON u._id = d.owner \nWHERE \n  d.\"dealLostAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealLostAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  d.stage, \n  u._id, \n  u.name \nORDER BY \n  lost_deals_count DESC, \n  total_lost_value DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:08:30.626403"
+  },
+  {
+    "natural_query": "invoices with payment_status != 'paid'",
+    "sql": "SELECT \n  i.invoice_number, \n  i.payment_status, \n  i.grand_total, \n  i.currency, \n  c.\"companyName\"\nFROM \n  \"invoices\" i \n  LEFT JOIN \"companies\" c ON c._id = i.company \nWHERE \n  i.payment_status != 'paid' \n  AND NOT i.deleted \nORDER BY \n  i.invoice_number",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:09:04.640779"
+  },
+  {
+    "natural_query": "companyName for invoices with company\u2192companies",
+    "sql": "SELECT c.\"companyName\" \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE NOT i.deleted",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:09:04.644647"
+  },
+  {
+    "natural_query": "invoices with due_date < (CURRENT_DATE - INTERVAL '60 days')",
+    "sql": "SELECT i.invoice_number, i.due_date, i.grand_total, i.currency \nFROM \"invoices\" i \nWHERE NOT i.deleted AND NULLIF(i.due_date,'')::timestamptz < (CURRENT_DATE - INTERVAL '60 days') \nORDER BY i.due_date DESC NULLS LAST LIMIT 100",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:09:04.664504"
+  },
+  {
+    "natural_query": "COUNT(*) FROM publicleads WHERE EXTRACT(WEEK FROM NULLIF(\"createdAt\", '')::timestamptz) = EXTRACT(WEEK FROM CURRENT_DATE::timestamptz) - 3 AND EXTRACT(YEAR FROM NULLIF(\"createdAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE::timestamptz)",
+    "sql": "SELECT COUNT(*) AS lead_count FROM \"publicleads\" WHERE EXTRACT(WEEK FROM NULLIF(\"createdAt\", '')::timestamptz) = EXTRACT(WEEK FROM CURRENT_DATE::timestamptz) - 3 AND EXTRACT(YEAR FROM NULLIF(\"createdAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE::timestamptz)",
+    "tables": [
+      "publicleads"
+    ],
+    "saved_at": "2026-05-18T06:09:39.971420"
+  },
+  {
+    "natural_query": "SELECT u._id, COUNT(ct._id) as count FROM users u JOIN createtasks ct ON u._id = ct.\"createdBy\" WHERE ct.status = 'pending' GROUP BY u._id",
+    "sql": "SELECT u._id, COUNT(ct._id) AS count \nFROM \"users\" u \nLEFT JOIN \"createtasks\" ct ON u._id = ct.\"createdBy\" \nWHERE ct.status = 'Pending' AND NOT ct.deleted \nGROUP BY u._id",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:10:11.736490"
+  },
+  {
+    "natural_query": "Overdue task aging \u2014 tasks past due by 7, 14, 30 plus days per user",
+    "sql": "SELECT \n  u.name AS assignee_name,\n  COALESCE(SUM(CASE WHEN NOW() - NULLIF(ct.due_date,'')::timestamptz BETWEEN INTERVAL '0 days' AND INTERVAL '7 days' THEN 1 ELSE 0 END), 0) AS overdue_7_days,\n  COALESCE(SUM(CASE WHEN NOW() - NULLIF(ct.due_date,'')::timestamptz BETWEEN INTERVAL '8 days' AND INTERVAL '14 days' THEN 1 ELSE 0 END), 0) AS overdue_14_days,\n  COALESCE(SUM(CASE WHEN NOW() - NULLIF(ct.due_date,'')::timestamptz BETWEEN INTERVAL '15 days' AND INTERVAL '30 days' THEN 1 ELSE 0 END), 0) AS overdue_30_days,\n  COALESCE(SUM(CASE WHEN NOW() - NULLIF(ct.due_date,'')::timestamptz > INTERVAL '30 days' THEN 1 ELSE 0 END), 0) AS overdue_30_plus_days\nFROM \n  \"users\" u \n  LEFT JOIN \"createtasks\" ct ON ct.\"createdBy\" = u._id AND ct.status != 'Completed' AND NOT ct.deleted\nGROUP BY \n  u._id, u.name \nORDER BY \n  overdue_7_days DESC, \n  overdue_14_days DESC, \n  overdue_30_days DESC, \n  overdue_30_plus_days DESC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:10:46.097922"
+  },
+  {
+    "natural_query": "SUM(targets.targetInUSD) AS total_target",
+    "sql": "SELECT COALESCE(SUM(t.\"targetInUSD\"), 0) AS total_target \nFROM \"targets\" t \nWHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "targets"
+    ],
+    "saved_at": "2026-05-18T06:11:19.338404"
+  },
+  {
+    "natural_query": "users.name AS rep_name",
+    "sql": "SELECT u.name AS rep_name FROM \"users\" u",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:11:19.349081"
+  },
+  {
+    "natural_query": "SUM(sales.amount) AS total_revenue",
+    "sql": "SELECT COALESCE(SUM(s.grand_total), 0) AS total_revenue \nFROM \"sales\" s \nWHERE s.status = 'Confirm' AND NOT s.deleted",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-18T06:11:19.356265"
+  },
+  {
+    "natural_query": "COUNT(*) FROM deals WHERE stage = 'Closed Won' AND EXTRACT(MONTH FROM NULLIF(\"dealWonAt\", '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(\"dealWonAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) - 1",
+    "sql": "SELECT COUNT(*) AS won_deals_count \nFROM \"deals\" d \nWHERE d.stage = 'Closed Won' \n  AND EXTRACT(MONTH FROM NULLIF(d.\"dealWonAt\", '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) - 1 \n  AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:11:52.723653"
+  },
+  {
+    "natural_query": "COUNT(*) FROM deals WHERE stage = 'Closed Won' AND EXTRACT(MONTH FROM NULLIF(\"dealWonAt\", '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM NULLIF(\"dealWonAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "sql": "SELECT COUNT(*) AS won_deals_count \nFROM \"deals\" d \nWHERE d.stage = 'Closed Won' \n  AND NOT d.deleted \n  AND EXTRACT(MONTH FROM NULLIF(d.\"dealWonAt\", '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:11:52.735077"
+  },
+  {
+    "natural_query": "Total SUM(invoices.grandtotal_in_usd) this year",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status != 'cancelled' \nAND NOT i.deleted \nAND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:12:25.743576"
+  },
+  {
+    "natural_query": "SUM(invoices.grandtotal_in_usd) FILTER_BY company",
+    "sql": "SELECT COALESCE(SUM(i.grand_total),0) AS total_revenue, UPPER(COALESCE(i.currency,'USD')) AS currency \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE NOT i.deleted \nGROUP BY 2 \nORDER BY 2",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:12:25.753161"
+  },
+  {
+    "natural_query": "Which deal owners have the highest loss rate this year?",
+    "sql": "SELECT \n  u.name AS owner_name, \n  ROUND(100.0*COALESCE(SUM(CASE WHEN d.\"dealLostAt\" IS NOT NULL THEN 1 ELSE 0 END),0)/NULLIF(COUNT(*),0),1) AS loss_rate_pct\nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE NOT d.deleted \nAND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY u._id, u.name \nORDER BY loss_rate_pct DESC \nLIMIT 10",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:12:59.442007"
+  },
+  {
+    "natural_query": "Active contacts per company with their lifecycle stage breakdown",
+    "sql": "SELECT \n  c.\"companyName\", \n  COUNT(DISTINCT CASE WHEN co.\"lifecycleStage\" = 'Lead' THEN co._id END) AS \"lead_contacts\", \n  COUNT(DISTINCT CASE WHEN co.\"lifecycleStage\" != 'Lead' THEN co._id END) AS \"non_lead_contacts\",\n  COUNT(DISTINCT co._id) AS total_contacts\nFROM \"companies\" c \n  LEFT JOIN \"contacts\" co ON co.company = c._id AND NOT co.deleted\nGROUP BY c._id, c.\"companyName\" \nORDER BY total_contacts DESC",
+    "tables": [
+      "companies",
+      "contacts"
+    ],
+    "saved_at": "2026-05-18T06:13:32.890097"
+  },
+  {
+    "natural_query": "COUNT(*) FROM sales WHERE status = 'confirmed' AND EXTRACT(YEAR FROM NULLIF(\"createdAt\",''::timestamptz)) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(QUARTER FROM NULLIF(\"createdAt\",''::timestamptz)) = EXTRACT(QUARTER FROM CURRENT_DATE) GROUP BY \"salesOwner\"",
+    "sql": "SELECT COUNT(*) AS sales_count \nFROM \"sales\" s \nLEFT JOIN \"users\" u ON u._id = s.\"salesOwner\" \nWHERE s.status = 'Confirm' \n  AND NOT s.deleted \n  AND EXTRACT(YEAR FROM NULLIF(s.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND EXTRACT(QUARTER FROM NULLIF(s.\"createdAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE) \nGROUP BY s.\"salesOwner\"",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:14:06.162890"
+  },
+  {
+    "natural_query": "COUNT(*) FROM sales WHERE EXTRACT(YEAR FROM NULLIF(\"createdAt\",''::timestamptz)) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(QUARTER FROM NULLIF(\"createdAt\",''::timestamptz)) = EXTRACT(QUARTER FROM CURRENT_DATE) GROUP BY \"salesOwner\"",
+    "sql": "SELECT COUNT(*) \nFROM \"sales\" s \nWHERE NOT s.deleted \n  AND EXTRACT(YEAR FROM NULLIF(s.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND EXTRACT(QUARTER FROM NULLIF(s.\"createdAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE) \nGROUP BY s.\"salesOwner\"",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-18T06:14:06.166351"
+  },
+  {
+    "natural_query": "COUNT open deals by company",
+    "sql": "SELECT \n  c.\"companyName\", \n  COUNT(DISTINCT d._id) AS open_deal_count\nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \nWHERE \n  d.\"dealWonAt\" IS NULL \n  AND d.\"dealLostAt\" IS NULL \n  AND NOT d.deleted \nGROUP BY \n  c.\"companyName\" \nORDER BY \n  open_deal_count DESC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:14:38.790870"
+  },
+  {
+    "natural_query": "Get companies with > 3 open deals",
+    "sql": "SELECT c._id, c.\"companyName\", COUNT(*) AS open_deal_count \nFROM \"companies\" c \nLEFT JOIN \"deals\" d ON d.company = c._id \nWHERE NOT c.deleted AND d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted \nGROUP BY c._id, c.\"companyName\" \nHAVING COUNT(*) > 3 \nORDER BY open_deal_count DESC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:14:38.798346"
+  },
+  {
+    "natural_query": "COUNT(DISTINCT CASE WHEN lifecycle_stage='customer' THEN source END) AS customer_count_by_source",
+    "sql": "SELECT COUNT(DISTINCT CASE WHEN c.\"lifecycleStage\" = 'Customer' THEN s._id END) AS customer_count_by_source \nFROM \"companies\" c \nLEFT JOIN \"sources\" s ON s._id = c.source \nWHERE NOT c.deleted",
+    "tables": [
+      "companies",
+      "sources"
+    ],
+    "saved_at": "2026-05-18T06:15:45.820064"
+  },
+  {
+    "natural_query": "COUNT(DISTINCT CASE WHEN lifecycle_stage='lead' THEN source END) AS lead_count_by_source",
+    "sql": "SELECT COUNT(DISTINCT CASE WHEN c.\"lifecycleStage\" = 'Lead' THEN s._id END) AS lead_count_by_source\nFROM \"companies\" c \nLEFT JOIN \"sources\" s ON s._id = c.source \nWHERE NOT c.deleted",
+    "tables": [
+      "companies",
+      "sources"
+    ],
+    "saved_at": "2026-05-18T06:15:45.827273"
+  },
+  {
+    "natural_query": "COUNT(createtasks _id) AS pending_tasks FOR users _id",
+    "sql": "SELECT COUNT(ct._id) AS pending_tasks \nFROM \"users\" u \nLEFT JOIN \"createtasks\" ct ON ct.\"createdBy\" = u._id AND ct.status = 'Pending' AND NOT ct.deleted \nGROUP BY u._id \nORDER BY pending_tasks DESC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:16:18.943416"
+  },
+  {
+    "natural_query": "COUNT(deals _id) AS deal_count FOR users _id",
+    "sql": "SELECT COUNT(DISTINCT d._id) AS deal_count \nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE NOT d.deleted",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:16:18.946298"
+  },
+  {
+    "natural_query": "users _id, name, email",
+    "sql": "SELECT u._id, u.name, u.email FROM \"users\" u",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:16:18.948957"
+  },
+  {
+    "natural_query": "COUNT(CASE WHEN deals stage = 'won' THEN 1 END) AS won_deals FOR users _id",
+    "sql": "SELECT \n  u._id, \n  COUNT(*) AS total_deals, \n  COUNT(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 END) AS won_deals\nFROM \n  \"users\" u \n  LEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE \n  NOT d.deleted \nGROUP BY \n  u._id \nORDER BY \n  won_deals DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:16:18.951707"
+  },
+  {
+    "natural_query": "Which deals changed stage in the last 7 days?",
+    "sql": "SELECT \n  d.name AS deal_name, \n  d.stage AS deal_stage, \n  al.action AS stage_change, \n  NULLIF(al.\"createdAt\",'')::timestamptz AS change_date\nFROM \n  \"deals\" d \n  LEFT JOIN \"activitylogs\" al ON al.\"recordId\" = d._id AND al.module='deals' \nWHERE \n  NULLIF(al.\"createdAt\",'')::timestamptz >= NOW() - INTERVAL '7 days' \n  AND NOT d.deleted \nORDER BY \n  change_date DESC",
+    "tables": [
+      "activitylogs",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:24:16.368824"
+  },
+  {
+    "natural_query": "List _id of companies with deals in proposal stage",
+    "sql": "SELECT DISTINCT c._id \nFROM \"companies\" c \nLEFT JOIN \"deals\" d ON d.company = c._id \nWHERE d.stage = 'Quotation Sent' AND NOT d.deleted AND NOT c.deleted",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:28:23.141933"
+  },
+  {
+    "natural_query": "List _id of companies with follow-up createtasks",
+    "sql": "SELECT DISTINCT c._id \nFROM \"companies\" c \nLEFT JOIN \"createtasks\" ct ON ct.\"companyId\" = c._id \nWHERE ct._id IS NOT NULL AND NOT ct.deleted \nAND NOT c.deleted",
+    "tables": [
+      "companies",
+      "createtasks"
+    ],
+    "saved_at": "2026-05-18T06:28:23.146339"
+  },
+  {
+    "natural_query": "Find companies in list 1 not in list 2",
+    "sql": "SELECT c1.\"companyName\" \nFROM \"companies\" c1 \nWHERE NOT c1.deleted \nAND c1._id NOT IN (\n  SELECT c2._id \n  FROM \"companies\" c2 \n  WHERE NOT c2.deleted \n) \nORDER BY c1.\"companyName\" ASC",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-18T06:28:23.151295"
+  },
+  {
+    "natural_query": "Rank companies by sum of open deal pipeline value",
+    "sql": "SELECT \n  UPPER(COALESCE(c.\"companyName\",'Unassigned')) AS company_name, \n  UPPER(COALESCE(c.country,'Unknown')) AS country, \n  COALESCE(SUM(d.grand_total),0) AS open_pipeline_value\nFROM \"companies\" c \n  LEFT JOIN \"deals\" d ON d.company = c._id \nWHERE \n  NOT c.deleted \n  AND d.\"dealWonAt\" IS NULL \n  AND d.\"dealLostAt\" IS NULL \n  AND NOT d.deleted \n  AND UPPER(COALESCE(d.currency,'USD')) = 'USD'\nGROUP BY \n  c._id, \n  c.\"companyName\", \n  c.country \nORDER BY \n  open_pipeline_value DESC \n  NULLS LAST",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:34:13.848224"
+  },
+  {
+    "natural_query": "Sum of open deal pipeline value by company",
+    "sql": "SELECT \n  c.\"companyName\", \n  UPPER(COALESCE(d.currency,'USD')) AS currency, \n  COALESCE(SUM(d.grand_total),0) AS pipeline_value\nFROM \"deals\" d \nLEFT JOIN \"companies\" c ON c._id = d.company \nWHERE d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted \nGROUP BY c.\"companyName\", 2 \nORDER BY pipeline_value DESC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:34:13.852160"
+  },
+  {
+    "natural_query": "Top 10 companies by rank",
+    "sql": "SELECT c.\"companyName\", \n       COALESCE(SUM(d.grand_total), 0) AS total_deal_value,\n       ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(d.grand_total), 0) DESC) AS rank\nFROM \"companies\" c \nLEFT JOIN \"deals\" d ON d.company = c._id \nWHERE NOT c.deleted \nGROUP BY c._id, c.\"companyName\"\nORDER BY rank ASC \nLIMIT 10",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:34:13.857790"
+  },
+  {
+    "natural_query": "Which users have more than 5 pending tasks right now?",
+    "sql": "SELECT u.name, COUNT(*) AS pending_task_count \nFROM \"users\" u \nLEFT JOIN \"createtasks\" t ON t.\"createdBy\" = u._id \nWHERE t.status = 'Pending' AND NOT t.deleted AND (NULLIF(t.due_date,'')::timestamptz IS NULL OR NULLIF(t.due_date,'')::timestamptz >= NOW()) \nGROUP BY u._id, u.name \nHAVING COUNT(*) > 5 \nORDER BY pending_task_count DESC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:34:45.974579"
+  },
+  {
+    "natural_query": "invoices with due_date < NOW() - INTERVAL '60 days'",
+    "sql": "SELECT \n  i.invoice_number, \n  i.due_date, \n  i.payment_status \nFROM \n  \"invoices\" i \nWHERE \n  NOT i.deleted \n  AND NULLIF(i.due_date,'')::timestamptz < NOW() - INTERVAL '60 days' \nORDER BY \n  i.due_date DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:38:06.716376"
+  },
+  {
+    "natural_query": "companies associated with those invoices",
+    "sql": "SELECT \n  c.\"companyName\", \n  c._id AS company_id,\n  COALESCE(COUNT(i._id), 0) AS invoice_count,\n  COALESCE(SUM(i.grand_total), 0) AS total_revenue,\n  UPPER(COALESCE(i.currency, 'USD')) AS currency\nFROM \n  \"companies\" c \n  LEFT JOIN \"invoices\" i ON i.company = c._id \nWHERE \n  NOT c.deleted \n  AND NOT i.deleted \n  AND i.payment_status = 'paid'\nGROUP BY \n  c._id, \n  c.\"companyName\", \n  i.currency \nORDER BY \n  total_revenue DESC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:38:06.724545"
+  },
+  {
+    "natural_query": "List _id of companies with follow-up tasks",
+    "sql": "SELECT DISTINCT c._id \nFROM \"companies\" c \nLEFT JOIN \"createtasks\" t ON t.\"companyId\" = c._id \nWHERE t.status != 'Completed' \nAND NOT t.deleted \nAND NOT c.deleted \nAND NULLIF(t.due_date,'')::timestamptz < NOW() \nOR t._id IS NOT NULL",
+    "tables": [
+      "companies",
+      "createtasks"
+    ],
+    "saved_at": "2026-05-18T06:39:46.557444"
+  },
+  {
+    "natural_query": "Compare confirmed sales amount this year vs last year by sales owner",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COALESCE(SUM(CASE WHEN EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) THEN s.grand_total ELSE 0 END), 0) AS current_year_sales,\n  COALESCE(SUM(CASE WHEN EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) - 1 THEN s.grand_total ELSE 0 END), 0) AS last_year_sales\nFROM \n  \"users\" u \n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id AND s.status = 'Confirm' AND NOT s.deleted\nWHERE \n  u.\"isActive\" = true\nGROUP BY \n  u._id, u.name \nORDER BY \n  current_year_sales DESC, last_year_sales DESC",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:40:19.646412"
+  },
+  {
+    "natural_query": "Average invoice payment time by company \u2014 days from invoice date to payment date",
+    "sql": "SELECT \n  c.\"companyName\", \n  COALESCE(AVG(EXTRACT(DAY FROM (NULLIF(i.payment_date,'')::timestamptz - NULLIF(i.invoice_date,'')::timestamptz))), 0) AS avg_payment_days\nFROM \n  \"invoices\" i \n  LEFT JOIN \"companies\" c ON c._id = i.company \nWHERE \n  i.payment_status = 'paid' AND \n  NOT i.deleted AND \n  i.payment_date <> '' AND \n  i.invoice_date <> ''\nGROUP BY \n  c.\"companyName\" \nORDER BY \n  avg_payment_days DESC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:40:53.153224"
+  },
+  {
+    "natural_query": "SELECT SUM(i.grandtotal_in_usd) AS total_overdue, r.name AS region_name FROM invoices i JOIN companies c ON i.company = c._id JOIN regions r ON c.region = r._id WHERE i.payment_status = 'overdue' GROUP BY r.name",
+    "sql": "SELECT COALESCE(SUM(i.grand_total), 0) AS total_overdue, r.\"regionName\" AS region_name \nFROM \"invoices\" i \nJOIN \"companies\" c ON i.company = c._id \nJOIN \"regions\" r ON c.region = r._id \nWHERE i.payment_status NOT IN ('paid', 'cancelled') \n  AND NULLIF(i.due_date, '')::timestamptz < CURRENT_DATE \n  AND NOT i.deleted \nGROUP BY r.\"regionName\"",
+    "tables": [
+      "companies",
+      "invoices",
+      "regions"
+    ],
+    "saved_at": "2026-05-18T06:41:25.624210"
+  },
+  {
+    "natural_query": "Which deals are expected to close this month with their owner and value?",
+    "sql": "SELECT \n  d.name AS deal_name, \n  u.name AS owner_name, \n  d.grand_total AS deal_value, \n  d.currency AS deal_currency\nFROM \n  \"deals\" d \n  LEFT JOIN \"users\" u ON u._id = d.owner \nWHERE \n  d.stage = 'Negotiation' \n  AND NOT d.deleted \n  AND EXTRACT(MONTH FROM NULLIF(d.\"closeDate\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)\n  AND EXTRACT(YEAR FROM NULLIF(d.\"closeDate\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nORDER BY \n  d.\"closeDate\" ASC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:41:57.579482"
+  },
+  {
+    "natural_query": "SUM(d.grand_total_in_usd) BY d.type",
+    "sql": "SELECT \n  d.type AS deal_type, \n  COALESCE(SUM(d.grand_total_in_usd), 0) AS total_value\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \nGROUP BY \n  d.type \nORDER BY \n  total_value DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:42:30.174035"
+  },
+  {
+    "natural_query": "Which users have the highest task completion rate this month?",
+    "sql": "SELECT \n  u.name AS user_name, \n  COALESCE(SUM(CASE WHEN t.status = 'Completed' THEN 1 ELSE 0 END), 0) AS completed_tasks,\n  COALESCE(COUNT(CASE WHEN t.status != 'Completed' AND NOT t.deleted THEN 1 ELSE NULL END), 0) AS total_tasks,\n  ROUND(100.0 * \n        COALESCE(SUM(CASE WHEN t.status = 'Completed' THEN 1 ELSE 0 END), 0) / \n        NULLIF(COUNT(CASE WHEN NOT t.deleted THEN 1 ELSE NULL END), 0), 2) AS completion_rate\nFROM \n  \"users\" u \n  LEFT JOIN \"createtasks\" t ON t.\"createdBy\" = u._id \nWHERE \n  EXTRACT(MONTH FROM NULLIF(t.\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)\n  AND EXTRACT(YEAR FROM NULLIF(t.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  u._id, u.name \nORDER BY \n  completion_rate DESC NULLS LAST",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:43:03.579949"
+  },
+  {
+    "natural_query": "Select company, sum(amount) from invoices group by company",
+    "sql": "SELECT \n  UPPER(COALESCE(i.\"companyName\",'Unassigned')) AS company,\n  COALESCE(SUM(i.grand_total),0) AS amount\nFROM \n  \"invoices\" i \nWHERE \n  NOT i.deleted \nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:43:37.429142"
+  },
+  {
+    "natural_query": "Select company, sum(grand_total_in_usd) from deals group by company",
+    "sql": "SELECT \n  c.\"companyName\" AS company, \n  COALESCE(SUM(d.grand_total_in_usd), 0) AS total_grand_total_in_usd\nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \nWHERE \n  NOT d.deleted \nGROUP BY \n  c.\"companyName\" \nORDER BY \n  total_grand_total_in_usd DESC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:43:37.436474"
+  },
+  {
+    "natural_query": "Show invoice collection trend \u2014 total paid amount per month for last 6 months",
+    "sql": "SELECT \n  EXTRACT(MONTH FROM NULLIF(i.\"payment_date\",'')::timestamptz) AS month,\n  UPPER(COALESCE(i.currency,'USD')) AS currency,\n  COALESCE(SUM(i.grand_total),0) AS total_paid_amount\nFROM \n  \"invoices\" i\nWHERE \n  i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM NULLIF(i.\"payment_date\",'')::timestamptz) IN (EXTRACT(MONTH FROM CURRENT_DATE)-6, \n  EXTRACT(MONTH FROM CURRENT_DATE)-5, \n  EXTRACT(MONTH FROM CURRENT_DATE)-4, \n  EXTRACT(MONTH FROM CURRENT_DATE)-3, \n  EXTRACT(MONTH FROM CURRENT_DATE)-2, \n  EXTRACT(MONTH FROM CURRENT_DATE)-1, \n  EXTRACT(MONTH FROM CURRENT_DATE))\nGROUP BY \n  1, 2\nORDER BY \n  1, 2",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:44:46.135781"
+  },
+  {
+    "natural_query": "SELECT company, COUNT(*) FROM deals WHERE stage = 'Analysis - To be Quoted' GROUP BY company ORDER BY COUNT(*) DESC",
+    "sql": "SELECT \n  d.company, \n  COUNT(*) AS deal_count\nFROM \n  \"deals\" d \nWHERE \n  d.stage = 'Analysis - To be Quoted' \n  AND NOT d.deleted \nGROUP BY \n  d.company \nORDER BY \n  deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:45:19.085258"
+  },
+  {
+    "natural_query": "SELECT company FROM deals WHERE stage = 'Analysis - To be Quoted'",
+    "sql": "SELECT \n  c.\"companyName\" \nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \nWHERE \n  d.stage = 'Analysis - To be Quoted' \n  AND NOT d.deleted \nORDER BY \n  c.\"companyName\" ASC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:45:19.088347"
+  },
+  {
+    "natural_query": "confirmed sales by owner this month",
+    "sql": "SELECT \n  u.name AS owner_name, \n  COALESCE(SUM(s.grand_total), 0) AS total_sales\nFROM \n  \"users\" u \n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id AND s.status = 'Confirm' AND NOT s.deleted\n  LEFT JOIN targets t ON t.\"userId\" = u._id AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = t.month\nWHERE \n  u.\"isActive\" = true \n  AND EXTRACT(MONTH FROM CURRENT_DATE) = t.month \n  AND EXTRACT(YEAR FROM CURRENT_DATE) = t.year\nGROUP BY \n  u._id, \n  u.name \nORDER BY \n  total_sales DESC",
+    "tables": [
+      "sales",
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:45:51.429313"
+  },
+  {
+    "natural_query": "currency breakdown of confirmed sales this month",
+    "sql": "SELECT \n  UPPER(COALESCE(s.currency, 'USD')) AS currency, \n  COALESCE(SUM(s.grand_total), 0) AS amount\nFROM \n  \"sales\" s\nWHERE \n  s.status = 'Confirm' \n  AND NOT s.deleted \n  AND EXTRACT(MONTH FROM NULLIF(s.sales_date, '')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)\n  AND EXTRACT(YEAR FROM NULLIF(s.sales_date, '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  1\nORDER BY \n  2 DESC",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-18T06:45:51.438281"
+  },
+  {
+    "natural_query": "SELECT d._id FROM deals d LEFT JOIN createtasks ct ON d._id = ct.deal_id WHERE ct.deal_id IS NULL",
+    "sql": "SELECT d._id \nFROM \"deals\" d \nLEFT JOIN \"createtasks\" ct \n    ON ct.\"dealsId\" = d._id \nWHERE ct.\"dealsId\" IS NULL \n    AND NOT d.deleted",
+    "tables": [
+      "createtasks",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:46:24.533485"
+  },
+  {
+    "natural_query": "deal count for each company",
+    "sql": "SELECT \n  c.\"companyName\", \n  COALESCE(COUNT(d._id), 0) AS deal_count\nFROM \n  \"companies\" c \n  LEFT JOIN \"deals\" d ON d.company = c._id \nWHERE \n  NOT c.deleted \nGROUP BY \n  c._id, \n  c.\"companyName\" \nORDER BY \n  deal_count DESC \n  NULLS LAST",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:46:58.137875"
+  },
+  {
+    "natural_query": "pipeline value for each company",
+    "sql": "SELECT \n  c.\"companyName\", \n  UPPER(COALESCE(d.currency,'USD')) AS currency, \n  COALESCE(SUM(d.grand_total),0) AS pipeline_value\nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \nWHERE \n  d.stage NOT IN ('Closed Lost', 'Closed Won') \n  AND NOT d.deleted \nGROUP BY \n  c.\"companyName\", \n  UPPER(COALESCE(d.currency,'USD')) \nORDER BY \n  pipeline_value DESC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:46:58.151093"
+  },
+  {
+    "natural_query": "companies added this month",
+    "sql": "SELECT COUNT(*) AS company_count \nFROM \"companies\" c \nWHERE NOT c.deleted \nAND EXTRACT(YEAR FROM NULLIF(c.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \nAND EXTRACT(MONTH FROM NULLIF(c.\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-18T06:46:58.161923"
+  },
+  {
+    "natural_query": "SUM(targets.targetInUSD) AS target, u._id",
+    "sql": "SELECT COALESCE(SUM(t.\"targetInUSD\"), 0) AS target, u._id \nFROM \"users\" u \nLEFT JOIN \"targets\" t ON t.\"userId\" = u._id \nWHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE) \nGROUP BY u._id \nORDER BY target DESC",
+    "tables": [
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:47:30.990386"
+  },
+  {
+    "natural_query": "EXTRACT(YEAR FROM CURRENT_DATE)",
+    "sql": "SELECT EXTRACT(YEAR FROM CURRENT_DATE) AS current_year",
+    "tables": [],
+    "saved_at": "2026-05-18T06:47:30.994303"
+  },
+  {
+    "natural_query": "SUM(sales.amount) AS revenue, u._id, u.name",
+    "sql": "SELECT COALESCE(SUM(s.grand_total), 0) AS revenue, u._id, u.name \nFROM \"users\" u \nLEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id \nWHERE NOT s.deleted \nGROUP BY u._id, u.name \nORDER BY revenue DESC",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:47:30.997045"
+  },
+  {
+    "natural_query": "deals where stage = 'won' and EXTRACT(MONTH FROM NULLIF(closed_at,''::timestamptz)) = EXTRACT(MONTH FROM CURRENT_DATE - INTERVAL '1 month')",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency\nFROM \n  \"deals\" d \n  LEFT JOIN \"users\" u ON u._id = d.owner \n  LEFT JOIN \"companies\" c ON c._id = d.company \nWHERE \n  d.stage = 'Closed Won' \n  AND NOT d.deleted \n  AND EXTRACT(MONTH FROM NULLIF(d.\"closeDate\",'')::timestamptz) = \n  EXTRACT(MONTH FROM (CURRENT_DATE - INTERVAL '1 month'))",
+    "tables": [
+      "companies",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:48:04.049114"
+  },
+  {
+    "natural_query": "users _id, name",
+    "sql": "SELECT u._id, u.name \nFROM \"users\" u \nWHERE u.\"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:48:04.061510"
+  },
+  {
+    "natural_query": "SUM(deals.grand_total_in_usd)",
+    "sql": "SELECT COALESCE(SUM(d.grand_total_in_usd), 0) AS total_revenue \nFROM \"deals\" d \nWHERE NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:48:04.069026"
+  },
+  {
+    "natural_query": "Show contacts grouped by job title with count and their lifecycle stage distribution",
+    "sql": "SELECT \n  c.\"jobTitle\", \n  COUNT(*) AS contact_count, \n  c.\"lifecycleStage\", \n  COUNT(*) FILTER (WHERE c.\"lifecycleStage\" = 'Lead') AS lead_count,\n  COUNT(*) FILTER (WHERE c.\"lifecycleStage\" = 'Customer') AS customer_count,\n  COUNT(*) FILTER (WHERE c.\"lifecycleStage\" = 'Inactive Customer') AS inactive_customer_count,\n  COUNT(*) FILTER (WHERE c.\"lifecycleStage\" = 'Dead Customer') AS dead_customer_count,\n  COUNT(*) FILTER (WHERE c.\"lifecycleStage\" = 'Partner') AS partner_count\nFROM \n  \"contacts\" c \nWHERE \n  NOT c.deleted \n  AND c.\"lifecycleStage\" IN ('Lead', 'Customer', 'Inactive Customer', 'Dead Customer', 'Partner')\nGROUP BY \n  c.\"jobTitle\", \n  c.\"lifecycleStage\"\nORDER BY \n  c.\"jobTitle\", \n  c.\"lifecycleStage\"",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-18T06:48:36.921534"
+  },
+  {
+    "natural_query": "Average deal size by region and industry combination",
+    "sql": "SELECT \n  r.\"regionName\", \n  c.industry, \n  COALESCE(AVG(d.grand_total), 0) AS avg_deal_size\nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \n  LEFT JOIN \"regions\" r ON r._id = c.region \nWHERE \n  NOT d.deleted \nGROUP BY \n  r.\"regionName\", \n  c.industry \nORDER BY \n  avg_deal_size DESC",
+    "tables": [
+      "companies",
+      "deals",
+      "regions"
+    ],
+    "saved_at": "2026-05-18T06:49:11.978936"
+  },
+  {
+    "natural_query": "Which companies had their very first deal created this year?",
+    "sql": "SELECT DISTINCT c.\"companyName\", c._id \nFROM \"companies\" c \nLEFT JOIN \"deals\" d ON d.company = c._id \nWHERE NOT c.deleted \nAND NOT d.deleted \nAND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \nAND d._id IN (\n  SELECT MIN(d2._id) \n  FROM \"deals\" d2 \n  LEFT JOIN \"companies\" c2 ON c2._id = d2.company \n  WHERE NOT d2.deleted \n  AND c2._id = c._id \n  GROUP BY c2._id\n)",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:49:45.529166"
+  },
+  {
+    "natural_query": "Show pending invoices grouped by company with total amount and days since due date",
+    "sql": "SELECT \n  c.\"companyName\", \n  COALESCE(SUM(i.grand_total), 0) AS total_amount,\n  COALESCE(COUNT(i._id), 0) AS invoice_count,\n  COALESCE(AVG(EXTRACT(DAY FROM (NOW() - NULLIF(i.due_date, '')::timestamptz))), 0) AS avg_days_overdue\nFROM \n  \"invoices\" i \n  LEFT JOIN \"companies\" c ON c._id = i.company \nWHERE \n  i.payment_status IN ('pending', 'partial_payment') \n  AND NOT i.deleted \nGROUP BY \n  c.\"companyName\" \nORDER BY \n  total_amount DESC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:50:20.138708"
+  },
+  {
+    "natural_query": "Which sales owners have open deals in every pipeline stage right now?",
+    "sql": "SELECT DISTINCT u.name AS sales_owner\nFROM \"users\" u\nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted AND d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL\nGROUP BY u._id, u.name\nHAVING COUNT(DISTINCT d.stage) = (SELECT COUNT(DISTINCT \"dealStageName\") FROM \"dealstagesettings\" WHERE NOT deleted)",
+    "tables": [
+      "deals",
+      "dealstagesettings",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:50:52.285722"
+  },
+  {
+    "natural_query": "COUNT(new leads last month by source",
+    "sql": "SELECT \n  s.\"sourceName\", \n  COUNT(DISTINCT c._id) AS new_leads_count\nFROM \n  \"sources\" s \n  LEFT JOIN \"companies\" c ON c.source = s._id \n  LEFT JOIN \"contacts\" ct ON ct.company = c._id \nWHERE \n  NOT c.deleted \n  AND NOT ct.deleted \n  AND EXTRACT(MONTH FROM NULLIF(ct.\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) - 1 \n  AND EXTRACT(YEAR FROM NULLIF(ct.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  s.\"sourceName\" \nORDER BY \n  new_leads_count DESC",
+    "tables": [
+      "companies",
+      "contacts",
+      "sources"
+    ],
+    "saved_at": "2026-05-18T06:51:25.472890"
+  },
+  {
+    "natural_query": "COUNT(new leads this month by source",
+    "sql": "SELECT \n  s.\"sourceName\", \n  COUNT(*) AS new_leads_count\nFROM \n  \"sources\" s\n  LEFT JOIN \"companies\" c ON c.source = s._id\n  LEFT JOIN \"contacts\" t ON t.company = c._id\nWHERE \n  NOT t.deleted \n  AND EXTRACT(MONTH FROM NULLIF(t.\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)\n  AND EXTRACT(YEAR FROM NULLIF(t.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  s.\"sourceName\"\nORDER BY \n  new_leads_count DESC",
+    "tables": [
+      "companies",
+      "contacts",
+      "sources"
+    ],
+    "saved_at": "2026-05-18T06:51:25.488104"
+  },
+  {
+    "natural_query": "List companies with overdue invoices",
+    "sql": "SELECT \n  c.\"companyName\", \n  i.invoice_number, \n  NULLIF(i.due_date,'')::timestamptz AS due_date, \n  NULLIF(i.payment_date,'')::timestamptz AS payment_date,\n  i.grand_total\nFROM \n  \"companies\" c \n  LEFT JOIN \"invoices\" i ON c._id = i.company\nWHERE \n  NOT c.deleted \n  AND NOT i.deleted \n  AND i.payment_status NOT IN ('paid','cancelled') \n  AND NULLIF(i.due_date,'')::timestamptz < CURRENT_DATE \nORDER BY \n  due_date ASC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:51:58.454175"
+  },
+  {
+    "natural_query": "List companies with won deals",
+    "sql": "SELECT DISTINCT c.\"companyName\", c._id \nFROM \"companies\" c \nLEFT JOIN \"deals\" d ON d.company = c._id \nWHERE d.\"dealWonAt\" IS NOT NULL AND NOT d.deleted \nORDER BY c.\"companyName\" ASC",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-18T06:51:58.459059"
+  },
+  {
+    "natural_query": "Show deals closing in the next 30 days with owner and expected revenue",
+    "sql": "SELECT \n  d.name AS deal_name, \n  d.stage AS deal_stage, \n  u.name AS owner_name, \n  d.currency AS deal_currency, \n  COALESCE(d.grand_total, 0) AS expected_revenue,\n  NULLIF(d.\"closeDate\", '')::timestamptz AS close_date\nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE \n  d.stage IN ('Negotiation', 'Quotation Sent', 'Contract Under Review') \n  AND NOT d.deleted \n  AND NULLIF(d.\"closeDate\", '')::timestamptz <= CURRENT_DATE + INTERVAL '30 days'\n  AND NULLIF(d.\"closeDate\", '')::timestamptz > CURRENT_DATE \nORDER BY close_date ASC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:52:31.883834"
+  },
+  {
+    "natural_query": "COUNT contacts created by each user this month",
+    "sql": "SELECT \n  u.name AS user_name, \n  COALESCE(COUNT(c._id), 0) AS contact_count\nFROM \n  \"users\" u \n  LEFT JOIN \"contacts\" c ON c.\"contactOwner\" = u._id \n  AND c.\"lifecycleStage\" = 'Lead' \n  AND c.\"leadStatus\" = 'New' \n  AND NOT c.deleted \n  AND EXTRACT(MONTH FROM NULLIF(c.\"createdAt\",'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)\n  AND EXTRACT(YEAR FROM NULLIF(c.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nGROUP BY \n  u._id, \n  u.name \nORDER BY \n  contact_count DESC",
+    "tables": [
+      "contacts",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:53:04.275504"
+  },
+  {
+    "natural_query": "Get users who created these contacts",
+    "sql": "SELECT u._id, u.name, u.email \nFROM \"users\" u \nLEFT JOIN \"contacts\" c ON c.\"contactOwner\" = u._id \nWHERE c.\"lifecycleStage\" = 'Lead' AND c.\"leadStatus\" = 'New' AND NOT c.deleted \nORDER BY u._id",
+    "tables": [
+      "contacts",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:53:04.286073"
+  },
+  {
+    "natural_query": "SELECT company FROM invoices WHERE payment_status = 'paid'",
+    "sql": "SELECT DISTINCT UPPER(COALESCE(i.\"companyName\",'Unassigned')) AS company \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \nAND NOT i.deleted \nORDER BY company ASC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-18T06:53:38.219592"
+  },
+  {
+    "natural_query": "SELECT company FROM sales WHERE status = 'confirmed'",
+    "sql": "SELECT \n  c.\"companyName\" \nFROM \n  \"sales\" s \n  LEFT JOIN \"companies\" c ON c._id = s.company \nWHERE \n  s.status = 'Confirm' \n  AND NOT s.deleted \n  AND c.\"companyName\" IS NOT NULL",
+    "tables": [
+      "companies",
+      "sales"
+    ],
+    "saved_at": "2026-05-18T06:53:38.226665"
+  },
+  {
+    "natural_query": "Find deal owners of deals created in the last 60 days",
+    "sql": "SELECT DISTINCT u.name AS owner_name \nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id \nWHERE NOT d.deleted \nAND NULLIF(d.\"createdAt\",'')::timestamptz >= (CURRENT_DATE - INTERVAL '60 days') \nORDER BY u.name ASC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:54:11.520817"
+  },
+  {
+    "natural_query": "Find all active users",
+    "sql": "SELECT _id, name, email, department FROM \"users\" WHERE \"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:54:11.549447"
+  },
+  {
+    "natural_query": "Average number of tasks per deal by owner",
+    "sql": "SELECT \n  u.name AS owner_name, \n  COALESCE(AVG(t.task_count), 0) AS avg_tasks_per_deal\nFROM \n  \"users\" u \n  LEFT JOIN (\n    SELECT \n      d.owner, \n      COUNT(ct._id) AS task_count\n    FROM \n      \"deals\" d \n      LEFT JOIN \"createtasks\" ct ON ct.\"dealsId\" = d._id \n    WHERE \n      NOT d.deleted AND \n      NOT ct.deleted \n    GROUP BY \n      d.owner\n  ) t ON t.owner = u._id\nWHERE \n  u.\"isActive\" = true \nGROUP BY \n  u._id, \n  u.name \nORDER BY \n  avg_tasks_per_deal DESC",
+    "tables": [
+      "createtasks",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-18T06:54:45.134476"
+  },
+  {
+    "natural_query": "SELECT _id FROM companies WHERE \"lifecycleStage\" = 'Customer' AND \"leadWonAt\" IS NOT NULL AND EXTRACT(YEAR FROM NULLIF(\"leadWonAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM NULLIF(\"leadWonAt\", '')::timestamptz) BETWEEN EXTRACT(MONTH FROM CURRENT_DATE) - 3 AND EXTRACT(MONTH FROM CURRENT_DATE)",
+    "sql": "SELECT _id \nFROM \"companies\" \nWHERE \"lifecycleStage\" = 'Customer' \nAND \"leadWonAt\" IS NOT NULL \nAND EXTRACT(YEAR FROM NULLIF(\"leadWonAt\", '')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE) \nAND EXTRACT(MONTH FROM NULLIF(\"leadWonAt\", '')::timestamptz) BETWEEN EXTRACT(MONTH FROM CURRENT_DATE) - 3 \nAND EXTRACT(MONTH FROM CURRENT_DATE) \nAND NOT deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-18T06:55:18.513314"
+  },
+  {
+    "natural_query": "Which contacts have been assigned to a user but have no outreach activity recorded?",
+    "sql": "SELECT c._id, c.\"firstName\", c.\"lastName\", c.email\nFROM \"contacts\" c\nLEFT JOIN \"outreaches\" o ON c.email = o.email AND NOT o.\"isDeleted\"\nWHERE c.\"lifecycleStage\" = 'Lead'\n  AND c.\"leadStatus\" = 'New'\n  AND c.\"contactOwner\" IS NOT NULL\n  AND o._id IS NULL\n  AND NOT c.deleted",
+    "tables": [
+      "contacts",
+      "outreaches"
+    ],
+    "saved_at": "2026-05-18T06:55:53.049578"
   }
 ]

@@ -1,0 +1,50 @@
+1. Win rate by deal owner for the current year
+2. Which companies have overdue invoices with total outstanding amount?
+3. Average deal size by deal type and owner
+4. Which deals are past their close date and still open?
+5. Payment collection rate by company with paid vs total invoices
+6. Which contacts have no associated deals in the system?
+7. Deals in negotiation stage for more than 30 days
+8. Target achievement percentage per sales rep this month
+9. Invoice aging breakdown — overdue 30, 60, 90 plus days with amounts
+10. Monthly revenue trend for the last 6 months
+11. Top 10 companies by total open deal pipeline value
+12. Which users have more than 5 pending tasks right now?
+13. Overdue task aging — tasks past due by 7, 14, 30 plus days per user
+14. Which deals changed stage in the last 7 days?
+15. Show me all users with their deal count, won deals, and pending tasks
+16. Sales rep ranking by win rate this year with deal counts
+17. Companies with more than 3 open deals in the pipeline
+18. Which customers have unpaid invoices older than 60 days?
+19. Revenue breakdown by region this year
+20. Deals lost this year broken down by stage and owner
+21. Which companies have deals in proposal stage with no follow-up task created?
+22. Compare confirmed sales amount this year vs last year by sales owner
+23. Average invoice payment time by company — days from invoice date to payment date
+24. Which regions have the most overdue invoice amount outstanding?
+25. Which deals are expected to close this month with their owner and value?
+26. Revenue by deal type this year — New Business vs Upsell vs Cross-sell
+27. Which users have the highest task completion rate this month?
+28. Show all companies with their total pipeline deal value and total invoice amount together
+29. Which deals moved from open to closed won in the last 30 days?
+30. Show invoice collection trend — total paid amount per month for last 6 months
+31. Which companies have the most deals stuck in negotiation stage?
+32. Sales performance this month — confirmed sales by owner with currency breakdown
+33. Which deals have no associated tasks at all?
+34. Show new companies added this month with their deal count and pipeline value
+35. Revenue vs target gap per user this year — who is behind and by how much?
+36. Which deals were won last month and by which owner with total value?
+37. Show contacts grouped by job title with count and their lifecycle stage distribution
+38. Average deal size by region and industry combination
+39. Which companies had their very first deal created this year?
+40. Show pending invoices grouped by company with total amount and days since due date
+41. Which sales owners have open deals in every pipeline stage right now?
+42. Compare number of new leads this month vs last month by source
+43. Which companies have both a won deal and an overdue invoice at the same time?
+44. Show deals closing in the next 30 days with owner and expected revenue
+45. Which users created the most contacts this month?
+46. Invoice vs sales order reconciliation — companies with confirmed sales but no paid invoice
+47. Which deal owners have not created any new deals in the last 60 days?
+48. Average number of tasks per deal by owner
+49. Show companies where lifecycle stage changed to Customer in the last 3 months
+50. Which contacts have been assigned to a user but have no outreach activity recorded?

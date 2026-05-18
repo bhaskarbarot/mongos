@@ -51,7 +51,7 @@ GREEN_THRESHOLD   = 0.90          # 90 %+ average accuracy = green flag
 CSV_COLUMNS = [
     "#",
     "query",
-    "response_summary",
+    "full_response",
     "sql_query",
     "success",
     "has_data",
@@ -362,14 +362,14 @@ def run_tests() -> None:
             print(f"{tag:<14}  {latency_ms:>6.0f}ms  acc={acc:.2f}")
 
             # ── Write CSV row (incremental) ───────────────────────────────────
-            resp_safe = answer[:200].replace("\n", " ").replace("|", "¦")
+            resp_safe = answer.replace("\n", " ").replace("|", "¦")
             sql_safe  = sql_query.replace("\n", " ") if sql_query else ""
-            err_note  = "" if ok else answer[:150].replace("\n", " ")
+            err_note  = "" if ok else answer.replace("\n", " ")
 
             writer.writerow({
-                "#":                num,
-                "query":            query,
-                "response_summary": resp_safe,
+                "#":            num,
+                "query":        query,
+                "full_response": resp_safe,
                 "sql_query":        sql_safe,
                 "success":          "Yes" if ok else "No",
                 "has_data":         "Yes" if has_data else "No",
