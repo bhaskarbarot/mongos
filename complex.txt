@@ -1,0 +1,50 @@
+1. Give me a complete executive business summary covering revenue, deals, pipeline, targets, tasks, and team performance all in one report
+2. Full sales leaderboard — every rep with revenue, deals created, deals won, deals lost, win rate, average deal size, and pending tasks
+3. Complete 360 view of our top 10 customers by revenue — their deals, invoices, payments, tasks, contacts, and last activity
+4. Comprehensive revenue analytics report — total collected, pending, overdue, monthly trend, top companies, and currency breakdown this year
+5. Year-to-date performance report — revenue vs target, pipeline forecast, win rate, team comparison, and achievement percentage
+6. Deep pipeline health analysis — stage distribution, velocity, stagnant deals, at-risk opportunities, and full conversion funnel
+7. Complete customer health dashboard — payment behavior, deal activity, task completion rate, and engagement level per company
+8. Full win and loss analysis — won vs lost deals by owner, stage, deal type, and time period with root cause patterns
+9. Monthly business performance trend for last 12 months — revenue, new deals, closed deals, new leads, and tasks per month
+10. Complete deal lifecycle report — average days in each stage, fastest wins, longest cycles, and outlier deals for all reps
+11. Comprehensive invoice and payment report — all statuses, aging buckets, collection rates, overdue companies, and payment behavior trends
+12. Deep sales cycle analysis — from lead creation to closed won for every rep with average, median, fastest, and slowest
+13. Full company acquisition and retention analysis — new customers this year, revenue per customer, lifecycle stage, and churn signals
+14. Complete rep performance deep dive — each sales owner with full history, monthly trend, and comparison to team average
+15. Pipeline to revenue forecast — open deals weighted by stage and historical win rate with expected monthly closures
+16. Executive summary of all CRM activity this quarter — deals, revenue, tasks, leads, meetings, and target achievement
+17. Full industry segment analysis — performance of each industry with revenue, deal count, win rate, avg deal size, and growth
+18. Multi-year revenue comparison — this year vs last year vs two years ago by month with growth rates and trends
+19. Complete risk and overdue report — all overdue invoices, at-risk deals, inactive customers, and pending escalations combined
+20. Full team productivity analysis — tasks per user, completion rate, overdue work, deals worked, and performance ranking
+21. Geographic performance deep dive — deals, revenue, pipeline value, win rate, and top customers broken down by every region
+22. Full deal type and product analysis — which deal types generate most revenue, best win rates, and highest average deal sizes
+23. Customer lifetime value analysis — all active customers with total revenue, deal count, invoice history, and relationship duration
+24. Complete sales funnel conversion report — lead count at each stage, conversion rate, time spent per stage, and drop-off analysis
+25. Comprehensive account executive scorecard — every rep with 12 KPIs including pipeline, revenue, targets, activity, win rate, and trend
+26. Deep revenue concentration analysis — what percentage of revenue comes from top 5, top 10, top 20 companies vs the rest
+27. Complete deals at risk intelligence — stagnant deals by stage, approaching deadlines, low engagement, and owner accountability
+28. Full customer segmentation analysis — all customers grouped by revenue tier, industry, region, and deal frequency with metrics
+29. Full new business versus existing customer revenue split — new acquisition rate, upsell expansion, and customer churn signals
+30. Complete competitive deal analysis — deal types won vs lost, which stages lose most deals, pricing and owner patterns
+31. Comprehensive 6-month business cadence report — what was created, closed, paid, and completed in each of the last 6 months
+32. Deep company engagement analysis — most and least active companies with last interaction, pipeline status, and health score
+33. Complete sales rep side-by-side comparison — all active reps ranked across revenue, deals, win rate, tasks, and target achievement
+34. Full invoice reconciliation report — companies with confirmed sales orders but no paid invoice, unmatched amounts, and gaps
+35. Complete target versus achieved with variance analysis — every user, every month this year, achievement percentage, and ranking
+36. Deep lead conversion analysis — leads by source, conversion rates, time to convert, revenue generated, and quality score
+37. Comprehensive deal velocity report — average time deals spend in each stage, pipeline bottlenecks, and velocity by owner
+38. Full regional performance summary — revenue, deals, win rate, top rep, top company, and target achievement per region
+39. Complete payment behavior analysis — companies ranked by payment speed, overdue frequency, and total outstanding with trends
+40. Deep account health matrix — score every customer on payment history, deal activity, task responsiveness, and relationship depth
+41. Full sales operations health report — pipeline coverage ratio, average deal size, quota attainment, forecast accuracy, and velocity
+42. Complete contact and lead engagement report — lifecycle stages, outreach history, conversion percentages, and priority tier ranking
+43. Multi-dimensional revenue analysis — revenue split simultaneously by currency, region, industry, deal type, and owner
+44. Full at-risk customer intervention report — companies with declining revenue, overdue invoices, stagnant deals, and no recent activity
+45. Comprehensive business momentum report — growth or decline signals across revenue, pipeline, team activity, and customer engagement
+46. Best and worst performing months analysis — identify top 3 and bottom 3 months across all metrics with pattern explanation
+47. Full pipeline stage transition analysis — how many deals moved between each stage this month with time and owner breakdown
+48. Complete outreach and prospecting effectiveness report — outreach count, response patterns, conversion to deals, and rep comparison
+49. Full CRM summary dashboard — every table count, total values, this month vs last month change, and year-to-date summary
+50. Comprehensive year-end business intelligence report — all KPIs, growth rates, achievement vs targets, anomalies, and strategic insights
