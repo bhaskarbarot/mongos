@@ -481,29 +481,10 @@ function MessageBubble({ msg }) {
     <div className={`message-row message-row--${isUser ? "user" : "bot"}`}>
       <div className={`message-wrapper--${isUser ? "user" : "bot"}`}>
         <div className={`message-meta-row message-meta-row--${isUser ? "user" : "bot"}`}>
-          <div className={`message-avatar message-avatar--${isUser ? "user" : "bot"}`}>{isUser ? "U" : "AI"}</div>
+          <div className={`message-avatar message-avatar--${isUser ? "user" : "bot"}`}>
+            {isUser ? "U" : <img src="/src/assets/elsner-logo.png" alt="AI" style={{width:16,height:16,objectFit:"contain"}}/>}
+          </div>
           <span className="message-sender-name">{isUser ? "You" : "ECRM Agent"}</span>
-          {!isUser && <TimingBadge ms={msg.processing_time_ms} />}
-          {!isUser && msg.agent_type && (() => {
-            const at = (msg.agent_type || "").toLowerCase();
-            const label = at.includes("fast") ? "⚡ Fast Path"
-              : at.includes("complex") ? "🔬 Complex"
-              : at.includes("medium")  ? "🔧 Medium"
-              : at.includes("simple")  ? "✦ Simple"
-              : at.includes("guard")   ? "🛡 Guard"
-              : null;
-            const color = at.includes("fast") ? "green"
-              : at.includes("complex") ? "purple"
-              : at.includes("medium")  ? "amber"
-              : at.includes("simple")  ? "blue"
-              : "slate";
-            return label ? <Badge color={color}>{label}</Badge> : null;
-          })()}
-          {!isUser && msg.confidence != null && msg.confidence < 1 && (
-            <Badge color={msg.confidence >= 0.7 ? "amber" : "red"}>
-              {Math.round(msg.confidence * 100)}% conf
-            </Badge>
-          )}
         </div>
         <div className={`bubble bubble--${isUser ? "user" : "bot"}`}>
           <span dangerouslySetInnerHTML={{ __html: renderMarkdown(parsedContent.display || msg.content) }} />
@@ -515,6 +496,30 @@ function MessageBubble({ msg }) {
               <CopyButton text={msg.content} />
             </div>
             <Collapsible title="Source & Details">
+              {/* Timing + agent type + confidence — moved here from meta row */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>
+                <TimingBadge ms={msg.processing_time_ms} />
+                {msg.agent_type && (() => {
+                  const at = (msg.agent_type || "").toLowerCase();
+                  const label = at.includes("fast") ? "⚡ Fast Path"
+                    : at.includes("complex") ? "🔬 Complex"
+                    : at.includes("medium")  ? "🔧 Medium"
+                    : at.includes("simple")  ? "✦ Simple"
+                    : at.includes("guard")   ? "🛡 Guard"
+                    : null;
+                  const color = at.includes("fast") ? "green"
+                    : at.includes("complex") ? "purple"
+                    : at.includes("medium")  ? "amber"
+                    : at.includes("simple")  ? "blue"
+                    : "slate";
+                  return label ? <Badge color={color}>{label}</Badge> : null;
+                })()}
+                {msg.confidence != null && msg.confidence < 1 && (
+                  <Badge color={msg.confidence >= 0.7 ? "amber" : "red"}>
+                    {Math.round(msg.confidence * 100)}% conf
+                  </Badge>
+                )}
+              </div>
               {(parsedContent.collection || parsedContent.appliedFilters) && (
                 <div className="message-perf">
                   {parsedContent.collection && <span>Collection: {parsedContent.collection}</span>}
@@ -733,7 +738,9 @@ function TypingDots() {
     <div className="typing-row">
       <div className="typing-wrapper">
         <div className="typing-meta">
-          <div className="typing-avatar">AI</div>
+          <div className="typing-avatar">
+            <img src="/src/assets/elsner-logo.png" alt="AI" style={{width:16,height:16,objectFit:"contain"}}/>
+          </div>
           <span className="message-sender-name">Data Agent</span>
         </div>
         <div className="typing-bubble" style={{padding:"12px 16px",minWidth:280,maxWidth:400}}>
@@ -771,7 +778,7 @@ function EmptyState({ onExample }) {
 
   return (
     <div className="empty-state">
-      <div className="empty-icon"><img src="/src/assets/chatAI.png" alt="Chat AI" className="empty-logo-img" /></div>
+      <div className="empty-icon"><img src="/src/assets/elsner-logo.png" alt="Elsner Analytica AI" className="empty-logo-img" /></div>
       <p className="empty-desc">Ask questions about your data in natural language. I'll query your database and return structured results.</p>
 
       {hasHistory ? (
@@ -1246,7 +1253,7 @@ export default function DataAnalysisChat() {
           </svg>
         </button>
         <div className="chat-header__title">
-          Elsner ECRM Chatbot
+          Elsner Analytica AI
           <span className={`chat-status-badge chat-status-badge--${
             backendUp === null ? "connecting" : backendUp ? "online" : "offline"
           }`}>
