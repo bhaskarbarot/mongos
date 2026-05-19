@@ -3919,5 +3919,77 @@
       "deals"
     ],
     "saved_at": "2026-05-19T05:22:01.395643"
+  },
+  {
+    "natural_query": "give me april 2026 month revenue",
+    "sql": "SELECT \n  UPPER(COALESCE(i.currency,'USD')) AS currency, \n  COALESCE(SUM(i.grand_total),0) AS revenue\nFROM \n  \"invoices\" i \nWHERE \n  i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM NULLIF(i.payment_date,'')::timestamptz) = 4 \n  AND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = 2026\nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T10:58:05.134760"
+  },
+  {
+    "natural_query": "how many deals are in each stage",
+    "sql": "SELECT \n  d.stage AS deal_stage, \n  COUNT(*) AS deal_count\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \nGROUP BY \n  d.stage \nORDER BY \n  deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-19T10:58:18.098790"
+  },
+  {
+    "natural_query": "Sales rep names, revenue, and ranking",
+    "sql": "SELECT \n  u.name AS rep_name, \n  UPPER(COALESCE(s.currency,'USD')) AS currency, \n  COALESCE(SUM(s.grand_total),0) AS total_sales\nFROM \"users\" u \nLEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id AND s.status = 'Confirm' AND NOT s.deleted \nWHERE u.\"isActive\" = true \nGROUP BY u._id, u.name, s.currency \nORDER BY total_sales DESC",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T10:58:35.746936"
+  },
+  {
+    "natural_query": "Sales rep names and target achievement percentages",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COALESCE(SUM(CASE WHEN s.status='Confirm' THEN s.grand_total ELSE 0 END), 0) AS achieved_amount,\n  COALESCE(t.\"targetInUSD\", 0) AS target_amount,\n  ROUND(100.0*COALESCE(SUM(CASE WHEN s.status='Confirm' THEN s.grand_total ELSE 0 END), 0) / COALESCE(t.\"targetInUSD\", 1), 2) AS achievement_pct\nFROM \n  \"users\" u \n  LEFT JOIN \"targets\" t ON t.\"userId\" = u._id AND t.year = EXTRACT(YEAR FROM CURRENT_DATE)\n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year \n                         AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = t.month\nWHERE \n  u.\"isActive\" = true \nGROUP BY \n  u._id, \n  u.name, \n  t.\"targetInUSD\" \nORDER BY \n  achievement_pct DESC",
+    "tables": [
+      "sales",
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-19T10:58:35.760642"
+  },
+  {
+    "natural_query": "Revenue distribution by sales rep",
+    "sql": "SELECT \n  u.name AS rep_name, \n  UPPER(COALESCE(s.currency,'USD')) AS currency, \n  COALESCE(SUM(s.grand_total),0) AS total_sales\nFROM \n  \"sales\" s \n  LEFT JOIN \"users\" u ON u._id = s.\"salesOwner\"\nWHERE \n  s.status='Confirm' AND \n  NOT s.deleted\nGROUP BY \n  u._id, \n  u.name, \n  s.currency\nORDER BY \n  total_sales DESC",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T10:58:35.807969"
+  },
+  {
+    "natural_query": "Total team revenue and target achievement",
+    "sql": "SELECT \n  t.\"teamName\", \n  COALESCE(SUM(s.grand_total), 0) AS total_revenue,\n  COALESCE(SUM(t.\"targetInUSD\"), 0) AS total_target,\n  ROUND(100.0 * COALESCE(SUM(s.grand_total), 0) / NULLIF(COALESCE(SUM(t.\"targetInUSD\"), 0), 0), 2) AS achievement_pct\nFROM \n  \"targets\" t \n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = t.\"userId\" \n                      AND EXTRACT(YEAR FROM NULLIF(s.sales_date, '')::timestamptz) = t.year \n                      AND EXTRACT(MONTH FROM NULLIF(s.sales_date, '')::timestamptz) = t.month\n  LEFT JOIN \"users\" u ON u._id = t.\"userId\"\nWHERE \n  t.year = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND u.\"isActive\" = TRUE\nGROUP BY \n  t.\"teamName\", t._id\nORDER BY \n  achievement_pct DESC",
+    "tables": [
+      "sales",
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-19T10:58:35.828149"
+  },
+  {
+    "natural_query": "Sales rep names and total revenue generated",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COALESCE(SUM(s.grand_total), 0) AS total_revenue\nFROM \n  \"users\" u \n  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id \nWHERE \n  u.\"isActive\" = true \n  AND s.status = 'Confirm' \n  AND NOT s.deleted \nGROUP BY \n  u._id, \n  u.name \nORDER BY \n  total_revenue DESC",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T10:58:35.836652"
+  },
+  {
+    "natural_query": "SELECT c.name, i.invoice_number, i.due_date, i.outstanding_amount FROM companies c JOIN invoices i ON c._id = i.company_id WHERE i.due_date < CURRENT_DATE AND EXTRACT(MONTH FROM CURRENT_DATE) = EXTRACT(MONTH FROM i.due_date) AND EXTRACT(YEAR FROM CURRENT_DATE) = EXTRACT(YEAR FROM i.due_date)",
+    "sql": "SELECT \n  c.\"companyName\", \n  i.invoice_number, \n  i.due_date, \n  COALESCE(i.grand_total, 0) - COALESCE(i.grandtotal_in_usd, 0) AS outstanding_amount\nFROM \n  \"companies\" c \n  LEFT JOIN \"invoices\" i ON c._id = i.company\nWHERE \n  NOT c.deleted \n  AND NOT i.deleted \n  AND NULLIF(i.due_date, '')::timestamptz < CURRENT_DATE \n  AND EXTRACT(MONTH FROM CURRENT_DATE) = EXTRACT(MONTH FROM NULLIF(i.due_date, '')::timestamptz) \n  AND EXTRACT(YEAR FROM CURRENT_DATE) = EXTRACT(YEAR FROM NULLIF(i.due_date, '')::timestamptz)",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T11:10:52.171695"
   }
 ]

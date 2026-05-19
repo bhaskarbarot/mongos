@@ -1,120 +1,135 @@
 /**
- * sqlHandler.js — PostgreSQL upsert / delete helpers for MongoDB→PG sync.
+ * sqlHandler.js — Column-wise PostgreSQL upsert / delete for MongoDB→PG sync.
  *
- * Table schema expected:
- *   _id        TEXT PRIMARY KEY   (MongoDB ObjectId as string)
- *   document   JSONB              (full normalised MongoDB document)
- *   updated_at TIMESTAMPTZ        (sync timestamp)
+ * Every top-level MongoDB field becomes its own PostgreSQL column.
+ * Columns are created / added automatically on first insert (no manual schema).
  *
- * ensureTable creates this schema for NEW tables.
- * For EXISTING tables that already have _id as PK (created by older sync tool),
- * it idempotently adds any missing columns without touching existing data.
+ * Column type mapping from JavaScript typeof:
+ *   boolean → BOOLEAN
+ *   number  → NUMERIC
+ *   object  → JSONB  (plain object or array)
+ *   string  → TEXT
+ *   null    → TEXT   (safe default; overridden if a non-null value arrives later)
  */
 
 const db = require("./postgres");
 
-const ensuredTables = new Set();
+const _ensuredTables = new Set();
+const _colCache = {}; // { tableName: Set<colName> }
 
-function quoteIdentifier(identifier) {
-  return `"${String(identifier).replace(/"/g, '""')}"`;
+function quote(name) {
+  return '"' + String(name).replace(/"/g, '""') + '"';
+}
+
+function pgType(value) {
+  if (value === null || value === undefined) return "TEXT";
+  if (typeof value === "boolean") return "BOOLEAN";
+  if (typeof value === "number")  return "NUMERIC";
+  if (typeof value === "object")  return "JSONB";   // array or plain object
+  return "TEXT";
+}
+
+function toPgValue(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") return JSON.stringify(value);
+  return value;
+}
+
+async function _loadCols(table) {
+  const res = await db.query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1`,
+    [table]
+  );
+  _colCache[table] = new Set(res.rows.map((r) => r.column_name));
+  return _colCache[table];
 }
 
 async function ensureTable(table) {
-  if (ensuredTables.has(table)) return;
-
-  const q = quoteIdentifier(table);
-
-  // 1. Create table with correct schema if it does not exist yet
+  if (_ensuredTables.has(table)) return;
+  const q = quote(table);
   await db.query(`
     CREATE TABLE IF NOT EXISTS ${q} (
       _id        TEXT PRIMARY KEY,
-      document   JSONB,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  _ensuredTables.add(table);
+  await _loadCols(table);
+}
 
-  // 2. Idempotently add required columns for tables that already exist
-  //    with a different schema (older sync tool created them without these).
-  await db.query(
-    `ALTER TABLE ${q} ADD COLUMN IF NOT EXISTS document   JSONB`
-  );
-  await db.query(
-    `ALTER TABLE ${q} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-  );
+async function ensureColumns(table, row) {
+  const cols = _colCache[table] || (await _loadCols(table));
+  const q    = quote(table);
 
-  ensuredTables.add(table);
+  for (const [key, value] of Object.entries(row)) {
+    if (key === "_id" || key === "updated_at" || cols.has(key)) continue;
+
+    const type = pgType(value);
+    const colQ = quote(key);
+
+    try {
+      await db.query(`ALTER TABLE ${q} ADD COLUMN IF NOT EXISTS ${colQ} ${type}`);
+      cols.add(key);
+    } catch (_) {
+      // Fallback to TEXT if typed column fails (e.g. reserved word edge cases)
+      try {
+        await db.query(`ALTER TABLE ${q} ADD COLUMN IF NOT EXISTS ${colQ} TEXT`);
+        cols.add(key);
+      } catch (__) { /* skip this column */ }
+    }
+  }
 }
 
 async function insertRow(table, data) {
+  if (!data || !data._id) return;
+
   await ensureTable(table);
+  await ensureColumns(table, data);
 
-  const _id        = data._id;
-  const document   = data.document !== undefined ? data.document : null;
-  const updated_at = data.updated_at || new Date();
+  const cols = _colCache[table];
+  const q    = quote(table);
 
-  if (!_id) return; // skip rows that have no usable primary key
+  // Build ordered key list: _id first, updated_at last, all others in between
+  const keys = [
+    "_id",
+    ...Object.keys(data).filter((k) => k !== "_id" && k !== "updated_at" && cols.has(k)),
+    "updated_at",
+  ];
 
-  const q = quoteIdentifier(table);
+  const colList     = keys.map(quote).join(", ");
+  const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
+  const values       = keys.map((k) => toPgValue(data[k]));
 
-  try {
-    await db.query(
-      `INSERT INTO ${q} (_id, document, updated_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (_id) DO UPDATE
-         SET document   = EXCLUDED.document,
-             updated_at = EXCLUDED.updated_at`,
-      [_id, JSON.stringify(document), updated_at]
-    );
-  } catch (err) {
-    // Fallback for tables whose PK is not on _id yet (e.g. counters).
-    // Try UPDATE first; if nothing matched, attempt a plain INSERT.
-    if (
-      err.message &&
-      (err.message.includes("ON CONFLICT") ||
-        err.message.includes("constraint") ||
-        err.message.includes("unique"))
-    ) {
-      const res = await db.query(
-        `UPDATE ${q} SET document = $2, updated_at = $3 WHERE _id = $1`,
-        [_id, JSON.stringify(document), updated_at]
-      );
-      if (res.rowCount === 0) {
-        await db.query(
-          `INSERT INTO ${q} (_id, document, updated_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-          [_id, JSON.stringify(document), updated_at]
-        );
-      }
-    } else {
-      throw err;
-    }
-  }
+  const updateSet = keys
+    .filter((k) => k !== "_id")
+    .map((k) => `${quote(k)} = EXCLUDED.${quote(k)}`)
+    .join(", ");
+
+  await db.query(
+    `INSERT INTO ${q} (${colList}) VALUES (${placeholders})
+     ON CONFLICT (_id) DO UPDATE SET ${updateSet}`,
+    values
+  );
 }
 
 async function deleteRow(table, id) {
   if (!id) return;
   await ensureTable(table);
-  const q = quoteIdentifier(table);
+  const q = quote(table);
   await db.query(`DELETE FROM ${q} WHERE _id = $1`, [id]);
 }
 
 async function deleteMissingRows(table, validIds) {
   await ensureTable(table);
+  if (!Array.isArray(validIds)) throw new Error("validIds must be an array");
 
-  if (!Array.isArray(validIds)) {
-    throw new Error("validIds must be an array");
-  }
-
-  const q = quoteIdentifier(table);
-
+  const q = quote(table);
   if (validIds.length === 0) {
     await db.query(`DELETE FROM ${q}`);
     return;
   }
-
-  await db.query(
-    `DELETE FROM ${q} WHERE _id <> ALL($1::text[])`,
-    [validIds]
-  );
+  await db.query(`DELETE FROM ${q} WHERE _id <> ALL($1::text[])`, [validIds]);
 }
 
 module.exports = { insertRow, deleteRow, deleteMissingRows };

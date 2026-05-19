@@ -1,18 +1,17 @@
 /**
- * mapper.js — Maps a raw MongoDB document to the PostgreSQL row shape.
+ * mapper.js — Maps a raw MongoDB document to a flat PostgreSQL row.
  *
- * DB schema: _id TEXT PRIMARY KEY, document JSONB, updated_at TIMESTAMPTZ
+ * Each top-level MongoDB field becomes its own column:
+ *   - Scalars (string, number, boolean) → native TEXT / NUMERIC / BOOLEAN column
+ *   - Objects and arrays                → JSONB column
+ *   - ObjectId values                   → plain hex string (TEXT)
+ *   - Date instances                    → ISO-8601 string (TEXT)
  *
- * Normalisation applied to `document`:
- *   - ObjectId instances  → plain hex string
- *   - Date instances      → ISO-8601 string
- *   - Removes system keys (document, updated_at, _synced_at) to keep it clean
+ * sqlHandler.js creates/adds columns automatically on first insert.
  */
 
 function normalizeValue(key, value) {
   if (value === null || value === undefined) return value;
-
-  // MongoDB ObjectId (has _bsontype or is an object with toHexString)
   if (value && typeof value === "object") {
     if (value._bsontype === "ObjectId" || typeof value.toHexString === "function") {
       return value.toHexString ? value.toHexString() : String(value);
@@ -25,11 +24,11 @@ function normalizeValue(key, value) {
 }
 
 function mapDocumentToSQL(doc) {
-  if (!doc) return { _id: null, document: null, updated_at: new Date() };
+  if (!doc) return { _id: null, updated_at: new Date() };
 
   const _id = doc._id ? String(doc._id) : null;
 
-  // Deep-clone with normalization (handles nested ObjectIds and Dates)
+  // Deep-clone with normalization (ObjectIds → hex strings, Dates → ISO strings)
   let normalized;
   try {
     normalized = JSON.parse(
@@ -38,18 +37,16 @@ function mapDocumentToSQL(doc) {
       })
     );
   } catch (_) {
-    normalized = doc;
+    normalized = { ...doc };
   }
 
-  // Remove PostgreSQL meta columns from the JSONB document
+  // Remove fields that belong to PostgreSQL meta or are duplicated
+  delete normalized._id;
   delete normalized.updated_at;
   delete normalized._synced_at;
 
-  return {
-    _id,
-    document: normalized,
-    updated_at: new Date(),
-  };
+  // Spread every MongoDB field as its own key — sqlHandler will column-ify them
+  return { _id, ...normalized, updated_at: new Date() };
 }
 
 module.exports = mapDocumentToSQL;

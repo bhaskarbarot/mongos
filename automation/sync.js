@@ -14,8 +14,9 @@
 // Load .env from project root (one level up from automation/)
 require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 
-const fs   = require("fs");
-const path = require("path");
+const fs     = require("fs");
+const path   = require("path");
+const { exec } = require("child_process");
 
 // ── Logger ────────────────────────────────────────────────────────────────────
 // Logs directory lives at project root: ../logs/
@@ -258,6 +259,59 @@ async function startSync() {
     await startPollingFallback(err);
   }
 }
+
+// ── Database Backup ───────────────────────────────────────────────────────────
+const BACKUP_DIR          = path.join(__dirname, "..", "backups");
+const BACKUP_INTERVAL_MS  = 60 * 60 * 1000;  // every 1 hour
+const BACKUP_KEEP_COUNT   = 24;               // keep last 24 backups (~1 day)
+
+function runBackup() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  } catch (e) {
+    logger.error("Backup: cannot create backup dir", { error: e.message });
+    return;
+  }
+
+  const ts   = new Date().toISOString().replace(/[:.]/g, "-");
+  const file = path.join(BACKUP_DIR, `mongos_sync_${ts}.sql`);
+
+  // Run pg_dump inside the Docker container (avoids host/server version mismatch)
+  const cmd = [
+    `docker exec mongos-postgres`,
+    `bash -c "PGPASSWORD=${process.env.POSTGRES_PASSWORD}`,
+    `pg_dump -U ${process.env.POSTGRES_USER}`,
+    `-d ${process.env.POSTGRES_DB} -F p"`,
+    `> "${file}"`,
+  ].join(" ");
+
+  exec(cmd, (err) => {
+    if (err) {
+      logger.error("Backup FAILED", { error: err.message });
+      return;
+    }
+    const sizeMB = (fs.statSync(file).size / 1024 / 1024).toFixed(1);
+    logger.info(`Backup saved: ${path.basename(file)} (${sizeMB} MB)`);
+
+    // Rotate: keep only the last BACKUP_KEEP_COUNT backups
+    try {
+      const files = fs.readdirSync(BACKUP_DIR)
+        .filter((f) => f.startsWith("mongos_sync_") && f.endsWith(".sql"))
+        .sort()
+        .reverse();
+      files.slice(BACKUP_KEEP_COUNT).forEach((f) => {
+        fs.unlinkSync(path.join(BACKUP_DIR, f));
+        logger.info(`Backup rotated (deleted old): ${f}`);
+      });
+    } catch (rotErr) {
+      logger.warn("Backup rotation error", { error: rotErr.message });
+    }
+  });
+}
+
+// Run backup immediately on startup, then every hour
+runBackup();
+setInterval(runBackup, BACKUP_INTERVAL_MS).unref();
 
 // Graceful error handling
 process.on("uncaughtException", (err) => {
