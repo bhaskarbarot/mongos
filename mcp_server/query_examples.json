@@ -3919,5 +3919,222 @@
       "deals"
     ],
     "saved_at": "2026-05-19T05:22:01.395643"
+  },
+  {
+    "natural_query": "give me top 10 customer names?",
+    "sql": "SELECT c.\"companyName\" AS customer_name \nFROM \"companies\" c \nWHERE c.\"lifecycleStage\" = 'Customer' AND NOT c.deleted \nORDER BY c.\"companyName\" ASC \nLIMIT 10",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-19T05:47:28.528381"
+  },
+  {
+    "natural_query": "Get me full details for customer Automations Limited\u2014 his contact info, total orders placed, lifetime value, any pending invoices, and last purchase date. (referring to companies)",
+    "sql": "SELECT \n  c.\"companyName\", \n  c.industry, \n  c.country, \n  c.\"lifecycleStage\", \n  c.\"leadStatus\",\n  COALESCE(SUM(i.grand_total), 0) AS lifetime_value,\n  COUNT(DISTINCT i.invoice_number) AS total_orders,\n  MAX(NULLIF(i.payment_date, '')::timestamptz) AS last_purchase_date,\n  STRING_AGG(DISTINCT co.email, ', ') AS contact_emails,\n  STRING_AGG(DISTINCT co.\"phoneNumber\", ', ') AS contact_phones\nFROM \n  \"companies\" c\n  LEFT JOIN \"invoices\" i ON i.company = c._id\n  LEFT JOIN \"contacts\" co ON co.company = c._id\nWHERE \n  c.\"companyName\" ILIKE '%Automations Limited%'\n  AND NOT c.deleted\n  AND (co.deleted IS NULL OR co.deleted = FALSE)\nGROUP BY \n  c._id, \n  c.\"companyName\", \n  c.industry, \n  c.country, \n  c.\"lifecycleStage\", \n  c.\"leadStatus\"",
+    "tables": [
+      "companies",
+      "contacts",
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T05:48:05.593426"
+  },
+  {
+    "natural_query": "Give me orders of Automations Limited ?",
+    "sql": "SELECT s.sales_number, s.status, s.grand_total, s.currency, c.\"companyName\" \nFROM \"sales\" s \nLEFT JOIN \"companies\" c ON c._id = s.company \nWHERE c.\"companyName\" ILIKE '%Automations Limited%' AND NOT s.deleted",
+    "tables": [
+      "companies",
+      "sales"
+    ],
+    "saved_at": "2026-05-19T05:49:58.288916"
+  },
+  {
+    "natural_query": "SELECT c.name FROM companies c JOIN sales s ON c._id = s.company WHERE s.sales_number = 'SO00103'",
+    "sql": "SELECT c.\"companyName\" \nFROM \"companies\" c \nLEFT JOIN \"sales\" s \nON s.company = c._id \nWHERE s.sales_number = 'SO00103' \nAND NOT c.deleted \nAND NOT s.deleted",
+    "tables": [
+      "companies",
+      "sales"
+    ],
+    "saved_at": "2026-05-19T05:50:40.042747"
+  },
+  {
+    "natural_query": "SELECT p.name FROM products p JOIN sales s ON p._id = s.product WHERE s.sales_number = 'SO00103'",
+    "sql": "SELECT p.name \nFROM \"products\" p \nLEFT JOIN \"sales\" s ON p._id = s.items->>'product' \nWHERE s.sales_number = 'SO00103' \nAND NOT s.deleted \nAND s.status = 'Confirm'",
+    "tables": [
+      "products",
+      "sales"
+    ],
+    "saved_at": "2026-05-19T05:50:40.050598"
+  },
+  {
+    "natural_query": "SELECT s.status FROM sales s WHERE s.sales_number = 'SO00103'",
+    "sql": "SELECT s.status \nFROM \"sales\" s \nWHERE s.sales_number = 'SO00103' \n  AND NOT s.deleted",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-19T05:50:40.055844"
+  },
+  {
+    "natural_query": "SELECT u.name FROM users u JOIN sales s ON u._id = s.\"salesOwner\" WHERE s.sales_number = 'SO00103'",
+    "sql": "SELECT u.name \nFROM \"users\" u \nLEFT JOIN \"sales\" s \nON u._id = s.\"salesOwner\" \nWHERE s.sales_number = 'SO00103' AND NOT s.deleted",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:50:40.060879"
+  },
+  {
+    "natural_query": "give me product list with details?",
+    "sql": "SELECT \n  name, \n  unit_cost, \n  currency, \n  product_type, \n  tax_rate, \n  \"isNoNBillable\", \n  billing_frequency, \n  description_long, \n  description_short \nFROM \n  \"products\" \nWHERE \n  \"isActive\" = true \nORDER BY \n  unit_cost DESC",
+    "tables": [
+      "products"
+    ],
+    "saved_at": "2026-05-19T05:51:26.611915"
+  },
+  {
+    "natural_query": "give me product id of Odoo Dedicated Developer?",
+    "sql": "SELECT p._id FROM \"products\" p LEFT JOIN \"projecttypes\" pt ON pt._id = p.product_type WHERE pt.name = 'Dedicated' AND p.name ILIKE '%Odoo%' AND p.\"isActive\" = true",
+    "tables": [
+      "products",
+      "projecttypes"
+    ],
+    "saved_at": "2026-05-19T05:52:12.234340"
+  },
+  {
+    "natural_query": "680b4cb17ebf3acd5b1 which company?",
+    "sql": "SELECT c.\"companyName\", c.industry, c.country \nFROM \"companies\" c \nWHERE c._id = '680b4cb17ebf3acd5b1' AND NOT c.deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-19T05:52:52.286349"
+  },
+  {
+    "natural_query": "680b4cb17ebf3acd5b1 which product?",
+    "sql": "SELECT name, product_type, unit_cost, currency \nFROM \"products\" \nWHERE _id = '680b4cb17ebf3acd5b1'",
+    "tables": [
+      "products"
+    ],
+    "saved_at": "2026-05-19T05:53:06.573073"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM sales WHERE product_id = (SELECT _id FROM products WHERE name = 'Odoo Dedicated Developer') AND EXTRACT(MONTH FROM sale_date) = EXTRACT(MONTH FROM CURRENT_DATE)",
+    "sql": "SELECT COUNT(*) \nFROM \"sales\" s \nLEFT JOIN \"products\" p ON p.name = (\n  SELECT jsonb_array_elements(s.items)->>'name' \n  FROM \"sales\" \n  WHERE _id = s._id \n  LIMIT 1\n) \nWHERE p.name = 'Odoo Dedicated Developer' \nAND NOT s.deleted \nAND s.status = 'Confirm' \nAND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)",
+    "tables": [
+      "products",
+      "sales"
+    ],
+    "saved_at": "2026-05-19T05:54:02.203988"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM products WHERE name = 'Odoo Dedicated Developer'",
+    "sql": "SELECT COUNT(*) AS product_count FROM \"products\" WHERE name = 'Odoo Dedicated Developer' AND \"isActive\" = true",
+    "tables": [
+      "products"
+    ],
+    "saved_at": "2026-05-19T05:54:02.210363"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals WHERE product_id = (SELECT _id FROM products WHERE name = 'Odoo Dedicated Developer') AND deal_stage = 'pending'",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nWHERE d.type  = (\n  SELECT p.name \n  FROM \"products\" p \n  WHERE p.name = 'Odoo Dedicated Developer'\n) \nAND d.stage  = 'Negotiation'",
+    "tables": [
+      "deals",
+      "products"
+    ],
+    "saved_at": "2026-05-19T05:54:02.216649"
+  },
+  {
+    "natural_query": "SELECT c.company_name, COUNT(s.*) AS sales_count FROM sales s JOIN companies c ON s.company_id = c._id WHERE s.product_id = (SELECT _id FROM products WHERE name = 'Odoo Dedicated Developer') GROUP BY c.company_name ORDER BY sales_count DESC LIMIT 5",
+    "sql": "SELECT \n  c.\"companyName\" AS company_name, \n  COUNT(s._id) AS sales_count \nFROM \n  \"sales\" s \n  LEFT JOIN \"companies\" c ON c._id = s.company \n  LEFT JOIN \"products\" p ON p.name = 'Odoo Dedicated Developer' \n  LEFT JOIN jsonb_array_elements(s.items) AS item ON item->>'product' = p._id \nWHERE \n  NOT s.deleted \n  AND s.status = 'Confirm' \n  AND p._id IS NOT NULL \nGROUP BY \n  c.\"companyName\" \nORDER BY \n  sales_count DESC \nLIMIT 5",
+    "tables": [
+      "companies",
+      "jsonb_array_elements",
+      "products",
+      "sales"
+    ],
+    "saved_at": "2026-05-19T05:54:02.221942"
+  },
+  {
+    "natural_query": "give me name of sales representative?",
+    "sql": "SELECT u.name AS rep_name \nFROM \"users\" u \nLEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id \nWHERE u.\"isActive\" = true AND u._id IS NOT NULL \nORDER BY u.\"createdAt\" ASC LIMIT 1",
+    "tables": [
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:55:25.360303"
+  },
+  {
+    "natural_query": "list of overdue follow-ups assigned to Ketul Trivedi",
+    "sql": "SELECT o._id, o.name, o.email, o.status, o.\"leadStatus\", o.\"createdAt\", u.name AS assigned_to \nFROM \"outreaches\" o \nLEFT JOIN \"users\" u ON u._id = o.\"assignedTo\" \nWHERE o.status IN ('Not Contacted','Contacted') \nAND u.name ILIKE '%Ketul Trivedi%' \nAND NOT o.\"isDeleted\" \nORDER BY o.\"createdAt\" ASC",
+    "tables": [
+      "outreaches",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:56:16.635862"
+  },
+  {
+    "natural_query": "conversion rate of deals handled by Ketul Trivedi this quarter",
+    "sql": "SELECT \n  ROUND(\n    100.0 * \n    COUNT(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE NULL END) / \n    COUNT(CASE WHEN d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL THEN 1 ELSE NULL END), \n    2\n  ) AS conversion_rate\nFROM \n  \"deals\" d\n  LEFT JOIN \"users\" u ON u._id = d.owner\nWHERE \n  u.name ILIKE '%Ketul Trivedi%' \n  AND NOT d.deleted \n  AND EXTRACT(QUARTER FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)\n  AND EXTRACT(YEAR FROM NULLIF(d.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:56:16.643839"
+  },
+  {
+    "natural_query": "count of deals closed by Ketul Trivedi this quarter",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE d.\"dealWonAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND u.name ILIKE '%Ketul Trivedi%' \n  AND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND EXTRACT(QUARTER FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:56:16.649767"
+  },
+  {
+    "natural_query": "total revenue generated by Ketul Trivedi this quarter",
+    "sql": "SELECT COALESCE(SUM(d.grand_total), 0) AS total_revenue\nFROM \"deals\" d\nLEFT JOIN \"users\" u ON u._id = d.owner\nWHERE u.name ILIKE '%Ketul Trivedi%'\nAND NOT d.deleted\nAND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nAND EXTRACT(QUARTER FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)\n\nUNION ALL\n\nSELECT COALESCE(SUM(s.grand_total), 0) AS total_revenue\nFROM \"sales\" s\nLEFT JOIN \"users\" u ON u._id = s.\"salesOwner\"\nWHERE u.name ILIKE '%Ketul Trivedi%'\nAND NOT s.deleted\nAND s.status = 'Confirm'\nAND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nAND EXTRACT(QUARTER FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)\n\nUNION ALL\n\nSELECT COALESCE(SUM(i.grand_total), 0) AS total_revenue\nFROM \"invoices\" i\nLEFT JOIN \"users\" u ON u._id = i.\"createdBy\"\nWHERE u.name ILIKE '%Ketul Trivedi%'\nAND NOT i.deleted\nAND i.payment_status = 'paid'\nAND EXTRACT(YEAR FROM NULLIF(i.payment_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)\nAND EXTRACT(QUARTER FROM NULLIF(i.payment_date,'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE)",
+    "tables": [
+      "deals",
+      "invoices",
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:56:16.656208"
+  },
+  {
+    "natural_query": "average deal size of deals closed by Ketul Trivedi this quarter",
+    "sql": "SELECT COALESCE(AVG(d.grand_total), 0) AS average_deal_size \nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE d.\"dealWonAt\" IS NOT NULL \nAND NOT d.deleted \nAND u.name ILIKE '%Ketul Trivedi%' \nAND EXTRACT(QUARTER FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(QUARTER FROM CURRENT_DATE) \nAND EXTRACT(YEAR FROM NULLIF(d.\"dealWonAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:56:16.662636"
+  },
+  {
+    "natural_query": "give me top 10 deals list in detail?",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.type, \n  d.grand_total, \n  d.currency, \n  c.\"companyName\", \n  u.name AS owner_name, \n  NULLIF(d.\"closeDate\",'')::timestamptz AS close_date, \n  NULLIF(d.\"dealWonAt\",'')::timestamptz AS won_at, \n  NULLIF(d.\"dealLostAt\",'')::timestamptz AS lost_at, \n  d.\"createdAt\" \nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company \n  LEFT JOIN \"users\" u ON u._id = d.owner \nWHERE \n  NOT d.deleted \nORDER BY \n  d.grand_total DESC \nLIMIT 10",
+    "tables": [
+      "companies",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:58:36.133745"
+  },
+  {
+    "natural_query": "What's the current status of deal \"Deal By Indian Currency\". Show me the client, deal value, stage it's in, last activity, probability of closing, and expected close date. (referring to deals)",
+    "sql": "SELECT \n  d.name AS deal_name,\n  c.\"companyName\" AS client,\n  d.grand_total AS deal_value,\n  d.stage AS deal_stage,\n  al.\"createdAt\" AS last_activity,\n  d.\"closeDate\" AS expected_close_date\nFROM \"deals\" d\nLEFT JOIN \"companies\" c ON c._id = d.company\nLEFT JOIN \"activitylogs\" al ON al.\"recordId\" = d._id AND al.module='deals'\nWHERE d.name ILIKE '%Deal By Indian Currency%' AND NOT d.deleted\nORDER BY al.\"createdAt\" DESC NULLS LAST LIMIT 1",
+    "tables": [
+      "activitylogs",
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-19T06:00:24.097389"
+  },
+  {
+    "natural_query": "SELECT c.name, i.invoice_number, i.due_date, i.outstanding_amount, i.due_date - CURRENT_DATE AS days_overdue FROM invoices i JOIN companies c ON i.company = c._id",
+    "sql": "SELECT \n  c.\"companyName\" AS company_name,\n  i.invoice_number,\n  NULLIF(i.due_date,'')::timestamptz AS due_date,\n  i.grand_total AS outstanding_amount,\n  NULLIF(i.due_date,'')::timestamptz - CURRENT_DATE AS days_overdue \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE NOT i.deleted \nORDER BY days_overdue DESC",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T06:01:13.131760"
   }
 ]

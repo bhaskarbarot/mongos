@@ -1,13 +1,24 @@
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+httpx>=0.27.0
+
+# LangChain / AI
 langchain
 langchain-community
 langchain-ollama
 langchain-core
 langchain-groq>=0.2.0
-psycopg2-binary
-python-dotenv
-streamlit
 ollama
+
+# Database
+psycopg2-binary
 redis
+
+# Config / utils
+python-dotenv
+requests
 
 # 3-agent architecture
 crewai>=0.80.0

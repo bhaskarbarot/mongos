@@ -1,0 +1,47 @@
+# Secrets — never bake into image (passed at runtime via docker-compose env_file)
+.env
+
+# Version control
+.git/
+.github/
+
+# Runtime-generated — mounted as volumes instead
+logs/
+
+# Test files — not needed at runtime
+tests/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Node modules (each service installs its own)
+automation/node_modules/
+chat-ui/node_modules/
+chat-ui/dist/
+
+# IDE / tool config
+.code-review-graph/
+.cursor/
+.kiro/
+.qoder/
+.vscode/
+.gemini/
+.opencode.json
+.mcp.json
+.cursorrules
+.windsurfrules
+
+# Data / output files
+*.csv
+*.log
+*.txt
+!requirements.txt
+
+# Docs
+*.md
+!requirements.txt

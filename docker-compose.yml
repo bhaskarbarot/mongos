@@ -1,0 +1,87 @@
+services:
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: mongos-postgres
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB:       mongos_sync
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mongos_sync"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mongos-backend
+    env_file: .env
+    environment:
+      # Override host/port so backend talks to the postgres service, not localhost
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      # Ollama runs on the host machine — host-gateway resolves to host IP on Linux
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      # Allow frontend origin
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173,http://frontend"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── MongoDB → PostgreSQL Sync ────────────────────────────────────────────────
+  sync:
+    build:
+      context: .
+      dockerfile: automation/Dockerfile
+    container_name: mongos-sync
+    env_file: .env
+    environment:
+      # Override so sync writes to postgres service, not localhost
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── React Frontend (nginx, production build) ─────────────────────────────────
+  frontend:
+    build:
+      context: ./chat-ui
+      dockerfile: Dockerfile
+    container_name: mongos-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    driver: local
