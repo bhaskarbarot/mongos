@@ -165,8 +165,17 @@ RULES:
 4. JOINs: ALWAYS prefix all columns with alias — d.name NOT name, d.deleted NOT deleted
 5. Soft delete: WHERE NOT t.deleted  — EXCEPT vendors (NO deleted column — omit filter)
 6. outreaches: WHERE NOT "isDeleted"  (isDeleted, not deleted — different column!)
-7. Date TEXT cast: NULLIF(col,'')::timestamptz  NEVER: col::timestamptz
-8. Year from TEXT date: EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)
+7. Date TEXT cast — EXACT PATTERN (memorize character by character):
+    NULLIF(col,'')::timestamptz
+    ✗ NEVER: col::timestamptz
+    ✗ NEVER: NULLIF(col,''::timestamptz)   ← casting '' not the result — WRONG
+    ✗ NEVER: NULLIF(col,'')               ← missing cast — stays TEXT, EXTRACT will fail
+8. EXTRACT from TEXT date — copy these exactly:
+    EXTRACT(YEAR  FROM NULLIF(i.due_date,'')::timestamptz) = EXTRACT(YEAR  FROM CURRENT_DATE)
+    EXTRACT(MONTH FROM NULLIF(i.due_date,'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE)
+    EXTRACT(DAY   FROM NOW() - NULLIF(i.due_date,'')::timestamptz)::INT AS days_overdue
+    ✗ NEVER: EXTRACT(MONTH FROM NULLIF(i.due_date,''))::timestamptz   ← cast outside EXTRACT
+    ✗ NEVER: EXTRACT(MONTH FROM NULLIF(i.due_date,''::timestamptz))   ← cast on wrong token
 9. targets.year and targets.month are NUMERIC INTEGERS — never cast to timestamptz
 10. NULL-safe numeric: COALESCE(SUM(col),0) | NULLIF(col,'')::numeric
 11. MIXED-CASE COLUMNS need double quotes: s."salesOwner" NOT s.salesOwner (will fail!)
