@@ -69,6 +69,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── pgAdmin (PostgreSQL visual browser) ─────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   # ── React Frontend (nginx, production build) ─────────────────────────────────
   frontend:
     build:
@@ -84,4 +100,6 @@ services:
 
 volumes:
   pgdata:
+    driver: local
+  pgadmin_data:
     driver: local

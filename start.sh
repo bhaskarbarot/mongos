@@ -128,27 +128,18 @@ fi
 
 echo ""
 
-# ── Step 1: PostgreSQL ─────────────────────────────────────────────────────────
+# ── Step 1: PostgreSQL (via Docker Compose) ────────────────────────────────────
 echo ">>> [1/5] PostgreSQL Docker container ($PG_CONTAINER)…"
 
 CONTAINER_STATUS=$(docker inspect -f '{{.State.Status}}' "$PG_CONTAINER" 2>/dev/null || echo "missing")
 
 if [ "$CONTAINER_STATUS" = "running" ]; then
   ok "Already running on port 5433"
-elif [ "$CONTAINER_STATUS" = "missing" ]; then
-  echo "      Container not found. Creating and starting…"
-  docker run --name "$PG_CONTAINER" \
-    -e POSTGRES_USER=postgres \
-    -e POSTGRES_PASSWORD=postgres \
-    -e POSTGRES_DB=mongos_sync \
-    -p 5433:5432 \
-    -d postgres:16 > /dev/null
-  sleep 5
-  ok "PostgreSQL created and started on port 5433"
 else
-  echo "      Starting (was: $CONTAINER_STATUS)…"
-  docker start "$PG_CONTAINER" > /dev/null
-  for i in $(seq 1 15); do
+  echo "      Starting via docker compose…"
+  docker compose up -d postgres 2>/dev/null
+  # Wait for postgres to be ready
+  for i in $(seq 1 20); do
     docker exec "$PG_CONTAINER" pg_isready -U postgres -q 2>/dev/null && break
     sleep 2
   done
@@ -163,18 +154,15 @@ else
   warn "DB connection check failed — backend will retry on first query"
 fi
 
-# ── Step 2: pgAdmin (optional) ─────────────────────────────────────────────────
+# ── Step 2: pgAdmin (via Docker Compose) ───────────────────────────────────────
 echo ">>> [2/5] pgAdmin ($PGA_CONTAINER on port 5050)…"
 
 PGA_STATUS=$(docker inspect -f '{{.State.Status}}' "$PGA_CONTAINER" 2>/dev/null || echo "missing")
 if [ "$PGA_STATUS" = "running" ]; then
   ok "Already running — http://localhost:5050"
-elif [ "$PGA_STATUS" = "missing" ]; then
-  warn "pgAdmin container not found — skipping (start with: docker run -d --name pgadmin -p 5050:80 -e PGADMIN_DEFAULT_EMAIL=admin@admin.com -e PGADMIN_DEFAULT_PASSWORD=admin dpage/pgadmin4)"
 else
-  docker start "$PGA_CONTAINER" > /dev/null 2>&1 \
-    && ok "pgAdmin started — http://localhost:5050" \
-    || warn "pgAdmin failed to start — skipping"
+  docker compose up -d pgadmin 2>/dev/null
+  ok "pgAdmin started — http://localhost:5050  (login: admin@admin.com / admin)"
 fi
 
 # ── Step 3: MongoDB → PostgreSQL sync ──────────────────────────────────────────
