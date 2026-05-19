@@ -48,7 +48,7 @@ def _build_chains() -> Dict:
     groq_cls_model   = getattr(settings, "groq_classify_model",   "llama-3.1-8b-instant")
     groq_dec_model   = getattr(settings, "groq_decompose_model",  "meta-llama/llama-4-scout-17b-16e-instruct")
     groq_syn_model   = getattr(settings, "groq_synthesis_model",  "llama-3.3-70b-versatile")
-    gem_model        = getattr(settings, "gemini_classify_model",  "gemini-2.0-flash-lite")
+    gem_model        = getattr(settings, "gemini_classify_model",  "gemini-2.5-flash")
     or_sql_model     = getattr(settings, "openrouter_sql_model",   "deepseek/deepseek-chat-v3-0324:free")
     or_syn_model     = getattr(settings, "openrouter_synthesis_model", "deepseek/deepseek-chat-v3-0324:free")
     oll_cls          = getattr(settings, "ollama_classify_model",  "qwen2.5:3b")

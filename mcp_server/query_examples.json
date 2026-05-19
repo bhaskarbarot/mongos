@@ -3901,5 +3901,23 @@
       "deals"
     ],
     "saved_at": "2026-05-18T11:11:19.702019"
+  },
+  {
+    "natural_query": "revenue, target revenue, target achievement",
+    "sql": "SELECT \n  COALESCE(SUM(i.grand_total), 0) AS revenue,\n  COALESCE(SUM(t.\"targetInUSD\"), 0) AS target_revenue,\n  ROUND(100.0 * \n    COALESCE(SUM(i.grand_total), 0) / \n    NULLIF(COALESCE(SUM(t.\"targetInUSD\"), 0), 0), \n    2) AS target_achievement_pct\nFROM \n  \"invoices\" i\n  LEFT JOIN \"users\" u ON u._id = i.\"createdBy\"\n  LEFT JOIN \"targets\" t \n    ON t.\"userId\" = u._id \n    AND t.year = EXTRACT(YEAR FROM CURRENT_DATE) \n    AND t.month = EXTRACT(MONTH FROM CURRENT_DATE)\nWHERE \n  i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND u.\"isActive\" = TRUE\nGROUP BY \n  u._id, \n  u.name, \n  t.\"targetInUSD\" \nORDER BY \n  target_achievement_pct DESC \nLIMIT 10",
+    "tables": [
+      "invoices",
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-19T05:22:01.387366"
+  },
+  {
+    "natural_query": "win rate, deal conversion rate, revenue trend",
+    "sql": "SELECT \n  d.type AS deal_type, \n  COUNT(*) AS deal_count, \n  COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END), 0) AS won_deals,\n  ROUND(100.0*COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END), 0)/NULLIF(COUNT(*), 0), 1) AS win_rate_pct,\n  COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN d.grand_total ELSE 0 END), 0) AS total_revenue,\n  EXTRACT(YEAR FROM NULLIF(d.\"closeDate\",'')::timestamptz) AS close_year\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \nGROUP BY \n  d.type, \n  EXTRACT(YEAR FROM NULLIF(d.\"closeDate\",'')::timestamptz)\nORDER BY \n  close_year DESC, \n  total_revenue DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-19T05:22:01.395643"
   }
 ]
