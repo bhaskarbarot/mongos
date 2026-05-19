@@ -347,10 +347,71 @@ _TABLE_NOTES = {
         "-- Deals that changed stage: JOIN activitylogs al ON al.\"recordId\" = d._id AND al.module='deals'",
         "-- NO deleted column on activitylogs — omit soft-delete filter",
     ],
+    "meetings": [
+        "-- ⚠ ALL date columns (start, end, createdAt) are TEXT — NEVER compare raw to DATE/TIMESTAMP",
+        "-- ✗ WRONG: m.start < CURRENT_DATE  or  m.\"createdAt\" < CURRENT_DATE  (TEXT vs date — fails!)",
+        "-- ✓ CORRECT: NULLIF(m.start,'')::timestamptz < NOW()",
+        "-- ✓ CORRECT: NULLIF(m.\"createdAt\",'')::timestamptz >= NOW() - INTERVAL '30 days'",
+        "-- Past meetings:   WHERE NULLIF(m.start,'')::timestamptz < NOW()",
+        "-- Future meetings: WHERE NULLIF(m.start,'')::timestamptz > NOW()",
+        "-- NO deleted column on meetings — omit soft-delete filter",
+        "-- FK: m.\"createdBy\" → users._id  (NOT m.\"EventId\" — EventId is a Google Calendar ID string)",
+        "-- attendees column is JSONB array of user IDs",
+    ],
+    "bills": [
+        "-- ⚠ billDate and dueDate are TEXT — cast: NULLIF(b.\"billDate\",'')::timestamptz",
+        "-- ✗ WRONG: b.\"billDate\" < CURRENT_DATE  (TEXT vs date fails!)",
+        "-- ✓ CORRECT: NULLIF(b.\"dueDate\",'')::timestamptz < NOW() AND b.status != 'Paid'",
+        "-- Amount: SUM(b.\"netPayableAmount\") — NUMERIC, no cast needed",
+        "-- NO deleted column on bills — omit soft-delete filter",
+        "-- FK join vendors: LEFT JOIN \"vendors\" v ON v._id = b.vendor",
+        "-- ⚠ vendors display name is v.\"companyName\" NOT v.name (vendors has NO name column!)",
+    ],
+    "commonnotes": [
+        "-- Links to parent records via: companyId → companies._id, dealId → deals._id",
+        "-- contactId → contacts._id, invoiceId → invoices._id, salesId → sales._id",
+        "-- ⚠ createdAt is TEXT — cast: NULLIF(cn.\"createdAt\",'')::timestamptz",
+        "-- NO deleted column on commonnotes — omit soft-delete filter",
+        "-- Filter pinned notes: WHERE cn.\"isPinned\" = true",
+    ],
+    "emails": [
+        "-- ⚠ \"from\" is a PostgreSQL reserved word — ALWAYS double-quote: e.\"from\"",
+        "-- ⚠ date column is TEXT — cast: NULLIF(e.date,'')::timestamptz",
+        "-- to, cc, bcc are JSONB arrays",
+        "-- FK: e.user → users._id",
+        "-- NO deleted column on emails — omit soft-delete filter",
+    ],
+    "publicleads": [
+        "-- Inbound/web leads — NO deleted column, omit soft-delete filter",
+        "-- ⚠ createdAt is TEXT — cast: NULLIF(pl.\"createdAt\",'')::timestamptz",
+        "-- Filter by stage: WHERE pl.\"lifecycleStage\" = 'Lead'",
+    ],
+    "contacts": [
+        "-- ⚠ createdAt is TEXT — cast: NULLIF(c.\"createdAt\",'')::timestamptz",
+        "-- FK: c.company → companies._id, c.contactOwner → users._id",
+        "-- Soft delete: WHERE NOT c.deleted",
+        "-- lastActivity is JSONB — do not compare directly",
+    ],
+    "campaigns": [
+        "-- NO deleted column on campaigns — omit soft-delete filter",
+        "-- ⚠ createdAt is TEXT — cast: NULLIF(cam.\"createdAt\",'')::timestamptz",
+        "-- FK: cam.\"createdBy\" → users._id, cam.\"categoryId\" → categories._id",
+    ],
+    "sources": [
+        "-- Reference table: sourceName is the display value",
+        "-- NO deleted column — omit soft-delete filter",
+        "-- Join: LEFT JOIN \"sources\" s ON s._id = c.source",
+    ],
+    "regions": [
+        "-- Reference table: regionName is the display value",
+        "-- NO deleted column — omit soft-delete filter",
+        "-- Join: LEFT JOIN \"regions\" r ON r._id = c.region",
+    ],
 }
 
 # Soft delete info per table (from real DB introspection)
 _SOFT_DELETE = {
+    # Tables WITH soft delete
     "deals":            "NOT deleted",
     "invoices":         "NOT deleted",
     "sales":            "NOT deleted",
@@ -359,7 +420,9 @@ _SOFT_DELETE = {
     "createtasks":      "NOT deleted",
     "dealstagesettings":"NOT deleted",
     "outreaches":       'NOT "isDeleted"',
-    "vendors":          None,  # no soft delete
+    "notifications":    'NOT "isDeleted"',
+    # Tables WITHOUT soft delete (no deleted column — never add WHERE NOT deleted)
+    "vendors":          None,
     "users":            None,
     "departments":      None,
     "regions":          None,
@@ -368,6 +431,21 @@ _SOFT_DELETE = {
     "meetings":         None,
     "campaigns":        None,
     "bills":            None,
+    "emails":           None,
+    "commonnotes":      None,
+    "activitylogs":     None,
+    "sources":          None,
+    "technologies":     None,
+    "taxes":            None,
+    "categories":       None,
+    "lead_statuses":    None,
+    "lifecycle_stages": None,
+    "payments":         None,
+    "countryregions":   None,
+    "projecttypes":     None,
+    "notes":            None,
+    "publicleads":      None,
+    "dealstagesettings":"NOT deleted",
 }
 
 # Which cols to show for each table (top-priority ones, others trimmed for token budget)
@@ -392,7 +470,31 @@ _PRIORITY_COLS = {
     "vendors":  ["_id","companyName","email","phone","currency","stage","country","createdAt"],
     "bills":    ["_id","vendor","systemBillNo","billDate","dueDate","status",
                  "netPayableAmount","subtotal","gstPercent","billType","createdAt"],
-    "departments":["_id","name","createdAt"],
+    "departments":   ["_id","name","createdAt"],
+    "meetings":      ["_id","title","start","end","location","createdBy","createdAt","attendees"],
+    # ── Reference / lookup tables ────────────────────────────────────────────────
+    "regions":        ["_id","regionName","createdAt"],
+    "sources":        ["_id","sourceName","createdAt"],
+    "products":       ["_id","name","product_type","unit_cost","currency","isActive","createdAt"],
+    "technologies":   ["_id","name","category"],
+    "taxes":          ["_id","name","amount","createdBy"],
+    "categories":     ["_id","name","categoryName","createdAt"],
+    "campaigns":      ["_id","campaignName","createdBy","createdAt"],
+    "lead_statuses":  ["_id","name"],
+    "lifecycle_stages":["_id","name","createdAt"],
+    "dealstagesettings":["_id","dealStageName","deleted","createdBy","createdAt"],
+    "payments":       ["_id","payment_name","payment_fee","description","createdAt"],
+    "projecttypes":   ["_id","name","createdAt"],
+    "countryregions": ["_id","country","region"],
+    # ── Activity / notes tables ───────────────────────────────────────────────────
+    "activitylogs":   ["_id","action","module","recordId","recordName","userId","createdAt"],
+    "commonnotes":    ["_id","note","type","createdBy","isPinned","companyId","dealId",
+                       "contactId","invoiceId","salesId","createdAt"],
+    "notes":          ["_id","outreachId","message","reminderDate","createdBy","createdAt"],
+    "emails":         ["_id","user","subject","date","snippet","createdAt"],
+    # ── Lead / outreach tables ────────────────────────────────────────────────────
+    "publicleads":    ["_id","firstName","lastName","email","phoneNumber","leadStatus",
+                       "lifecycleStage","source","createdAt"],
 }
 
 

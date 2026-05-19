@@ -163,9 +163,13 @@ RULES:
 2. NEVER SELECT * — always list explicit columns
 3. JOIN key is _id: LEFT JOIN "users" u ON u._id = d.owner
 4. JOINs: ALWAYS prefix all columns with alias — d.name NOT name, d.deleted NOT deleted
-5. Soft delete: WHERE NOT t.deleted  — EXCEPT vendors (NO deleted column — omit filter)
+5. Soft delete: WHERE NOT t.deleted  — tables with NO deleted column (never add filter): vendors, users, departments, regions, products, targets, meetings, campaigns, bills, emails, commonnotes, activitylogs, sources, technologies, taxes, categories, lead_statuses, lifecycle_stages, payments, countryregions, projecttypes, notes, publicleads
 6. outreaches: WHERE NOT "isDeleted"  (isDeleted, not deleted — different column!)
-7. Date TEXT cast — EXACT PATTERN (memorize character by character):
+   notifications: WHERE NOT "isDeleted"
+7. GLOBAL TEXT DATE RULE — ALL date-looking columns in EVERY table are stored as TEXT (ISO-8601 strings from MongoDB). This covers: createdAt, updatedAt, start, end, date, billDate, dueDate, due_date, invoice_date, payment_date, sales_date, closeDate, dealWonAt, dealLostAt, interestedDate, reminderDate, ReminderDate, leadWonAt, deletedAt, lastLogin, lastEmailSync, birthday — ALL of them.
+   ALWAYS use: NULLIF(col,'')::timestamptz before ANY comparison or EXTRACT.
+   ✗ NEVER write: col < CURRENT_DATE  or  col > NOW()  without the cast — causes "operator does not exist: text < date" error.
+8. Date TEXT cast — EXACT PATTERN (memorize character by character):
     NULLIF(col,'')::timestamptz
     ✗ NEVER: col::timestamptz
     ✗ NEVER: NULLIF(col,''::timestamptz)   ← casting '' not the result — WRONG
@@ -195,7 +199,21 @@ RULES:
     ✗ sales.closeDate     — sales uses sales_date (TEXT). closeDate is on deals only.
     ✗ invoices.productId  — invoices have no direct product FK column
     ✗ outreaches.leadId   — outreaches use assignedTo or email to link contacts
-16. MULTI-CURRENCY RULE — applies to ALL revenue/total/amount queries (invoices, sales, deals):
+16. SINGLE RECORD LOOKUP — when the query mentions a specific ID, number, or name to fetch details:
+    Signals: "details of", "show me X", "get invoice ELSN/...", "deal named X", "info on SO-..."
+    → Use WHERE + ILIKE, NO GROUP BY, NO SUM, NO aggregate functions.
+    → Select all useful columns for that record.
+    Invoice detail example:
+      SELECT i.invoice_number, i."companyName", i.grand_total, i.currency, i.payment_status,
+             i.invoice_date, i.due_date, i.payment_date, i.subtotal, i.approval_status
+      FROM "invoices" i
+      WHERE i.invoice_number ILIKE '%ELSN/2026/005%' AND NOT i.deleted
+    Deal detail example:
+      SELECT d.name, d.stage, d.grand_total, d.currency, d."closeDate", d."dealWonAt", d.type
+      FROM "deals" d WHERE d.name ILIKE '%deal name%' AND NOT d.deleted
+    ✗ NEVER use SUM/GROUP BY/aggregate when fetching details of a specific record.
+
+17. MULTI-CURRENCY RULE — applies ONLY to aggregate revenue/total/amount queries (NOT single-record lookups):
     ALWAYS select: currency column  +  native amount (NOT *_in_usd columns)
     ALWAYS GROUP BY currency so the system can convert each currency to USD automatically.
     invoices  → SELECT UPPER(COALESCE(i.currency,'USD')) AS currency, COALESCE(SUM(i.grand_total),0) AS amount FROM "invoices" i ... GROUP BY 1 ORDER BY 2 DESC
@@ -205,7 +223,7 @@ RULES:
     invoices native amount column: grand_total  (not grandtotal, not grandtotal_in_usd)
     ✗ NEVER use grandtotal_in_usd / grand_total_in_usd for SUM — use native grand_total + currency.
 
-17. ORDINAL SEARCHES ("first", "1st", "last N", "2nd", "second", "last 5"):
+18. ORDINAL SEARCHES ("first", "1st", "last N", "2nd", "second", "last 5"):
     "first" / "1st" / "oldest"   → ORDER BY "createdAt" ASC  LIMIT 1
     "last"  / "latest" / "recent" → ORDER BY "createdAt" DESC LIMIT 1
     "last N" / "recent N"         → ORDER BY "createdAt" DESC LIMIT N
@@ -213,7 +231,7 @@ RULES:
     ✗ NEVER write WHERE _id = 1 or WHERE _id = '1' — _id is a MongoDB ObjectId TEXT string, never an integer.
     Example: "give me 1st invoice" → SELECT ... FROM "invoices" i WHERE NOT i.deleted ORDER BY i."createdAt" ASC LIMIT 1
 
-18. ENTITY NAME SEARCH — ALWAYS use ILIKE for user-provided names (case-insensitive):
+19. ENTITY NAME SEARCH — ALWAYS use ILIKE for user-provided names (case-insensitive):
     Company name : WHERE c."companyName" ILIKE '%Wiegand LLC%'
     Contact name : WHERE (c."firstName" ILIKE '%ketul%' OR c."lastName" ILIKE '%ketul%')
     User name    : WHERE u.name ILIKE '%kartik%'
@@ -221,7 +239,7 @@ RULES:
     Sales order  : WHERE s.sales_number ILIKE '%SO00080%'
     ✗ NEVER exact-match user-provided names: WHERE u.name = 'ketul' → use ILIKE '%ketul%' instead
 
-19. PRODUCTS — embedded in JSONB on sales/invoices only; deals has NO items column:
+20. PRODUCTS — embedded in JSONB on sales/invoices only; deals has NO items column:
     ✗ NEVER write: d.product, s.product, i.productId, d.items — these DO NOT exist
     ✓ Only sales.items and invoices.items are JSONB line-item arrays
     Top products from sales JSONB items:

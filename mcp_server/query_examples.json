@@ -4087,5 +4087,205 @@
       "users"
     ],
     "saved_at": "2026-05-19T11:45:44.391233"
+  },
+  {
+    "natural_query": "EXTRACT(MONTH FROM d.\"closeDate\") = EXTRACT(MONTH FROM CURRENT_DATE - INTERVAL '1 month') AND EXTRACT(YEAR FROM d.\"closeDate\") = EXTRACT(YEAR FROM CURRENT_DATE - INTERVAL '1 month')",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency \nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \n  AND d.\"closeDate\" IS NOT NULL \n  AND EXTRACT(MONTH FROM NULLIF(d.\"closeDate\",'')::timestamptz) = EXTRACT(MONTH FROM (CURRENT_DATE - INTERVAL '1 month')) \n  AND EXTRACT(YEAR FROM NULLIF(d.\"closeDate\",'')::timestamptz) = EXTRACT(YEAR FROM (CURRENT_DATE - INTERVAL '1 month')) \nORDER BY \n  d.\"createdAt\" DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-19T11:51:05.567232"
+  },
+  {
+    "natural_query": "show deals by user",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COUNT(DISTINCT d._id) AS deal_count, \n  COALESCE(SUM(d.grand_total), 0) AS total_deal_value,\n  UPPER(COALESCE(d.currency, 'USD')) AS currency\nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted \nGROUP BY u._id, u.name, d.currency \nORDER BY total_deal_value DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-19T11:57:02.401365"
+  },
+  {
+    "natural_query": "lost deals of ketul trivedi?",
+    "sql": "SELECT d.name, d.stage, d.grand_total, d.currency, u.name AS owner_name \nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE d.\"dealLostAt\" IS NOT NULL AND u.name ILIKE '%ketul trivedi%' AND NOT d.deleted \nORDER BY d.\"dealLostAt\" DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-19T11:57:34.109952"
+  },
+  {
+    "natural_query": "who have pending task?",
+    "sql": "SELECT u.name AS assignee_name \nFROM \"users\" u \nLEFT JOIN \"createtasks\" t ON t.\"createdBy\" = u._id \nWHERE t.status = 'Pending' AND NOT t.deleted \nORDER BY u.name ASC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-19T11:58:23.610306"
+  },
+  {
+    "natural_query": "who is yash bhide? do he has pending tasks?",
+    "sql": "SELECT u.name, COUNT(t._id) AS pending_task_count \nFROM \"users\" u \nLEFT JOIN \"createtasks\" t ON t.\"createdBy\" = u._id AND t.status != 'Completed' AND t.due_date IS NOT NULL AND NULLIF(t.due_date,'')::timestamptz > NOW() AND NOT t.deleted \nWHERE u.name ILIKE '%yash bhide%' \nGROUP BY u._id, u.name",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-19T11:58:52.406710"
+  },
+  {
+    "natural_query": "who is ketul Trivedi",
+    "sql": "SELECT \"firstName\", \"lastName\", \"jobTitle\", email, \"phoneNumber\" \nFROM \"contacts\" \nWHERE \"firstName\" ILIKE '%ketul%' OR \"lastName\" ILIKE '%trivedi%' \nAND NOT deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-19T12:00:56.319735"
+  },
+  {
+    "natural_query": "Show me the total sales for last month.",
+    "sql": "SELECT \n  UPPER(COALESCE(s.currency,'USD')) AS currency, \n  COALESCE(SUM(s.grand_total),0) AS total_sales\nFROM \n  \"sales\" s \n  LEFT JOIN \"users\" u ON u._id = s.\"salesOwner\"\n  LEFT JOIN \"companies\" c ON c._id = s.company\nWHERE \n  s.status = 'Confirm' \n  AND NOT s.deleted \n  AND EXTRACT(YEAR  FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(YEAR  FROM CURRENT_DATE)\n  AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) - 1\nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "companies",
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:01:16.802384"
+  },
+  {
+    "natural_query": "give me details of ELSN/2025/1",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  d.type, \n  NULLIF(d.\"closeDate\",'')::timestamptz AS close_date,\n  NULLIF(d.\"dealWonAt\",'')::timestamptz AS deal_won_at,\n  NULLIF(d.\"dealLostAt\",'')::timestamptz AS deal_lost_at,\n  c.\"companyName\" AS company_name\nFROM \n  \"deals\" d \n  LEFT JOIN \"companies\" c ON c._id = d.company\nWHERE \n  d.name ILIKE '%ELSN/2025/1%' \n  AND NOT d.deleted \nORDER BY \n  d.\"createdAt\" DESC \nLIMIT 1",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-19T12:01:20.075615"
+  },
+  {
+    "natural_query": "give me sales number?",
+    "sql": "SELECT s.sales_number FROM \"sales\" s WHERE NOT s.deleted",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-19T12:01:47.883757"
+  },
+  {
+    "natural_query": "SO00094 details of this? (referring to sales)",
+    "sql": "SELECT \n  s.sales_number, \n  s.status, \n  s.grand_total, \n  s.currency, \n  s.sales_date, \n  u.name AS sales_owner_name, \n  c.\"companyName\" \nFROM \"sales\" s \nLEFT JOIN \"users\" u ON u._id = s.\"salesOwner\" \nLEFT JOIN \"companies\" c ON c._id = s.company \nWHERE s.sales_number ILIKE '%SO00094%' AND NOT s.deleted",
+    "tables": [
+      "companies",
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:02:08.774134"
+  },
+  {
+    "natural_query": "give me invoice number?",
+    "sql": "SELECT i.invoice_number \nFROM \"invoices\" i \nWHERE NOT i.deleted \nORDER BY i.\"createdAt\" ASC \nLIMIT 1",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T12:02:22.800468"
+  },
+  {
+    "natural_query": "give invoice list with number",
+    "sql": "SELECT i.invoice_number, i.\"companyName\", i.grand_total, i.currency \nFROM \"invoices\" i \nWHERE NOT i.deleted \nORDER BY i.\"createdAt\" DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T12:02:41.841627"
+  },
+  {
+    "natural_query": "ELSN/2026/005 give me details of this? (referring to sales)",
+    "sql": "SELECT \n  s.sales_number, \n  s.status, \n  s.\"salesOwner\", \n  u.name AS owner_name, \n  c.\"companyName\" AS company_name, \n  s.grand_total, \n  s.currency, \n  NULLIF(s.sales_date,'')::timestamptz AS sales_date,\n  s.items\nFROM \n  \"sales\" s \n  LEFT JOIN \"users\" u ON u._id = s.\"salesOwner\"\n  LEFT JOIN \"companies\" c ON c._id = s.company\nWHERE \n  s.sales_number ILIKE '%ELSN/2026/005%' \n  AND NOT s.deleted",
+    "tables": [
+      "companies",
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:03:20.265975"
+  },
+  {
+    "natural_query": "show sales by invoice",
+    "sql": "SELECT \n  i.invoice_number, \n  COALESCE(SUM(i.grand_total), 0) AS invoice_amount,\n  UPPER(COALESCE(i.currency, 'USD')) AS currency\nFROM \n  \"invoices\" i \n  LEFT JOIN \"sales\" s ON s.company = i.company \nWHERE \n  NOT i.deleted \nGROUP BY \n  i.invoice_number, \n  i.currency \nORDER BY \n  invoice_amount DESC",
+    "tables": [
+      "invoices",
+      "sales"
+    ],
+    "saved_at": "2026-05-19T12:03:32.774109"
+  },
+  {
+    "natural_query": "ELSN/2026/005 give me details of this invoice",
+    "sql": "SELECT \n  i.invoice_number, \n  i.\"companyName\", \n  i.grand_total, \n  i.currency, \n  i.payment_status,\n  i.invoice_date, \n  i.due_date, \n  i.payment_date, \n  i.subtotal, \n  i.approval_status\nFROM \n  \"invoices\" i \nWHERE \n  i.invoice_number ILIKE '%ELSN/2026/005%' \n  AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-19T12:07:54.641435"
+  },
+  {
+    "natural_query": "give me yesteradays meeting status? s?",
+    "sql": "SELECT \n  m.title, \n  m.description, \n  m.start, \n  m.end, \n  m.location, \n  u.name AS \"createdBy\"\nFROM \n  \"meetings\" m \n  LEFT JOIN \"users\" u ON u._id = m.\"createdBy\"\nWHERE \n  NULLIF(m.start,'')::timestamptz >= NOW() - INTERVAL '1 day' \n  AND NULLIF(m.start,'')::timestamptz < NOW() \nORDER BY \n  m.start DESC",
+    "tables": [
+      "meetings",
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:10:08.052232"
+  },
+  {
+    "natural_query": "show users by past",
+    "sql": "SELECT u.name, u.email, u.department \nFROM \"users\" u \nORDER BY u.\"createdAt\" DESC",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:10:25.820018"
+  },
+  {
+    "natural_query": "how many meetings have been scheduled so far",
+    "sql": "SELECT COUNT(*) AS meeting_count \nFROM \"meetings\" \nWHERE NULLIF(\"createdAt\",'')::timestamptz <= NOW()",
+    "tables": [
+      "meetings"
+    ],
+    "saved_at": "2026-05-19T12:14:02.074324"
+  },
+  {
+    "natural_query": "how many meetings happened this month",
+    "sql": "SELECT COUNT(*) AS meeting_count \nFROM \"meetings\" m \nWHERE NULLIF(m.start,'')::timestamptz < NOW() \n  AND EXTRACT(MONTH FROM NULLIF(m.start,'')::timestamptz) = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(YEAR FROM NULLIF(m.start,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "meetings"
+    ],
+    "saved_at": "2026-05-19T12:18:28.698610"
+  },
+  {
+    "natural_query": "show me all campaigns and who created them",
+    "sql": "SELECT cam.\"campaignName\", u.name AS creator_name \nFROM \"campaigns\" cam \nLEFT JOIN \"users\" u ON u._id = cam.\"createdBy\"\nORDER BY cam.\"createdAt\" DESC",
+    "tables": [
+      "campaigns",
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:18:33.640187"
+  },
+  {
+    "natural_query": "how many public leads came in this year",
+    "sql": "SELECT COUNT(*) AS lead_count \nFROM \"publicleads\" pl \nWHERE EXTRACT(YEAR FROM NULLIF(pl.\"createdAt\",'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "publicleads"
+    ],
+    "saved_at": "2026-05-19T12:18:35.250063"
+  },
+  {
+    "natural_query": "list all activity logs from last 7 days",
+    "sql": "SELECT \n  al._id, \n  al.action, \n  al.module, \n  al.\"recordId\", \n  al.\"recordName\", \n  al.\"userId\", \n  u.name AS user_name, \n  NULLIF(al.\"createdAt\",'')::timestamptz AS created_at\nFROM \n  \"activitylogs\" al \n  LEFT JOIN \"users\" u ON u._id = al.\"userId\"\nWHERE \n  NULLIF(al.\"createdAt\",'')::timestamptz >= NOW() - INTERVAL '7 days'\nORDER BY \n  created_at DESC",
+    "tables": [
+      "activitylogs",
+      "users"
+    ],
+    "saved_at": "2026-05-19T12:18:36.695221"
+  },
+  {
+    "natural_query": "list all bills that are overdue",
+    "sql": "SELECT b.\"systemBillNo\", b.\"billDate\", b.\"dueDate\", b.status, b.\"netPayableAmount\", v.\"companyName\" \nFROM \"bills\" b \nLEFT JOIN \"vendors\" v ON v._id = b.vendor \nWHERE NULLIF(b.\"dueDate\",'')::timestamptz < NOW() AND b.status != 'Paid'",
+    "tables": [
+      "bills",
+      "vendors"
+    ],
+    "saved_at": "2026-05-19T12:19:38.727183"
   }
 ]
