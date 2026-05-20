@@ -60,8 +60,13 @@ import logging
 import re
 from typing import Dict, List, Optional
 
+import os
+
 from pipeline.db_schema import get_all_crm_tables
 from pipeline.llm import call as llm_call
+
+# Read once at import time; respects runtime .env reload via dotenv
+_PRE_CLASSIFIER_ENABLED = os.getenv("PRE_CLASSIFIER_ENABLED", "true").strip().lower() != "false"
 
 LOGGER = logging.getLogger("sql_chatbot")
 
@@ -349,13 +354,16 @@ def classify(query: str) -> Dict:
         }
 
     # ── Layer 1: pre-classifier (0ms, no LLM) ────────────────────────────────
-    pre = _pre_classify(query)
-    if pre:
-        LOGGER.info(
-            "Classifier [PRE] → %s | %s | query: %.60s",
-            pre["type"], pre["reason"][:60], query,
-        )
-        return pre
+    if _PRE_CLASSIFIER_ENABLED:
+        pre = _pre_classify(query)
+        if pre:
+            LOGGER.info(
+                "Classifier [PRE] → %s | %s | query: %.60s",
+                pre["type"], pre["reason"][:60], query,
+            )
+            return pre
+    else:
+        LOGGER.info("Classifier [PRE] disabled via PRE_CLASSIFIER_ENABLED=false — going straight to LLM")
 
     # ── Layer 2: LLM classifier ───────────────────────────────────────────────
     available_tables: List[str] = []
