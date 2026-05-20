@@ -3901,5 +3901,37 @@
       "deals"
     ],
     "saved_at": "2026-05-18T11:11:19.702019"
+  },
+  {
+    "natural_query": "how many deals are created from last 6 month",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nWHERE NOT d.deleted AND d.\"createdAt\" >= NOW() - INTERVAL '6 months'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T06:16:56.429577"
+  },
+  {
+    "natural_query": "total deals are created from last 6 month",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nWHERE NOT d.deleted AND d.\"createdAt\" >= NOW() - INTERVAL '6 months'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T06:39:09.630948"
+  },
+  {
+    "natural_query": "how many lost deals from last 6 month",
+    "sql": "SELECT COUNT(*) AS lost_deal_count \nFROM \"deals\" d \nWHERE d.\"dealLostAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND d.\"dealLostAt\" >= NOW() - INTERVAL '6 months'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T06:42:38.303476"
+  },
+  {
+    "natural_query": "give me closed lost deals from december 2025 to today",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  d.\"dealLostAt\"\nFROM \n  \"deals\" d \nWHERE \n  d.\"dealLostAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND d.\"dealLostAt\" >= '2025-12-01' \n  AND d.\"dealLostAt\" < CURRENT_DATE + INTERVAL '1 day'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T06:44:30.663358"
   }
 ]

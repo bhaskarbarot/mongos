@@ -72,6 +72,26 @@ _TABLE_KEYWORDS: Dict[str, List[str]] = {
     "notes":            ["outreach note","outreach activity","contact method"],
     "publicleads":      ["public lead","web lead","form lead","inbound","website lead"],
     "meetings":         ["meeting","meetings","calendar","scheduled","call"],
+    # ── New tables ─────────────────────────────────────────────────────────────
+    "technologycategories": ["technology category","tech category","technologycategories"],
+    "status":            ["status list","status names","status types"],
+    "mails":             ["mail","mails","sent mail","inbox mail"],
+    "activityevents":    ["activity event","activityevent","event log","crm event"],
+    "activities":        ["activity type","activity name","activities list"],
+    "notifications":     ["notification","notifications","alert","reminder notification"],
+    "conversations":     ["conversation","conversations","chat log","message thread"],
+    "companynotes":      ["company note","companynotes","note for company"],
+    "contactsnotes":     ["contact note","contactsnotes","note for contact"],
+    "dealsnotes":        ["deal note","dealsnotes","note for deal"],
+    "salesnotes":        ["sales note","salesnotes","note for sale","note for order"],
+    "remotejobnotes":    ["remote job note","remotejobnotes","job note"],
+    "ai_notes":          ["ai note","ai notes","smart note","automated note"],
+    "tasks":             ["task list","other tasks","tasks collection"],
+    "remotejobs":        ["remote job","remotejobs","job","job listing","remote work"],
+    "vendormagiclinks":  ["vendor link","vendor magic","vendor invite","vendormagiclinks"],
+    "outreachactivities":["outreach activity","outreachactivities","outreach event","outreach count"],
+    "deletedcompanies":  ["deleted company","deletedcompanies","archived company","removed company"],
+    "prompts":           ["prompt","prompts","ai prompt","query prompt","llm prompt"],
 }
 
 # Anchor tables: always included when JOINs are likely
@@ -165,8 +185,8 @@ RULES:
 4. JOINs: ALWAYS prefix all columns with alias — d.name NOT name, d.deleted NOT deleted
 5. Soft delete: WHERE NOT t.deleted  — EXCEPT vendors (NO deleted column — omit filter)
 6. outreaches: WHERE NOT "isDeleted"  (isDeleted, not deleted — different column!)
-7. Date TEXT cast: NULLIF(col,'')::timestamptz  NEVER: col::timestamptz
-8. Year from TEXT date: EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)
+7. Date cols are TIMESTAMPTZ — use directly, NO cast needed: d."createdAt" >= NOW() - INTERVAL '6 months'
+8. Year from date: EXTRACT(YEAR FROM d."createdAt") = EXTRACT(YEAR FROM CURRENT_DATE)
 9. targets.year and targets.month are NUMERIC INTEGERS — never cast to timestamptz
 10. NULL-safe numeric: COALESCE(SUM(col),0) | NULLIF(col,'')::numeric
 11. MIXED-CASE COLUMNS need double quotes: s."salesOwner" NOT s.salesOwner (will fail!)

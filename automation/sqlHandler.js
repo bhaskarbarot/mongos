@@ -1,87 +1,131 @@
 /**
- * sqlHandler.js — PostgreSQL upsert / delete helpers for MongoDB→PG sync.
+ * sqlHandler.js — Column-wise PostgreSQL upsert / delete for MongoDB→PG sync.
  *
- * Table schema expected:
+ * Table schema (created automatically):
  *   _id        TEXT PRIMARY KEY   (MongoDB ObjectId as string)
- *   document   JSONB              (full normalised MongoDB document)
- *   updated_at TIMESTAMPTZ        (sync timestamp)
+ *   <field>    TEXT | BOOLEAN | BIGINT | NUMERIC | JSONB  (one col per MongoDB field)
  *
- * ensureTable creates this schema for NEW tables.
- * For EXISTING tables that already have _id as PK (created by older sync tool),
- * it idempotently adds any missing columns without touching existing data.
+ * On every upsert:
+ *   1. Ensure table exists (CREATE TABLE IF NOT EXISTS)
+ *   2. For each field in the document, ADD COLUMN IF NOT EXISTS (auto-schema)
+ *   3. INSERT … ON CONFLICT (_id) DO UPDATE  (upsert all columns)
+ *
+ * On delete:
+ *   DELETE FROM <table> WHERE _id = $1
+ *
+ * On reconcile (polling):
+ *   DELETE FROM <table> WHERE _id <> ALL($1)
  */
+
+"use strict";
 
 const db = require("./postgres");
 
-const ensuredTables = new Set();
+// Caches — avoid repeated DDL round-trips
+const _ensuredTables = new Set();          // tables confirmed to exist
+const _knownCols     = new Map();          // table → Set<colName>
 
-function quoteIdentifier(identifier) {
-  return `"${String(identifier).replace(/"/g, '""')}"`;
+function quoteIdentifier(name) {
+  return `"${String(name).replace(/"/g, '""')}"`;
 }
 
-async function ensureTable(table) {
-  if (ensuredTables.has(table)) return;
-
-  const q = quoteIdentifier(table);
-
-  // 1. Create table with correct schema if it does not exist yet
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS ${q} (
-      _id        TEXT PRIMARY KEY,
-      document   JSONB,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  // 2. Idempotently add required columns for tables that already exist
-  //    with a different schema (older sync tool created them without these).
-  await db.query(
-    `ALTER TABLE ${q} ADD COLUMN IF NOT EXISTS document   JSONB`
-  );
-  await db.query(
-    `ALTER TABLE ${q} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-  );
-
-  ensuredTables.add(table);
+// ── Type inference (JS value → PostgreSQL type) ───────────────────────────────
+function _pgType(value) {
+  if (value === null || value === undefined) return "TEXT";
+  if (typeof value === "boolean")            return "BOOLEAN";
+  if (typeof value === "number")             return Number.isInteger(value) ? "BIGINT" : "NUMERIC";
+  if (typeof value === "string") {
+    const t = value.trimStart();
+    if (t.startsWith("{") || t.startsWith("[")) return "JSONB";
+    return "TEXT";
+  }
+  return "TEXT";
 }
 
+// ── Ensure table + individual columns exist ───────────────────────────────────
+async function ensureTable(table, fields) {
+  const qt = quoteIdentifier(table);
+
+  if (!_ensuredTables.has(table)) {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ${qt} (
+        _id TEXT PRIMARY KEY
+      )
+    `);
+    // Load existing columns into cache
+    const res = await db.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1`,
+      [table]
+    );
+    _knownCols.set(table, new Set(res.rows.map(r => r.column_name)));
+    _ensuredTables.add(table);
+  }
+
+  // Add any new fields as individual columns
+  const known = _knownCols.get(table);
+  for (const [col, val] of Object.entries(fields || {})) {
+    if (known.has(col)) continue;
+    try {
+      await db.query(
+        `ALTER TABLE ${qt} ADD COLUMN IF NOT EXISTS ${quoteIdentifier(col)} ${_pgType(val)}`
+      );
+      known.add(col);
+    } catch (_) {
+      // Concurrent add — safe to ignore
+    }
+  }
+}
+
+// ── Upsert one row ────────────────────────────────────────────────────────────
 async function insertRow(table, data) {
-  await ensureTable(table);
+  const { _id, fields = {} } = data;
+  if (!_id) return;
 
-  const _id        = data._id;
-  const document   = data.document !== undefined ? data.document : null;
-  const updated_at = data.updated_at || new Date();
+  await ensureTable(table, fields);
 
-  if (!_id) return; // skip rows that have no usable primary key
+  const qt        = quoteIdentifier(table);
+  const fieldNames = Object.keys(fields);
+  const allCols   = ["_id", ...fieldNames];
+  const allVals   = [_id, ...fieldNames.map(k => fields[k])];
 
-  const q = quoteIdentifier(table);
+  const colsSql      = allCols.map(quoteIdentifier).join(", ");
+  const placeholders = allCols.map((_, i) => `$${i + 1}`).join(", ");
+  const updateSql    = fieldNames
+    .map(c => `${quoteIdentifier(c)} = EXCLUDED.${quoteIdentifier(c)}`)
+    .join(", ");
+
+  if (!updateSql) {
+    // Only _id — just ensure the row exists
+    await db.query(
+      `INSERT INTO ${qt} (_id) VALUES ($1) ON CONFLICT (_id) DO NOTHING`,
+      [_id]
+    );
+    return;
+  }
 
   try {
     await db.query(
-      `INSERT INTO ${q} (_id, document, updated_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (_id) DO UPDATE
-         SET document   = EXCLUDED.document,
-             updated_at = EXCLUDED.updated_at`,
-      [_id, JSON.stringify(document), updated_at]
+      `INSERT INTO ${qt} (${colsSql})
+       VALUES (${placeholders})
+       ON CONFLICT (_id) DO UPDATE SET ${updateSql}`,
+      allVals
     );
   } catch (err) {
-    // Fallback for tables whose PK is not on _id yet (e.g. counters).
-    // Try UPDATE first; if nothing matched, attempt a plain INSERT.
-    if (
-      err.message &&
-      (err.message.includes("ON CONFLICT") ||
-        err.message.includes("constraint") ||
-        err.message.includes("unique"))
-    ) {
+    if (err.message && (
+      err.message.includes("ON CONFLICT") ||
+      err.message.includes("constraint") ||
+      err.message.includes("unique")
+    )) {
+      const setParts  = fieldNames.map((c, i) => `${quoteIdentifier(c)} = $${i + 2}`).join(", ");
+      const updateVals = [_id, ...fieldNames.map(k => fields[k])];
       const res = await db.query(
-        `UPDATE ${q} SET document = $2, updated_at = $3 WHERE _id = $1`,
-        [_id, JSON.stringify(document), updated_at]
+        `UPDATE ${qt} SET ${setParts} WHERE _id = $1`, updateVals
       );
       if (res.rowCount === 0) {
         await db.query(
-          `INSERT INTO ${q} (_id, document, updated_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-          [_id, JSON.stringify(document), updated_at]
+          `INSERT INTO ${qt} (${colsSql}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
+          allVals
         );
       }
     } else {
@@ -90,31 +134,28 @@ async function insertRow(table, data) {
   }
 }
 
+// ── Delete one row ────────────────────────────────────────────────────────────
 async function deleteRow(table, id) {
   if (!id) return;
-  await ensureTable(table);
-  const q = quoteIdentifier(table);
-  await db.query(`DELETE FROM ${q} WHERE _id = $1`, [id]);
+  const qt = quoteIdentifier(table);
+  await db.query(`CREATE TABLE IF NOT EXISTS ${qt} (_id TEXT PRIMARY KEY)`);
+  await db.query(`DELETE FROM ${qt} WHERE _id = $1`, [id]);
 }
 
+// ── Reconcile (polling): remove rows no longer in MongoDB ─────────────────────
 async function deleteMissingRows(table, validIds) {
-  await ensureTable(table);
-
-  if (!Array.isArray(validIds)) {
-    throw new Error("validIds must be an array");
-  }
-
-  const q = quoteIdentifier(table);
+  if (!Array.isArray(validIds)) throw new Error("validIds must be an array");
+  const qt = quoteIdentifier(table);
+  await db.query(`CREATE TABLE IF NOT EXISTS ${qt} (_id TEXT PRIMARY KEY)`);
 
   if (validIds.length === 0) {
-    await db.query(`DELETE FROM ${q}`);
-    return;
+    await db.query(`DELETE FROM ${qt}`);
+  } else {
+    await db.query(
+      `DELETE FROM ${qt} WHERE _id <> ALL($1::text[])`,
+      [validIds]
+    );
   }
-
-  await db.query(
-    `DELETE FROM ${q} WHERE _id <> ALL($1::text[])`,
-    [validIds]
-  );
 }
 
 module.exports = { insertRow, deleteRow, deleteMissingRows };

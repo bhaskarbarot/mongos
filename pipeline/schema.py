@@ -111,6 +111,29 @@ _ENTITY_ALIASES: Dict[str, str] = {
     "sale":       "sales",
     "order":      "sales",
     "sales order": "sales",
+    # ── New tables ─────────────────────────────────────────────────────────────
+    "notification": "notifications",
+    "alert":        "notifications",
+    "conversation": "conversations",
+    "chat":         "conversations",
+    "mail":         "mails",
+    "activity event": "activityevents",
+    "event":        "activityevents",
+    "company note": "companynotes",
+    "contact note": "contactsnotes",
+    "deal note":    "dealsnotes",
+    "sales note":   "salesnotes",
+    "job note":     "remotejobnotes",
+    "ai note":      "ai_notes",
+    "remote job":   "remotejobs",
+    "job":          "remotejobs",
+    "vendor link":  "vendormagiclinks",
+    "outreach activity": "outreachactivities",
+    "deleted company":   "deletedcompanies",
+    "archived company":  "deletedcompanies",
+    "prompt":       "prompts",
+    "tech category": "technologycategories",
+    "technology category": "technologycategories",
 }
 
 
@@ -186,21 +209,24 @@ class SchemaRegistry:
 
     def display_name_expr(self, table: str, fields: List[str]) -> str:
         """Build a SQL expression for the 'display name' of a record."""
+        def _qcol(f: str) -> str:
+            return f'"{f}"' if any(c.isupper() for c in f) else f
+
         name = self.get(table, "name", fields)
         if name:
-            return f"document->>'{name}'"
+            return _qcol(name)
 
         first = self.get(table, "first_name", fields)
         last  = self.get(table, "last_name", fields)
         if first and last:
-            return (f"TRIM(CONCAT(COALESCE(document->>'{first}',''), ' ',"
-                    f" COALESCE(document->>'{last}','')))")
+            return (f"TRIM(CONCAT(COALESCE({_qcol(first)},''), ' ',"
+                    f" COALESCE({_qcol(last)},'')))")
         if first:
-            return f"document->>'{first}'"
+            return _qcol(first)
 
         ident = self.get(table, "identifier", fields)
         if ident:
-            return f"document->>'{ident}'"
+            return _qcol(ident)
 
         return "_id"  # fallback: PK column
 
@@ -500,36 +526,24 @@ def get_document_fields(agent, table: str) -> List[str]:
     if table in _TABLE_FIELDS_CACHE:
         return _TABLE_FIELDS_CACHE[table]
 
-    # ── 1. JSONB document keys ────────────────────────────────────────────────
+    # Read real column names directly from information_schema
+    _SYSTEM_COLS = frozenset({"_synced_at"})
     fields: List[str] = []
     try:
-        sql = (
-            f'SELECT DISTINCT key FROM "{table}",'
-            f" jsonb_object_keys(document) AS key LIMIT 300"
+        _col_sql = (
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{table}' AND table_schema = 'public' "
+            "ORDER BY ordinal_position"
         )
-        _res   = run_sql(agent, sql)
-        fields = sorted([r[0] for r in _res.rows if r and r[0]])
+        _c_res = run_sql(agent, _col_sql)
+        fields = [
+            r[0] for r in _c_res.rows
+            if r and r[0] and r[0] not in _SYSTEM_COLS
+        ]
+        LOGGER.info("Schema: %s — %d cols from info_schema", table, len(fields))
     except Exception as exc:
-        LOGGER.warning("Schema: JSONB field discovery failed for %s: %s", table, exc)
-
-    # ── 2. information_schema fallback (when document column is empty) ────────
-    _SYSTEM_COLS = frozenset({"document", "updated_at", "_synced_at"})
-    if not fields:
-        try:
-            _col_sql = (
-                "SELECT column_name FROM information_schema.columns "
-                f"WHERE table_name = '{table}' AND table_schema = 'public' "
-                "ORDER BY ordinal_position"
-            )
-            _c_res = run_sql(agent, _col_sql)
-            fields = [
-                r[0] for r in _c_res.rows
-                if r and r[0] and r[0] not in _SYSTEM_COLS
-            ]
-            LOGGER.info("Schema: %s — using info_schema (%d cols)", table, len(fields))
-        except Exception as exc2:
-            LOGGER.warning("Schema: info_schema fallback failed for %s: %s", table, exc2)
-            fields = []
+        LOGGER.warning("Schema: info_schema failed for %s: %s", table, exc)
+        fields = []
 
     # Safe path: write under lock
     with _CACHE_LOCK:
@@ -583,13 +597,13 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                 if not target_name or target_name == table:
                     continue
 
-                # Validate with a sample value (SQL runs outside lock via RLock re-entrancy)
+                # Sample the field directly (individual column, no JSONB)
                 try:
+                    qf = f'"{field}"' if any(c.isupper() for c in field) else field
                     _s_res = run_sql(
                         agent,
-                        f"SELECT document->>'{field}' FROM \"{table}\""
-                        f" WHERE document->>'{field}' IS NOT NULL"
-                        f" AND document->>'{field}' != '' LIMIT 1",
+                        f"SELECT {qf} FROM \"{table}\""
+                        f" WHERE {qf} IS NOT NULL AND {qf}::text != '' LIMIT 1",
                     )
                     val = _s_res.rows[0][0] if _s_res.rows and _s_res.rows[0] else None
                     if not val:
@@ -624,9 +638,9 @@ def schema_links_prompt(links: Dict[str, Dict[str, str]]) -> str:
     lines = ["## Cross-Table Relationships (always use these for JOINs):"]
     for tbl, flds in sorted(links.items()):
         for fld, tgt in sorted(flds.items()):
+            qf = f'"{fld}"' if any(c.isupper() for c in fld) else fld
             lines.append(
-                f"  JOIN: \"{tbl}\" t1 → \"{tgt}\" t2"
-                f"  ON t1.document->>'{fld}' = t2.document->>'_id'"
+                f"  JOIN: \"{tbl}\" t1 → \"{tgt}\" t2  ON t1.{qf} = t2._id"
             )
     return "\n".join(lines)
 
@@ -657,25 +671,26 @@ def build_text2sql_schema(agent) -> str:
         lines = [
             "PostgreSQL CRM database — CRITICAL SQL RULES:",
             "  • Primary key: _id (TEXT) — use _id, NOT id",
-            "  • ALL field access via JSONB: document->>'fieldName'",
-            "  • Numbers: NULLIF(document->>'field','')::numeric",
-            "  • Dates: NULLIF(document->>'field','')::timestamptz",
-            "  • Soft-delete: WHERE COALESCE(document->>'deleted','false')!='true'",
-            "  • For outreaches: WHERE COALESCE(document->>'isDeleted','false')!='true'",
+            "  • ALL fields are individual columns — use directly (NO document JSONB column)",
+            "  • Mixed-case columns need double-quotes: d.\"createdAt\", u.\"isActive\", d.\"dealWonAt\"",
+            "  • Numbers: already NUMERIC — COALESCE(SUM(grand_total_in_usd), 0)",
+            "  • Dates: already TIMESTAMPTZ — use directly: d.\"createdAt\" >= NOW() - INTERVAL '6 months'",
+            "  • NEVER use NULLIF(col,'')::timestamptz — dates are TIMESTAMPTZ not TEXT!",
+            "  • Soft-delete: WHERE NOT deleted   (outreaches: WHERE NOT \"isDeleted\")",
             "  • Table names MUST be in double quotes: FROM \"tableName\"",
             "  • Use ILIKE for case-insensitive text matching",
-            "  • JOIN syntax: LEFT JOIN \"users\" u ON u._id = t.document->>'owner'",
+            "  • JOIN syntax: LEFT JOIN \"users\" u ON u._id = t.owner",
             "",
             "KEY DOMAIN RULES:",
             "  • Revenue = invoices WHERE payment_status='paid', field: grandtotal_in_usd",
             "  • Confirmed sales revenue = sales WHERE status='Confirm', field: grand_total_in_usd",
-            "  • Open deals: document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL",
-            "  • Won deals: document->>'dealWonAt' IS NOT NULL",
+            "  • Open deals: d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted",
+            "  • Won deals: d.\"dealWonAt\" IS NOT NULL AND NOT d.deleted",
             "  • Tasks table name: createtasks (NOT tasks). Status: 'Pending'/'Completed'",
-            "  • createtasks.document->>'Task' = task title (capital T)",
-            "  • createtasks JOIN users: createtasks.document->>'createdBy' = users._id",
-            "  • Targets: targets.document->>'userId' = users._id, field: targetInUSD",
-            "  • Companies lifecycle: document->>'lifecycleStage' = 'Lead'/'Customer'/'Partner'",
+            "  • createtasks.\"Task\" = task title (capital T, double-quoted column)",
+            "  • createtasks JOIN users: createtasks.\"createdBy\" = users._id",
+            "  • Targets: targets.\"userId\" = users._id, field: \"targetInUSD\"",
+            "  • Companies lifecycle: \"lifecycleStage\" = 'Lead'/'Customer'/'Partner'",
             "",
             "TABLES & FIELDS:",
         ]
@@ -695,25 +710,25 @@ def build_text2sql_schema(agent) -> str:
             lines.extend(["", "JOIN RELATIONSHIPS:"])
             for tbl, flds in sorted(links.items()):
                 for fld, tgt in sorted(flds.items()):
+                    qf = f'"{fld}"' if any(c.isupper() for c in fld) else fld
                     lines.append(
-                        f"  \"{tbl}\".document->>'{fld}' = \"{tgt}\".document->>'_id'"
+                        f"  \"{tbl}\".{qf} = \"{tgt}\"._id"
                     )
 
         # CRM domain hints
         lines.extend([
             "",
             "CRM DOMAIN QUICK REFERENCE:",
-            "  • Revenue:  SELECT SUM(NULLIF(document->>'grandtotal_in_usd','')::numeric)",
-            "              FROM \"invoices\" WHERE document->>'payment_status'='paid'",
-            "  • Open deals:  WHERE document->>'dealWonAt' IS NULL",
-            "                 AND document->>'dealLostAt' IS NULL",
-            "  • Won deals:   WHERE document->>'dealWonAt' IS NOT NULL",
-            "  • Targets:     targets table — targetInUSD per userId per month/year",
-            "  • Task title:  createtasks.document->>'Task'  (capital T)",
-            "  • Task JOIN:   createtasks.document->>'createdBy' = users._id",
-            "  • Outreaches:  use isDeleted field (NOT deleted)",
-            "  • Sales owner: sales.document->>'salesOwner' = users._id",
-            "  • Deals owner: deals.document->>'owner' = users._id",
+            "  • Revenue:  SELECT COALESCE(SUM(grandtotal_in_usd), 0)",
+            "              FROM \"invoices\" WHERE payment_status='paid'",
+            "  • Open deals:  WHERE \"dealWonAt\" IS NULL AND \"dealLostAt\" IS NULL AND NOT deleted",
+            "  • Won deals:   WHERE \"dealWonAt\" IS NOT NULL AND NOT deleted",
+            "  • Targets:     targets table — \"targetInUSD\" per \"userId\" per month/year",
+            "  • Task title:  createtasks.\"Task\"  (capital T, double-quoted)",
+            "  • Task JOIN:   createtasks.\"createdBy\" = users._id",
+            "  • Outreaches:  use \"isDeleted\" field (NOT deleted)",
+            "  • Sales owner: sales.\"salesOwner\" = users._id",
+            "  • Deals owner: deals.owner = users._id",
         ])
 
         _TEXT2SQL_SCHEMA_CACHE = "\n".join(lines)
@@ -769,26 +784,25 @@ def build_revenue_coalesce(fields: List[str]) -> str:
         candidates = ["grand_total"]
 
     # Use JSONB document access (document column is now populated from flat cols)
-    parts = [f"NULLIF(document->>'{f}','')::numeric" for f in candidates]
+    # Use direct column access — fields are individual NUMERIC columns
+    parts = [f'COALESCE("{f}", 0)' if any(c.isupper() for c in f) else f"COALESCE({f}, 0)" for f in candidates]
     return "COALESCE(" + ", ".join(parts) + ", 0)"
 
 
 def col(field: str) -> str:
-    """Return the JSONB document access expression for a field.
-
-    Centralised so a future schema change only needs updating here.
-    """
-    return f"document->>'{field}'"
+    """Return the direct column reference for a field (double-quoted if mixed-case)."""
+    return f'"{field}"' if any(c.isupper() for c in field) else field
 
 
 def col_num(field: str) -> str:
-    """Return a numeric JSONB access expression (safe cast)."""
-    return f"NULLIF(document->>'{field}','')::numeric"
+    """Return a safe numeric column expression."""
+    ref = f'"{field}"' if any(c.isupper() for c in field) else field
+    return f"COALESCE({ref}, 0)"
 
 
 def col_ts(field: str) -> str:
-    """Return a timestamptz JSONB access expression (safe cast)."""
-    return f"NULLIF(document->>'{field}','')::timestamptz"
+    """Return a timestamptz column reference (already TIMESTAMPTZ — no cast needed)."""
+    return f'"{field}"' if any(c.isupper() for c in field) else field
 
 
 def resolve_entity_table(

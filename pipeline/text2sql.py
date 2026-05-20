@@ -64,21 +64,20 @@ _CREATE_TABLE_SCHEMA = """-- ═════════════════
 -- SOFT DELETE  : WHERE NOT deleted   (deals, invoices, sales, companies, contacts, createtasks, bills)
 --                outreaches ONLY: WHERE NOT "isDeleted"
 --                vendors: NO deleted column — no soft delete filter needed
--- JOIN KEY     : always use _id flat column
--- ⚠️  JSONB RULE : mixed-case fields MUST use d.document->>'field'
---                 In JOINs ALWAYS prefix with alias: d.document, i.document, etc.
---                 NEVER write document->>'field' without table alias in a JOIN!
+-- JOIN KEY     : always use _id column directly
+-- DIRECT COLS  : ALL fields are individual columns — use them directly (NO document JSONB column)
+--                mixed-case columns need double-quotes: d."createdAt", d."dealWonAt", u."isActive"
 -- NUMERIC COLS : grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal,
 --                "targetInUSD", "netPayableAmount" — already NUMERIC, no cast needed
--- TARGETS COLS : targets.year and targets.month are NUMERIC integers (1-12 / 2025/2026)
---                NEVER cast them to timestamptz. Use: WHERE t.year = 2026 or EXTRACT(YEAR FROM CURRENT_DATE)
--- DATE COLS    : stored as TEXT → always use NULLIF to avoid empty-string errors:
---                NULLIF(col,'')::timestamptz  NOT  col::timestamptz (fails on empty strings!)
---                Month filter : DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE '2025-09-01'
---                Year filter  : EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = 2026
---                This year    : EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)
---                This month   : DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE)
---                Last N months: NULLIF(col,'')::timestamptz >= CURRENT_DATE - INTERVAL '3 months'
+-- TARGETS COLS : targets.year and targets.month are NUMERIC integers — NOT date columns
+--                NEVER cast them to timestamptz. Use: WHERE t.year = 2026
+-- DATE COLS    : stored as TIMESTAMPTZ — use directly, NO NULLIF cast needed:
+--                WHERE d."createdAt" >= NOW() - INTERVAL '6 months'       ← correct
+--                WHERE NULLIF(d."createdAt",'')::timestamptz >= ...        ← WRONG, causes error!
+--                Month filter : DATE_TRUNC('month', d."createdAt") = DATE '2025-09-01'
+--                Year filter  : EXTRACT(YEAR FROM d."createdAt") = 2026
+--                This year    : EXTRACT(YEAR FROM d."createdAt") = EXTRACT(YEAR FROM CURRENT_DATE)
+--                Last N months: d."createdAt" >= NOW() - INTERVAL '6 months'
 
 -- ─── CORE CRM TABLES ────────────────────────────────────────────────────────
 
@@ -95,11 +94,10 @@ CREATE TABLE "deals" (
     grand_total NUMERIC,        -- deal value in base currency
     currency TEXT,
     type TEXT,              -- deal category/type e.g. 'Support','Dedicated','Project'
-    "closeDate" TEXT,       -- expected close date (TEXT → cast ::timestamptz)
-    "dealWonAt" TEXT,       -- NULL=not yet won; NOT NULL=won date
-    "dealLostAt" TEXT,      -- NULL=not yet lost; NOT NULL=lost date
+    "closeDate" TIMESTAMPTZ,       -- expected close date (TEXT → cast ::timestamptz)
+    "dealWonAt" TIMESTAMPTZ,       -- NULL=not yet won; NOT NULL=won date
+    "dealLostAt" TIMESTAMPTZ,      -- NULL=not yet lost; NOT NULL=lost date
     "createdAt" TEXT,
-    document JSONB          -- ALL fields also accessible here
 );
 -- ✓ Open deals:  WHERE d."dealWonAt" IS NULL AND d."dealLostAt" IS NULL AND NOT d.deleted
 -- ✓ Won deals:   WHERE d."dealWonAt" IS NOT NULL AND NOT d.deleted
@@ -118,19 +116,18 @@ CREATE TABLE "invoices" (
     grand_total NUMERIC,    -- base currency amount
     currency TEXT,          -- 'USD','INR','AUD','GBP', etc.
     company TEXT,           -- → companies._id
-    invoice_date TEXT,      -- invoice creation date (TEXT → cast ::timestamptz)
-    due_date TEXT,          -- payment due date (TEXT → cast ::timestamptz)
-    payment_date TEXT,      -- actual payment received date (TEXT → cast ::timestamptz)
+    invoice_date TIMESTAMPTZ,      -- invoice creation date (TEXT → cast ::timestamptz)
+    due_date TIMESTAMPTZ,          -- payment due date (TEXT → cast ::timestamptz)
+    payment_date TIMESTAMPTZ,      -- actual payment received date (TEXT → cast ::timestamptz)
     deleted BOOLEAN,
     "createdBy" TEXT,       -- → users._id
     "companyName" TEXT,     -- company name snapshot (denormalised)
     "invoiceFor" TEXT,      -- 'Elsner Technologies Pvt. Ltd.' etc.
     "payment_mode" TEXT,    -- bank/payment method name
-    document JSONB
 );
 -- ✓ Revenue by period: SUM(grandtotal_in_usd) WHERE payment_status='paid'
---   AND DATE_TRUNC('month', NULLIF(payment_date,'')::timestamptz) = DATE '2025-09-01'
--- ✓ Overdue: WHERE NULLIF(due_date,'')::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')
+--   AND DATE_TRUNC('month', payment_date) = DATE '2025-09-01'
+-- ✓ Overdue: WHERE due_date < NOW() AND payment_status NOT IN ('paid','cancelled')
 -- ✓ By currency: WHERE UPPER(currency) = 'INR'
 -- ✓ By invoice#: WHERE invoice_number ILIKE '%ELSN/2025/1%'
 -- ✓ With company name: LEFT JOIN "companies" c ON c._id = i.company
@@ -144,9 +141,8 @@ CREATE TABLE "sales" (
     grand_total_in_usd NUMERIC,
     grand_total NUMERIC,
     currency TEXT,
-    sales_date TEXT,        -- TEXT → cast ::timestamptz
+    sales_date TIMESTAMPTZ,        -- TEXT → cast ::timestamptz
     deleted BOOLEAN,
-    document JSONB
 );
 -- ✓ Revenue: SUM(grand_total_in_usd) WHERE status='Confirm' AND NOT deleted
 -- ✓ By rep: LEFT JOIN "users" u ON u._id = s."salesOwner"  → use s.grand_total_in_usd
@@ -170,7 +166,6 @@ CREATE TABLE "companies" (
     "createdAt" TEXT,
     "leadWonAt" TEXT,           -- date company became customer
     "inActiveSince" TEXT,
-    document JSONB
 );
 -- ✓ Active customers: WHERE c."lifecycleStage" NOT IN ('Inactive Customer','Dead Customer') AND NOT c.deleted
 -- ✓ Company name: c."companyName"  (flat column, no JSONB needed)
@@ -191,7 +186,6 @@ CREATE TABLE "contacts" (
     deleted BOOLEAN,
     source TEXT,
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Full name: TRIM(CONCAT(COALESCE(c."firstName",''),' ',COALESCE(c."lastName",'')))
 -- ✓ Search by name: WHERE c."firstName" ILIKE '%kartik%' OR c."lastName" ILIKE '%kartik%'
@@ -206,26 +200,24 @@ CREATE TABLE "users" (
     "isAdmin" BOOLEAN,
     "isSuperAdmin" BOOLEAN,
     "createdAt" TEXT,
-    document JSONB
 );
 
 CREATE TABLE "createtasks" (   -- ⚠️ table is 'createtasks' NOT 'tasks'
     _id TEXT PRIMARY KEY,
-    "Task" TEXT,        -- task title (capital T — use flat column or document->>'Task')
+    "Task" TEXT,        -- task title (capital T — double-quote: t."Task")
     status TEXT,        -- 'Pending' | 'Completed' | 'Open'
     priority TEXT,      -- 'Low' | 'Medium' | 'High'
     "createdBy" TEXT,   -- → users._id (task assignee/owner)
-    due_date TEXT,      -- TEXT → cast ::timestamptz
+    due_date TIMESTAMPTZ,      -- TEXT → cast ::timestamptz
     company TEXT,       -- → companies._id
     "companyId" TEXT,   -- same as company
     "dealsId" TEXT,     -- → deals._id (if task linked to a deal)
     "invoiceId" TEXT,   -- → invoices._id
     deleted BOOLEAN,
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Pending: WHERE t.status='Pending' AND NOT t.deleted
--- ✓ Overdue: WHERE NULLIF(t.due_date,'')::timestamptz < NOW() AND t.status!='Completed' AND NOT t.deleted
+-- ✓ Overdue: WHERE t.due_date < NOW() AND t.status!='Completed' AND NOT t.deleted
 -- ✓ By user: LEFT JOIN "users" u ON u._id = t."createdBy"  → use t.status, t."Task"
 
 CREATE TABLE "targets" (
@@ -236,7 +228,6 @@ CREATE TABLE "targets" (
     year NUMERIC,           -- INTEGER e.g. 2026 ← NOT a date column, NO timestamptz cast!
     "teamName" TEXT,        -- e.g. 'Accounts Team'
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ This year targets:  WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)
 -- ✓ This month targets: WHERE t.month = EXTRACT(MONTH FROM CURRENT_DATE) AND t.year = EXTRACT(YEAR FROM CURRENT_DATE)
@@ -245,7 +236,7 @@ CREATE TABLE "targets" (
 --   FROM "targets" t
 --   LEFT JOIN "users" u ON u._id = t."userId"
 --   LEFT JOIN "sales" s ON s."salesOwner" = t."userId"
---     AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year
+--     AND EXTRACT(YEAR FROM s.sales_date) = t.year
 --     AND s.status = 'Confirm' AND NOT s.deleted
 --   WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)
 --   GROUP BY u.name, t."targetInUSD"
@@ -255,14 +246,13 @@ CREATE TABLE "meetings" (
     _id TEXT PRIMARY KEY,
     title TEXT,             -- meeting title e.g. 'Client Call'
     description TEXT,
-    start TEXT,             -- start datetime (TEXT → cast ::timestamptz)
-    "end" TEXT,             -- end datetime
+    start TIMESTAMPTZ,             -- start datetime (TEXT → cast ::timestamptz)
+    "end" TIMESTAMPTZ,             -- end datetime
     location TEXT,
     attendees JSONB,        -- list of attendee objects
     "EventId" TEXT,         -- Google Calendar event ID
     "createdBy" TEXT,       -- → users._id
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Today: WHERE m.start::timestamptz::date = CURRENT_DATE
 -- ✓ Previous: WHERE m.start::timestamptz < NOW() ORDER BY m.start DESC
@@ -284,7 +274,6 @@ CREATE TABLE "outreaches" (
     "assignedTo" TEXT,      -- → users._id
     "isDeleted" BOOLEAN,    -- ⚠️ isDeleted (not deleted!) WHERE NOT "isDeleted"
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Filter: WHERE NOT o."isDeleted"
 -- ✓ Conversion rate: COUNT(*) FILTER (WHERE status='Converted to Deal') / COUNT(*) * 100
@@ -295,7 +284,6 @@ CREATE TABLE "campaigns" (
     "categoryId" TEXT,      -- → categories._id
     "createdBy" TEXT,
     "createdAt" TEXT,
-    document JSONB
 );
 
 -- ─── FINANCE ────────────────────────────────────────────────────────────────
@@ -310,7 +298,6 @@ CREATE TABLE "vendors" (
     country TEXT,
     "createdBy" TEXT,       -- → users._id
     "createdAt" TEXT,
-    document JSONB
     -- ⚠️ NO deleted column — vendors has no soft-delete. Omit WHERE NOT deleted for vendors.
 );
 -- ✓ Count all vendors: SELECT COUNT(*) FROM "vendors"
@@ -322,8 +309,8 @@ CREATE TABLE "bills" (
     vendor TEXT,            -- → vendors._id
     "systemBillNo" TEXT,    -- e.g. 'BILL-14'
     "vendorInvoiceNo" TEXT,
-    "billDate" TEXT,        -- TEXT → cast ::timestamptz
-    "dueDate" TEXT,         -- payment due date
+    "billDate" TIMESTAMPTZ,        -- TEXT → cast ::timestamptz
+    "dueDate" TIMESTAMPTZ,         -- payment due date
     status TEXT,            -- 'Payment Scheduled' | 'Paid' | 'Pending' | 'Draft'
     "netPayableAmount" NUMERIC,
     subtotal NUMERIC,
@@ -331,7 +318,6 @@ CREATE TABLE "bills" (
     "billType" TEXT,        -- 'Service' | 'Product'
     "createdBy" TEXT,       -- → users._id
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Unpaid bills: WHERE b.status NOT IN ('Paid') AND b."dueDate" is set
 -- ✓ By vendor: LEFT JOIN "vendors" v ON v._id = b.vendor
@@ -361,7 +347,6 @@ CREATE TABLE "products" (
     description_long TEXT,
     billing_frequency TEXT,
     "createdAt" TEXT,
-    document JSONB
 );
 
 CREATE TABLE "sources" (
@@ -420,9 +405,8 @@ CREATE TABLE "emails" (
     subject TEXT,
     snippet TEXT,
     body TEXT,
-    date TEXT,              -- TEXT → cast ::timestamptz
+    date TIMESTAMPTZ,              -- TEXT → cast ::timestamptz
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Search emails: WHERE e.subject ILIKE '%keyword%' OR e.snippet ILIKE '%keyword%'
 
@@ -439,7 +423,6 @@ CREATE TABLE "commonnotes" (
     "isPinned" BOOLEAN,
     "isLog" BOOLEAN,
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Notes for company: WHERE cn."companyId" = 'company_id_here'
 -- ✓ Notes for deal: WHERE cn."dealId" = 'deal_id_here'
@@ -453,7 +436,6 @@ CREATE TABLE "activitylogs" (
     "userId" TEXT,          -- → users._id (who performed the action)
     "ipAddress" TEXT,
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Recent activity: ORDER BY "createdAt" DESC LIMIT 20
 -- ✓ By module: WHERE module = 'Deals'
@@ -477,7 +459,6 @@ CREATE TABLE "notes" (
     "reminderDate" TEXT,
     "createdBy" TEXT,       -- → users._id
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Outreach notes: WHERE n."outreachId" = outreach_id
 
@@ -493,7 +474,6 @@ CREATE TABLE "publicleads" (
     "userType" TEXT,
     description TEXT,
     "createdAt" TEXT,
-    document JSONB
 );
 -- ✓ Public leads: list of inbound/web form leads
 
@@ -629,29 +609,25 @@ STRICT OUTPUT RULES:
    ✓  SELECT invoice_number, payment_status, grand_total, currency FROM "invoices"
 
 INVOICE NUMBER LOOKUP — CRITICAL:
-  invoice_number may be in the flat column OR in the document JSONB.
-  Always search BOTH:
+  invoice_number is a direct column. Search with ILIKE:
     WHERE invoice_number ILIKE '%ELSN/2025/1%'
-       OR document->>'invoice_number' ILIKE '%ELSN/2025/1%'
   Use ILIKE (case-insensitive) not = (exact match).
 
 CRITICAL — MIXED-CASE COLUMNS:
   Many columns have mixed case (dealWonAt, companyName, firstName, etc.).
-  ALWAYS use document->>'fieldName' (JSONB) for these — it is case-safe.
-  NEVER use bare column names for mixed-case fields without double-quoting.
-  Examples:
-    ✓ document->>'dealWonAt'     (JSONB — always works)
-    ✓ "dealWonAt"                (quoted flat — also works)
+  ALWAYS double-quote mixed-case column names:
+    ✓ d."dealWonAt"              (double-quoted direct column — correct)
+    ✓ u."isActive"               (double-quoted direct column — correct)
     ✗ dealWonAt                  (unquoted — PostgreSQL lowercases it, FAILS)
 
-CRITICAL — JOIN QUERIES: ALWAYS prefix `document` with table alias:
-  Every table has a `document` JSONB column. In JOINs the column is AMBIGUOUS.
-  ALWAYS write: d.document->>'field'   NOT   document->>'field'
+CRITICAL — JOIN QUERIES: ALWAYS prefix columns with table alias:
+  In JOINs column references are AMBIGUOUS without a table alias prefix.
+  ALWAYS write: d."dealWonAt"  NOT  "dealWonAt"
   Examples:
     ✓ FROM "deals" d LEFT JOIN "users" u ON u._id = d.owner
-      WHERE d.document->>'dealWonAt' IS NOT NULL    ← d. prefix required
-      AND NOT d.deleted                              ← d. prefix required
-    ✗ WHERE document->>'dealWonAt' IS NOT NULL       ← AMBIGUOUS — SQL ERROR
+      WHERE d."dealWonAt" IS NOT NULL    ← d. prefix required
+      AND NOT d.deleted                   ← d. prefix required
+    ✗ WHERE "dealWonAt" IS NOT NULL       ← AMBIGUOUS — SQL ERROR
   Rule: ANY time you use FROM ... JOIN ..., prefix ALL column references with alias.
 
 SOFT DELETE:
@@ -659,33 +635,31 @@ SOFT DELETE:
   outreaches:  WHERE NOT "isDeleted"      (isDeleted is BOOLEAN)
 
 DATE FILTERING — CRITICAL RULES:
-  Date columns are TEXT — ALWAYS use NULLIF to avoid empty-string cast errors:
-    NULLIF(invoice_date, '')::timestamptz       ← correct
-    invoice_date::timestamptz                   ← FAILS on empty strings
+  Date columns are TIMESTAMPTZ — use them DIRECTLY, NO cast needed:
+    WHERE "createdAt" >= NOW() - INTERVAL '6 months'  ← correct
+    NULLIF("createdAt",'')::timestamptz               ← WRONG, causes error!
 
   For TODAY:
-    WHERE NULLIF(due_date,'')::date = CURRENT_DATE
+    WHERE due_date::date = CURRENT_DATE
 
   For a SPECIFIC MONTH (e.g. "December 2025"):
-    WHERE DATE_TRUNC('month', NULLIF(due_date,'')::timestamptz) = DATE '2025-12-01'
-    ✗ NEVER: WHERE due_date::date = '2025-12-01'  ← checks one day only, WRONG
+    WHERE DATE_TRUNC('month', due_date) = DATE '2025-12-01'
 
   For THIS MONTH:
-    WHERE DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE)
+    WHERE DATE_TRUNC('month', col) = DATE_TRUNC('month', CURRENT_DATE)
 
   For LAST MONTH:
-    WHERE DATE_TRUNC('month', NULLIF(col,'')::timestamptz) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+    WHERE DATE_TRUNC('month', col) = DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
 
-  For a YEAR filter on TEXT date columns (e.g. sales_date, payment_date, invoice_date):
-    ✓ EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = 2026
-    ✓ EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)
-    ✗ NEVER: DATE_TRUNC('year', ...) = '2026'::timestamptz  ← casting string year FAILS
+  For a YEAR filter:
+    ✓ EXTRACT(YEAR FROM "createdAt") = 2026
+    ✓ EXTRACT(YEAR FROM "createdAt") = EXTRACT(YEAR FROM CURRENT_DATE)
 
   For LAST N MONTHS:
-    WHERE NULLIF(col,'')::timestamptz >= CURRENT_DATE - INTERVAL '3 months'
+    WHERE "createdAt" >= NOW() - INTERVAL '6 months'
 
   For BETWEEN dates:
-    WHERE NULLIF(col,'')::timestamptz BETWEEN '2025-01-01' AND '2025-12-31'
+    WHERE "createdAt" BETWEEN '2025-01-01' AND '2025-12-31'
 
 TARGETS TABLE — year/month are INTEGER columns, NOT date columns:
   ✓ WHERE t.year = 2026                            ← integer comparison
@@ -701,7 +675,7 @@ TARGETS TABLE — year/month are INTEGER columns, NOT date columns:
   FROM "targets" t
   LEFT JOIN "users" u ON u._id = t."userId"
   LEFT JOIN "sales" s ON s."salesOwner" = t."userId"
-    AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year
+    AND EXTRACT(YEAR FROM s.sales_date) = t.year
     AND s.status = 'Confirm' AND NOT s.deleted
   WHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)
   GROUP BY u.name, t."targetInUSD"
@@ -711,18 +685,18 @@ VENDORS TABLE — NO deleted column:
   ✓ SELECT COUNT(*) FROM "vendors"            (no filter needed)
   ✓ WHERE v.stage = 'Active'                  (use stage for status filter)
 
-NULL HANDLING — always wrap TEXT-to-number casts:
-  NULLIF(document->>'grand_total', '')::numeric   ← safe
-  (document->>'grand_total')::numeric             ← FAILS on NULL/empty rows
+NULL HANDLING — always use COALESCE for aggregations:
+  COALESCE(SUM(grand_total_in_usd), 0)   ← safe
+  COALESCE(grand_total_in_usd, 0)         ← safe for single values
 
 NUMERIC COLUMNS (already NUMERIC — never cast to timestamptz):
   grand_total_in_usd, grandtotal_in_usd, grand_total, subtotal, "targetInUSD",
   "netPayableAmount", targets.year, targets.month
 
-OPEN/WON/LOST DEALS — use JSONB (avoids mixed-case quoting):
-  Open:  document->>'dealWonAt' IS NULL AND document->>'dealLostAt' IS NULL AND NOT deleted
-  Won:   document->>'dealWonAt' IS NOT NULL AND NOT deleted
-  Lost:  document->>'dealLostAt' IS NOT NULL AND NOT deleted
+OPEN/WON/LOST DEALS — use direct quoted columns:
+  Open:  d."dealWonAt" IS NULL AND d."dealLostAt" IS NULL AND NOT d.deleted
+  Won:   d."dealWonAt" IS NOT NULL AND NOT d.deleted
+  Lost:  d."dealLostAt" IS NOT NULL AND NOT d.deleted
 
 SALES TABLE STATUS VALUES — EXACT strings (case-sensitive):
   status = 'Confirm'   ← confirmed/active sales orders
@@ -736,16 +710,16 @@ INVOICE STATUS VALUES:
 
 TASKS TABLE:
   Table name:    "createtasks"   (NOT "tasks")
-  Title column:  document->>'Task'   (capital T — use JSONB)
+  Title column:  t."Task"   (capital T, double-quoted)
   Assignee:      "createdBy" = users._id
 
 SELECT COLUMNS — always include a human-readable name first:
   deals:       d.name, d.stage, d.grand_total_in_usd
   invoices:    i.invoice_number, i.payment_status, i.grandtotal_in_usd
-  companies:   document->>'companyName' (JSONB — mixed case)
-  contacts:    document->>'firstName', document->>'lastName' (JSONB)
+  companies:   c."companyName"  (double-quoted — mixed case)
+  contacts:    c."firstName", c."lastName"  (double-quoted)
   users:       u.name, u.email
-  createtasks: document->>'Task', t.status, t.priority
+  createtasks: t."Task", t.status, t.priority
 
 AGGREGATION — always handle NULLs:
   COALESCE(SUM(grand_total_in_usd), 0) AS total

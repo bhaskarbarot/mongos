@@ -58,12 +58,24 @@ _FK_MAP = {
 
 # ── Tables that have business data (exclude system/utility tables) ─────────────
 _CRM_TABLES = [
+    # ── Core CRM ──────────────────────────────────────────────────────────────
     "deals", "invoices", "sales", "companies", "contacts", "users",
     "createtasks", "targets", "outreaches", "vendors", "bills",
+    # ── Lookup / reference ────────────────────────────────────────────────────
     "departments", "regions", "products", "sources", "technologies",
     "taxes", "categories", "campaigns", "lead_statuses", "lifecycle_stages",
-    "dealstagesettings", "payments", "emails", "commonnotes", "activitylogs",
-    "countryregions", "projecttypes", "notes", "publicleads", "meetings",
+    "dealstagesettings", "payments", "technologycategories", "status",
+    # ── Communication & activity ──────────────────────────────────────────────
+    "emails", "mails", "commonnotes", "activitylogs", "activityevents",
+    "activities", "notifications", "conversations",
+    # ── Notes (per-entity) ────────────────────────────────────────────────────
+    "companynotes", "contactsnotes", "dealsnotes", "salesnotes",
+    "remotejobnotes", "ai_notes", "notes",
+    # ── People / geo / misc ───────────────────────────────────────────────────
+    "countryregions", "projecttypes", "publicleads", "meetings",
+    "tasks", "remotejobs", "vendormagiclinks",
+    # ── Outreach & archive ────────────────────────────────────────────────────
+    "outreachactivities", "deletedcompanies", "prompts",
 ]
 
 # ── Keyword → table relevance map (used for dynamic selection) ────────────────
@@ -108,6 +120,26 @@ _KEYWORDS: Dict[str, List[str]] = {
     "notes":             ["outreach note","outreach activity"],
     "publicleads":       ["public lead","web lead","form lead","inbound","website lead"],
     "meetings":          ["meeting","meetings","calendar","scheduled","call"],
+    # ── New tables ─────────────────────────────────────────────────────────────
+    "technologycategories": ["technology category","tech category","technologycategories"],
+    "status":            ["status","statuses","status list"],
+    "mails":             ["mail","mails","sent mail","inbox mail"],
+    "activityevents":    ["activity event","activityevent","event log","crm event"],
+    "activities":        ["activity type","activity name","activities list"],
+    "notifications":     ["notification","notifications","alert","reminder notification"],
+    "conversations":     ["conversation","conversations","chat log","message thread"],
+    "companynotes":      ["company note","companynotes","note for company"],
+    "contactsnotes":     ["contact note","contactsnotes","note for contact"],
+    "dealsnotes":        ["deal note","dealsnotes","note for deal"],
+    "salesnotes":        ["sales note","salesnotes","note for sale","note for order"],
+    "remotejobnotes":    ["remote job note","remotejobnotes","job note"],
+    "ai_notes":          ["ai note","ai notes","smart note","automated note"],
+    "tasks":             ["task list","other tasks","tasks collection"],
+    "remotejobs":        ["remote job","remotejobs","job","job listing","remote work"],
+    "vendormagiclinks":  ["vendor link","vendor magic","vendor invite","vendormagiclinks"],
+    "outreachactivities":["outreach activity","outreachactivities","outreach event","outreach count"],
+    "deletedcompanies":  ["deleted company","deletedcompanies","archived company","removed company"],
+    "prompts":           ["prompt","prompts","ai prompt","query prompt","llm prompt"],
 }
 
 # ── Columns to always exclude from schema (internal/noisy) ───────────────────
@@ -235,6 +267,14 @@ _ENUM_COLUMNS = {
     "sources":           ["sourceName"],
     "projecttypes":      ["name"],
     "payments":          ["payment_name"],
+    "notifications":     ["type"],
+    "activityevents":    ["ActivityEvent"],
+    "activities":        ["name"],
+    "status":            ["name"],
+    "technologycategories": ["categoryName"],
+    "tasks":             ["status", "priority"],
+    "remotejobs":        ["status"],
+    "deletedcompanies":  ["companyName"],
 }
 
 
@@ -284,7 +324,7 @@ _TABLE_NOTES = {
     "deals": [
         "-- Open: \"dealWonAt\" IS NULL AND \"dealLostAt\" IS NULL AND NOT deleted",
         "-- Won: \"dealWonAt\" IS NOT NULL AND NOT deleted | Lost: \"dealLostAt\" IS NOT NULL",
-        "-- TEXT date cols: NULLIF(col,'')::timestamptz  e.g. NULLIF(\"closeDate\",'')::timestamptz",
+        "-- Date cols are TIMESTAMPTZ — use directly: d.\"createdAt\" >= NOW() - INTERVAL '6 months'",
         "-- FK join companies: LEFT JOIN \"companies\" c ON c._id = d.company  (column='company' NOT 'companyId')",
         "-- ⚠ deals has NO 'items' or 'product' JSONB column — only sales and invoices have items JSONB",
         "-- d.type is a deal category TEXT label (e.g. 'Cross-sell','Upsell','New Business') — NOT a product FK",
@@ -295,18 +335,17 @@ _TABLE_NOTES = {
         "-- Overdue: NULLIF(due_date,'')::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')",
         "-- Year: EXTRACT(YEAR FROM NULLIF(payment_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
         "-- ⚠ FK join companies: LEFT JOIN \"companies\" c ON c._id = i.company  (column='company' NOT 'companyId'!)",
-        "-- ⚠ TEXT date cols (invoice_date, due_date, payment_date): NULLIF(col,'')::timestamptz — NEVER raw cast",
+        "-- Date cols are TIMESTAMPTZ — use directly: i.invoice_date, i.due_date, i.payment_date >= NOW()",
         "-- ⚠ companies table has NO 'currency' column — currency is on invoices (i.currency)",
         "-- ⚠ NO productId column on invoices — products are not directly joinable via invoices",
     ],
     "sales": [
         "-- Revenue: SUM(grand_total) WHERE status='Confirm' AND NOT deleted",
         "-- JOIN users: LEFT JOIN \"users\" u ON u._id = s.\"salesOwner\"",
-        "-- ⚠ CORRECT date EXTRACT: EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz) = t.year",
-        "-- ✗ WRONG:                EXTRACT(YEAR FROM NULLIF(s.sales_date,''))::numeric  (cast INSIDE NULLIF!)",
-        "-- ⚠ NO 'closeDate' column on sales — date col is sales_date (TEXT), cast: NULLIF(sales_date,'')::timestamptz",
+        "-- Date cols are TIMESTAMPTZ — use directly: EXTRACT(YEAR FROM s.sales_date) = t.year",
+        "-- ⚠ NO 'closeDate' column on sales — date col is sales_date (TIMESTAMPTZ)",
         "-- items column is JSONB — line items: jsonb_array_elements(s.items)->>'name' AS product_name",
-        "-- Target join: LEFT JOIN targets t ON t.\"userId\"=s.\"salesOwner\" AND EXTRACT(YEAR FROM NULLIF(s.sales_date,'')::timestamptz)=t.year AND EXTRACT(MONTH FROM NULLIF(s.sales_date,'')::timestamptz)=t.month",
+        "-- Target join: LEFT JOIN targets t ON t.\"userId\"=s.\"salesOwner\" AND EXTRACT(YEAR FROM s.sales_date)=t.year AND EXTRACT(MONTH FROM s.sales_date)=t.month",
     ],
     "targets": [
         "-- ⚠ year and month are NUMERIC INTEGERS — NEVER cast to timestamptz!",
@@ -351,23 +390,57 @@ _TABLE_NOTES = {
 
 # Soft delete info per table (from real DB introspection)
 _SOFT_DELETE = {
-    "deals":            "NOT deleted",
-    "invoices":         "NOT deleted",
-    "sales":            "NOT deleted",
-    "companies":        "NOT deleted",
-    "contacts":         "NOT deleted",
-    "createtasks":      "NOT deleted",
-    "dealstagesettings":"NOT deleted",
-    "outreaches":       'NOT "isDeleted"',
-    "vendors":          None,  # no soft delete
-    "users":            None,
-    "departments":      None,
-    "regions":          None,
-    "products":         None,
-    "targets":          None,
-    "meetings":         None,
-    "campaigns":        None,
-    "bills":            None,
+    "deals":             "NOT deleted",
+    "invoices":          "NOT deleted",
+    "sales":             "NOT deleted",
+    "companies":         "NOT deleted",
+    "contacts":          "NOT deleted",
+    "createtasks":       "NOT deleted",
+    "dealstagesettings": "NOT deleted",
+    "outreaches":        'NOT "isDeleted"',
+    "notifications":     'NOT "isDeleted"',
+    # no soft-delete column on the following
+    "vendors":           None,
+    "users":             None,
+    "departments":       None,
+    "regions":           None,
+    "products":          None,
+    "targets":           None,
+    "meetings":          None,
+    "campaigns":         None,
+    "bills":             None,
+    "technologycategories": None,
+    "status":            None,
+    "mails":             None,
+    "activityevents":    None,
+    "activities":        None,
+    "conversations":     None,
+    "companynotes":      None,
+    "contactsnotes":     None,
+    "dealsnotes":        None,
+    "salesnotes":        None,
+    "remotejobnotes":    None,
+    "ai_notes":          None,
+    "tasks":             None,
+    "remotejobs":        None,
+    "vendormagiclinks":  None,
+    "outreachactivities": None,
+    "deletedcompanies":  None,
+    "prompts":           None,
+    "commonnotes":       None,
+    "activitylogs":      None,
+    "countryregions":    None,
+    "projecttypes":      None,
+    "notes":             None,
+    "publicleads":       None,
+    "emails":            None,
+    "sources":           None,
+    "technologies":      None,
+    "taxes":             None,
+    "categories":        None,
+    "payments":          None,
+    "lead_statuses":     None,
+    "lifecycle_stages":  None,
 }
 
 # Which cols to show for each table (top-priority ones, others trimmed for token budget)
@@ -392,7 +465,27 @@ _PRIORITY_COLS = {
     "vendors":  ["_id","companyName","email","phone","currency","stage","country","createdAt"],
     "bills":    ["_id","vendor","systemBillNo","billDate","dueDate","status",
                  "netPayableAmount","subtotal","gstPercent","billType","createdAt"],
-    "departments":["_id","name","createdAt"],
+    "departments":   ["_id","name","createdAt"],
+    # ── New tables ─────────────────────────────────────────────────────────────
+    "technologycategories": ["_id","categoryName","createdAt"],
+    "status":        ["_id","name"],
+    "mails":         ["_id","subject","from","to","body","date","user","createdAt"],
+    "activityevents":["_id","ActivityEvent","createdBy","createdAt"],
+    "activities":    ["_id","name","createdAt"],
+    "notifications": ["_id","type","receivers","taskId","isDeleted","createdAt"],
+    "conversations": ["_id","createdAt"],
+    "companynotes":  ["_id","note","companyId","createdBy","createdAt"],
+    "contactsnotes": ["_id","note","contactId","createdBy","createdAt"],
+    "dealsnotes":    ["_id","note","dealId","createdBy","createdAt"],
+    "salesnotes":    ["_id","note","salesId","createdBy","createdAt"],
+    "remotejobnotes":["_id","note","jobId","createdBy","createdAt"],
+    "ai_notes":      ["_id","notes","company","createdBy","createdAt"],
+    "tasks":         ["_id","title","status","priority","assignedTo","dueDate","createdAt"],
+    "remotejobs":    ["_id","title","status","company","createdAt"],
+    "vendormagiclinks":["_id","vendor","link","createdAt"],
+    "outreachactivities":["_id","ActivityId","count","createdBy","regionId","createdAt"],
+    "deletedcompanies":  ["_id","companyName","deletedBy","deletionTime"],
+    "prompts":       ["_id","prompt","response","createdAt"],
 }
 
 
@@ -509,8 +602,9 @@ def build_schema_for_query(
         "-- SCHEMA (live from DB) — CRITICAL RULES:\n"
         "-- 1. Always alias tables in JOINs. Prefix ALL cols: d.name NOT name\n"
         "-- 2. Mixed-case columns NEED double quotes: s.\"salesOwner\" NOT s.salesOwner\n"
-        "-- 3. Date TEXT cols: NULLIF(col,'')::timestamptz  Year: EXTRACT(YEAR FROM NULLIF(col,'')::timestamptz)=2026\n"
-        "-- 4. targets.year / targets.month are NUMERIC — never cast to timestamp\n"
+        "-- 3. Date cols are TIMESTAMPTZ — use directly, NO cast: d.\"createdAt\" >= NOW() - INTERVAL '6 months'\n"
+        "-- 4. Year from date: EXTRACT(YEAR FROM d.\"createdAt\") = 2026  (no cast needed)\n"
+        "-- 5. targets.year / targets.month are NUMERIC integers — never cast to timestamp\n"
     )
     table_lines = []
     for tbl in selected:
