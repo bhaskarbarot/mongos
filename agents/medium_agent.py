@@ -192,6 +192,47 @@ def run_sql_with_selfheal(
                 else:
                     heal_hint = f"Fix: {last_error[:200]}"
 
+            elif "aggregate functions are not allowed in where" in err_lower:
+                heal_hint = (
+                    "CRITICAL FIX: You used SUM()/COUNT() inside a WHERE clause — this is illegal in SQL. "
+                    "NEVER put aggregate functions in WHERE. Use one of these patterns instead:\n"
+                    "PATTERN 1 — HAVING (preferred):\n"
+                    "  SELECT u.name FROM \"users\" u\n"
+                    "  JOIN \"targets\" t ON t.\"userId\" = u._id\n"
+                    "  LEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id\n"
+                    "    AND EXTRACT(MONTH FROM s.sales_date) = t.month\n"
+                    "    AND EXTRACT(YEAR FROM s.sales_date) = t.year\n"
+                    "    AND s.status = 'Confirm' AND NOT s.deleted\n"
+                    "  WHERE t.month = 4 AND t.year = 2026\n"
+                    "  GROUP BY u.name, t.\"targetInUSD\"\n"
+                    "  HAVING COALESCE(SUM(s.grand_total_in_usd), 0) >= t.\"targetInUSD\"\n"
+                    "PATTERN 2 — Correlated subquery:\n"
+                    "  WHERE (SELECT COALESCE(SUM(s.grand_total_in_usd),0) FROM \"sales\" s\n"
+                    "         WHERE s.\"salesOwner\"=u._id AND s.status='Confirm'\n"
+                    "         AND NOT s.deleted) >= t.\"targetInUSD\"\n"
+                    "Rewrite the SQL using PATTERN 1 or PATTERN 2."
+                )
+
+            elif "syntax error" in err_lower and "<=" in last_error:
+                heal_hint = (
+                    "SQL syntax error with range comparison. "
+                    "PostgreSQL does NOT support chained comparisons like 'a <= x <= b'. "
+                    "Use: x BETWEEN a AND b  OR  (x >= a AND x <= b). "
+                    "For month range: use t.month IN (2, 3, 4) or t.month BETWEEN 2 AND 4. "
+                    "Rewrite the SQL fixing this syntax."
+                )
+
+            elif "missing from-clause entry" in err_lower:
+                heal_hint = (
+                    "Subquery alias scope error. The outer SELECT cannot use ANY table alias "
+                    "(c., d., u., s., i., t. etc.) that is defined INSIDE the subquery. "
+                    "Fix: remove ALL table-alias prefixes from the outer SELECT and use plain column aliases.\n"
+                    "WRONG: SELECT u.name, cnt FROM (SELECT u.name, COUNT(*) AS cnt ...) sub\n"
+                    "RIGHT: SELECT user_name, cnt FROM (SELECT u.name AS user_name, COUNT(*) AS cnt ...) sub\n"
+                    "WRONG: SELECT c.\"companyName\", deal_count FROM (SELECT c.\"companyName\" ...) ranked\n"
+                    "RIGHT: SELECT company_name, deal_count FROM (SELECT c.\"companyName\" AS company_name ...) ranked"
+                )
+
             elif "ambiguous" in err_lower:
                 heal_hint = (
                     "Column is ambiguous. Prefix every column with its table alias "
@@ -318,7 +359,7 @@ def decompose_node(state: MediumState) -> Dict:
         "INTENT PRESERVATION RULES (never break these):\n"
         "- Keep the user's exact meaning — never substitute one metric for another\n"
         "- 'achieve target' = compare targets.targetInUSD vs SUM(confirmed sales) — NEVER use deals\n"
-        "- 'revenue' = invoices.grandtotal_in_usd WHERE payment_status='paid'\n"
+        "- 'revenue' = invoices.grandtotal_in_usd WHERE payment_status='paid' AND date filter on payment_date (NOT invoice_date)\n"
         "- 'confirmed sales' = sales.grand_total_in_usd WHERE status='Confirm'\n"
         "- 'last month' = the calendar month before today (see date context in schema)\n"
         "- 'last 7 days' = from 7 days ago to today (see date context in schema)\n"
@@ -326,7 +367,7 @@ def decompose_node(state: MediumState) -> Dict:
 
         "CRM TABLE ROUTING (use correct tables):\n"
         "- Target achievement : targets (targetInUSD, userId, month, year) + sales (salesOwner, grand_total_in_usd) + users\n"
-        "- Revenue / income   : invoices (grandtotal_in_usd, payment_status='paid') — NOT deals\n"
+        "- Revenue / income   : invoices (grandtotal_in_usd, payment_status='paid', date on payment_date) — NOT deals\n"
         "- Sales orders       : sales (grand_total_in_usd, status='Confirm', salesOwner)\n"
         "- Won/lost deals     : deals (dealWonAt, dealLostAt, owner, stage)\n"
         "- Pipeline health    : deals (lastActivity, stage, createdAt)\n"
@@ -553,7 +594,7 @@ def _fallback_format(sql_results: List[Dict]) -> str:
             header = " | ".join(str(c) for c in (columns or [f"col{i}" for i in range(len(rows[0]))]))
             rows_str = "\n".join(" | ".join("" if v is None else str(v) for v in r) for r in rows[:20])
             parts.append(f"**{sq}**\n{header}\n{rows_str}")
-    return "\n\n".join(parts) if parts else "No data available."
+    return "\n\n".join(parts) if parts else "No matching records were found for this query in the current data."
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -637,7 +678,7 @@ def run_medium_agent(query: str, classification: Dict[str, Any]) -> Dict[str, An
         LOGGER.error("Medium agent graph error: %s", exc, exc_info=True)
         elapsed = int((time.monotonic() - t_start) * 1000)
         return {
-            "answer":                "I encountered an error analyzing your query. Please try rephrasing.",
+            "answer":                "I wasn't able to complete the analysis for this query. Please try rephrasing or breaking it into a simpler question.",
             "data":                  None,
             "sql_queries":           [],
             "tables_used":           [],

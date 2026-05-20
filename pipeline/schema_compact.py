@@ -184,6 +184,12 @@ RULES:
 3. JOIN key is _id: LEFT JOIN "users" u ON u._id = d.owner
 4. JOINs: ALWAYS prefix all columns with alias — d.name NOT name, d.deleted NOT deleted
 5. Soft delete: WHERE NOT t.deleted  — EXCEPT vendors (NO deleted column — omit filter)
+   JOIN soft delete: ALWAYS add deleted filter ON the JOIN clause too:
+     ✓ LEFT JOIN "deals" d ON d.company = c._id AND NOT d.deleted
+     ✗ NEVER: LEFT JOIN "deals" d ON d.company = c._id  (missing deleted filter = counts deleted rows!)
+     ✓ LEFT JOIN "invoices" i ON i.company = c._id AND NOT i.deleted
+     ✓ LEFT JOIN "sales" s ON s."salesOwner" = u._id AND NOT s.deleted AND s.status='Confirm'
+     ✓ LEFT JOIN "contacts" ct ON ct.company = c._id AND NOT ct.deleted
 6. outreaches: WHERE NOT "isDeleted"  (isDeleted, not deleted — different column!)
 7. Date cols are TIMESTAMPTZ — use directly, NO cast needed: d."createdAt" >= NOW() - INTERVAL '6 months'
 8. Year from date: EXTRACT(YEAR FROM d."createdAt") = EXTRACT(YEAR FROM CURRENT_DATE)
@@ -206,15 +212,38 @@ RULES:
     ✗ sales.closeDate     — sales uses sales_date (TEXT). closeDate is on deals only.
     ✗ invoices.productId  — invoices have no direct product FK column
     ✗ outreaches.leadId   — outreaches use assignedTo or email to link contacts
-16. MULTI-CURRENCY RULE — applies to ALL revenue/total/amount queries (invoices, sales, deals):
-    ALWAYS select: currency column  +  native amount (NOT *_in_usd columns)
-    ALWAYS GROUP BY currency so the system can convert each currency to USD automatically.
-    invoices  → SELECT UPPER(COALESCE(i.currency,'USD')) AS currency, COALESCE(SUM(i.grand_total),0) AS amount FROM "invoices" i ... GROUP BY 1 ORDER BY 2 DESC
-    sales     → SELECT UPPER(COALESCE(s.currency,'USD')) AS currency, COALESCE(SUM(s.grand_total),0) AS amount FROM "sales" s ... GROUP BY 1 ORDER BY 2 DESC
-    deals     → SELECT UPPER(COALESCE(d.currency,'USD')) AS currency, COALESCE(SUM(d.grand_total),0) AS amount FROM "deals" d ... GROUP BY 1 ORDER BY 2 DESC
-    bills     → SELECT 'USD' AS currency, COALESCE(SUM(b."netPayableAmount"),0) AS amount FROM "bills" b ... GROUP BY 1
-    invoices native amount column: grand_total  (not grandtotal, not grandtotal_in_usd)
-    ✗ NEVER use grandtotal_in_usd / grand_total_in_usd for SUM — use native grand_total + currency.
+16. REVENUE / AMOUNT QUERIES — MANDATORY RULES (always apply):
+
+    REVENUE = paid invoices only, dated by when payment was received.
+    TWO mandatory filters for EVERY revenue query on invoices:
+      ✓ payment_status = 'paid'          — unpaid/overdue invoices are NOT revenue
+      ✓ date filter on payment_date      — NOT invoice_date, NOT createdAt
+    ✗ NEVER filter revenue by invoice_date or createdAt — use payment_date always.
+
+    MODE A — "total revenue", "how much revenue", single USD number:
+    ✓ ALWAYS use grandtotal_in_usd — already USD-converted, gives a clean single number.
+    ✗ NEVER SUM(grand_total) for a total — it mixes INR+USD+GBP into a meaningless number.
+
+    Canonical revenue query (copy this pattern exactly):
+    SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd
+    FROM "invoices" i
+    WHERE NOT i.deleted
+      AND i.payment_status = 'paid'
+      AND EXTRACT(YEAR FROM i.payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+
+    For a date range: AND i.payment_date >= '2026-01-01' AND i.payment_date < '2026-04-01'
+    For last N months: AND i.payment_date >= NOW() - INTERVAL 'N months'
+
+    MODE B — "revenue by currency", user explicitly asks per-currency breakdown:
+    ✓ THEN use: SELECT UPPER(COALESCE(i.currency,'USD')) AS currency, COALESCE(SUM(i.grand_total),0) AS amount
+    ✓ Still keep: AND i.payment_status = 'paid'  AND date filter on payment_date
+    ✓ GROUP BY currency — to separate each currency bucket.
+
+    Column names (exact spelling — double-check before writing):
+    invoices  → grandtotal_in_usd  (no underscore: grandtotal_in_usd, NOT grand_total_in_usd)
+    sales     → grand_total_in_usd (with underscore: grand_total_in_usd)
+    deals     → grand_total_in_usd (with underscore: grand_total_in_usd)
+    invoices native (MODE B only) → grand_total
 
 17. ORDINAL SEARCHES ("first", "1st", "last N", "2nd", "second", "last 5"):
     "first" / "1st" / "oldest"   → ORDER BY "createdAt" ASC  LIMIT 1
@@ -243,4 +272,94 @@ RULES:
       SELECT d.type AS deal_type, COUNT(*) AS deal_count, COALESCE(SUM(d.grand_total),0) AS total_value,
              ROUND(100.0*SUM(CASE WHEN d."dealWonAt" IS NOT NULL THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0),1) AS win_rate_pct
       FROM "deals" d WHERE NOT d.deleted GROUP BY d.type ORDER BY total_value DESC
-    Products standalone list: SELECT name, unit_cost, currency FROM "products" WHERE "isActive"=true"""
+    Products standalone list: SELECT name, unit_cost, currency FROM "products" WHERE "isActive"=true
+
+20. LEAST / LOWEST / LESS / LOW / MINIMUM and HIGHEST / MOST / HIGH / HIGHER / MAXIMUM — GROUP QUERIES:
+    These words mean: find ALL entities that share the minimum OR maximum value in a group.
+    NEVER return just 1 row with LIMIT 1 — that gives wrong results.
+    NEVER use ORDER BY + LIMIT — that only returns 1 entity, not ALL tied entities.
+
+    ✓ CORRECT pattern — use RANK() window function to get ALL entities with min/max:
+
+    "companies with LEAST/LOWEST/LESS/LOW/MINIMUM deals":
+    SELECT company_name, deal_count
+    FROM (
+      SELECT c."companyName" AS company_name, COUNT(d._id) AS deal_count,
+        RANK() OVER (ORDER BY COUNT(d._id) ASC) AS rnk
+      FROM "companies" c
+      LEFT JOIN "deals" d ON d.company = c._id AND NOT d.deleted
+      WHERE NOT c.deleted
+      GROUP BY c._id, c."companyName"
+    ) ranked
+    WHERE rnk = 1
+    ORDER BY company_name;
+    -- CRITICAL: outer SELECT uses plain alias 'company_name', NOT 'c."companyName"'
+    -- Table aliases (c., u., d., s.) are ONLY valid inside the subquery — NEVER in outer SELECT!
+
+    "companies with HIGHEST/MOST/HIGH/HIGHER/MAXIMUM deals":
+    SELECT company_name, deal_count
+    FROM (
+      SELECT c."companyName" AS company_name, COUNT(d._id) AS deal_count,
+        RANK() OVER (ORDER BY COUNT(d._id) DESC) AS rnk
+      FROM "companies" c
+      LEFT JOIN "deals" d ON d.company = c._id AND NOT d.deleted
+      WHERE NOT c.deleted
+      GROUP BY c._id, c."companyName"
+    ) ranked
+    WHERE rnk = 1
+    ORDER BY company_name;
+    -- CRITICAL: outer SELECT uses plain alias 'company_name', NOT 'c."companyName"'
+
+    -- For USERS with least/highest invoices/sales/deals — same RANK pattern:
+    SELECT user_name, item_count
+    FROM (
+      SELECT u.name AS user_name, COUNT(i._id) AS item_count,
+        RANK() OVER (ORDER BY COUNT(i._id) ASC) AS rnk
+      FROM "users" u
+      LEFT JOIN "invoices" i ON i."createdBy" = u._id AND NOT i.deleted
+      WHERE u."isActive" = true
+      GROUP BY u._id, u.name
+    ) ranked
+    WHERE rnk = 1 ORDER BY user_name;
+
+    Same pattern for: users with least/highest sales, reps with lowest/highest revenue, etc.
+    Key rule: ORDER BY ASC + RANK WHERE rnk=1 for LEAST/LOWEST/LESS/LOW/MINIMUM
+              ORDER BY DESC + RANK WHERE rnk=1 for HIGHEST/MOST/HIGH/HIGHER/MAXIMUM
+
+    ✗ WRONG: SELECT "companyName" ... ORDER BY deal_count ASC LIMIT 1  (only 1 row, misses ties)
+    ✓ RIGHT:  Use RANK() pattern above to get ALL companies with the minimum count
+
+21. AGGREGATE FILTER RULE — CRITICAL:
+    ✗ NEVER put SUM()/COUNT()/AVG() inside a WHERE clause — PostgreSQL will error.
+    ✓ Use HAVING after GROUP BY for aggregate comparisons.
+    ✓ OR use a correlated subquery in WHERE.
+
+    TARGET vs ACHIEVED pattern (who achieved / who did not achieve targets):
+    -- Who ACHIEVED (HAVING pattern):
+    SELECT u.name
+    FROM "users" u
+    JOIN "targets" t ON t."userId" = u._id
+    LEFT JOIN "sales" s ON s."salesOwner" = u._id
+      AND EXTRACT(MONTH FROM s.sales_date) = t.month
+      AND EXTRACT(YEAR  FROM s.sales_date) = t.year
+      AND s.status = 'Confirm' AND NOT s.deleted
+    WHERE t.month = 4 AND t.year = 2026
+    GROUP BY u.name, t."targetInUSD"
+    HAVING COALESCE(SUM(s.grand_total_in_usd), 0) >= t."targetInUSD"
+
+    -- Who DID NOT ACHIEVE (HAVING pattern):
+    SELECT u.name
+    FROM "users" u
+    JOIN "targets" t ON t."userId" = u._id
+    LEFT JOIN "sales" s ON s."salesOwner" = u._id
+      AND EXTRACT(MONTH FROM s.sales_date) = t.month
+      AND EXTRACT(YEAR  FROM s.sales_date) = t.year
+      AND s.status = 'Confirm' AND NOT s.deleted
+    WHERE t.month = 4 AND t.year = 2026
+    GROUP BY u.name, t."targetInUSD"
+    HAVING COALESCE(SUM(s.grand_total_in_usd), 0) < t."targetInUSD"
+
+    -- For LAST N MONTHS range — use IN list (never chained <=):
+    ✗ WRONG: WHERE EXTRACT(MONTH FROM CURRENT_DATE) - 2 <= t.month <= EXTRACT(MONTH FROM CURRENT_DATE)
+    ✓ CORRECT: WHERE t.month IN (2, 3, 4) AND t.year = 2026
+    ✓ CORRECT: WHERE t.month BETWEEN 2 AND 4 AND t.year = 2026"""

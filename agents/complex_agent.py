@@ -177,12 +177,12 @@ def complex_decompose_node(state: ComplexState) -> Dict:
         "- 'today' = TODAY's date from context; 'last month' = LAST MONTH from context\n"
         "- 'last 7 days' = 7 days ago to today from context\n"
         "- 'achieve target' = targets.targetInUSD vs SUM(sales.grand_total_in_usd) — NEVER deals\n"
-        "- 'revenue' = invoices.grandtotal_in_usd WHERE payment_status='paid'\n"
+        "- 'revenue' = invoices.grandtotal_in_usd WHERE payment_status='paid' AND date on payment_date (NOT invoice_date)\n"
         "- 'which rep' = JOIN users, GROUP BY u.name, ORDER BY metric DESC\n\n"
 
         "CRM TABLE ROUTING:\n"
         "- Target achievement : targets + sales + users\n"
-        "- Revenue            : invoices (payment_status='paid')\n"
+        "- Revenue            : invoices (grandtotal_in_usd, payment_status='paid', date on payment_date)\n"
         "- Sales performance  : sales (status='Confirm') + users\n"
         "- Deal pipeline      : deals (stage, dealWonAt, dealLostAt)\n"
         "- Tasks today/overdue: createtasks (due_date, status)\n"
@@ -650,7 +650,7 @@ def run_complex_agent(query: str, classification: Dict[str, Any]) -> Dict[str, A
         LOGGER.error("Complex agent graph error: %s", exc, exc_info=True)
         elapsed = int((time.monotonic() - t_start) * 1000)
         return {
-            "answer":                "I encountered an error building your report. Please try a simpler query.",
+            "answer":                "I wasn't able to generate this report right now. Please try rephrasing your request or break it into smaller questions.",
             "data":                  None,
             "sql_queries":           [],
             "tables_used":           [],

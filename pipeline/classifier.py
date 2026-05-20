@@ -196,6 +196,10 @@ Q1: Does the user want a COMPREHENSIVE REPORT covering multiple business areas?
 
 Q2: Does this need a RATIO, COMPARISON, or RISK ANALYSIS across 2+ tables?
   YES → MEDIUM (win rate, month vs month, rep ranking, stuck deals, overdue by company, targets vs actual)
+  ALWAYS MEDIUM — these can NEVER be answered by 1 SQL:
+    • "who achieved targets" / "who hit targets" / "who met targets"
+    • "who didn't achieve targets" / "who missed targets" / "who failed targets"
+    • Any "target" query that compares target amount vs actual sales → needs targets + sales + users
 
 Q3: Can ONE SQL query answer this?
   YES → SIMPLE (count, list, filter, single metric, lookup, basic date range)
@@ -219,6 +223,8 @@ MEDIUM — 2-3 SQL queries run in parallel, calculations across tables
   ✓ Cross-entity risk: "companies with overdue invoices" (which companies? = 2 SQL)
   ✓ Cross-entity risk: "customers no business in 3 months" (2-3 SQL with conditions)
   ✓ Rep ranking: "which rep closed most deals" (deals + users, ranked)
+  ✓ Target achievement: "who achieved targets", "who didn't achieve targets",
+                         "who hit/missed/failed targets" — ALWAYS MEDIUM (needs targets+sales+users)
   ✓ Target vs actual: "target vs achieved" (targets + sales + users)
   ✓ Funnel: "funnel performance by stage" (multi-stage counts)
   ✗ Cannot do: full dashboards, trend 3+ periods, full leaderboard all metrics
@@ -235,6 +241,10 @@ COMPLEX — 4-8 SQL queries, synthesis engine, multi-section reports
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CRITICAL BOUNDARIES (common mistakes to avoid):
+
+"who achieved targets" = MEDIUM (needs targets table + sales table comparison — NEVER SIMPLE)
+"who didn't achieve targets" = MEDIUM (same — needs targets + sales join — NEVER SIMPLE)
+"who hit/missed/failed targets" = MEDIUM (always cross-table: targets vs sales)
 
 "overdue invoices" = SIMPLE (filter 1 table)
 "companies WITH overdue invoices" = MEDIUM (which companies? cross-table risk)

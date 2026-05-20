@@ -240,6 +240,19 @@ def _generate_execute_selfheal(
                 else:
                     heal_hint = f"Fix this error: {last_error[:200]}"
 
+            elif "missing from-clause entry" in last_error.lower():
+                heal_hint = (
+                    "Subquery alias scope error. The outer SELECT cannot use ANY table alias "
+                    "(c., d., u., s., i., t. etc.) that is defined INSIDE the subquery. "
+                    "The outer SELECT must ONLY use the column aliases defined in the subquery.\n"
+                    "WRONG: SELECT u.name, cnt FROM (SELECT u.name, COUNT(*) AS cnt ...) sub\n"
+                    "RIGHT: SELECT user_name, cnt FROM (SELECT u.name AS user_name, COUNT(*) AS cnt ...) sub\n"
+                    "WRONG: SELECT c.\"companyName\", deal_count FROM (SELECT c.\"companyName\" ...) ranked\n"
+                    "RIGHT: SELECT company_name, deal_count FROM (SELECT c.\"companyName\" AS company_name ...) ranked\n"
+                    "Fix: remove ALL table-alias prefixes (u., c., d., s.) from the OUTER SELECT "
+                    "and use plain column aliases instead."
+                )
+
             elif "ambiguous" in last_error.lower():
                 heal_hint = (
                     "Column reference is ambiguous. Add a table alias prefix to every "
@@ -477,9 +490,10 @@ def run_simple_agent(query: str, classification: Dict) -> Dict[str, Any]:
             result_data["attempts"], result_data["error"],
         )
         answer = (
-            "I wasn't able to retrieve data for this query after several attempts. "
-            f"Last error: {result_data['error'] or 'unknown'}. "
-            "Please try rephrasing your question."
+            "I wasn't able to find an answer for this query. "
+            "This might be because the data doesn't exist for the specified period, "
+            "or this question requires a more detailed analysis. "
+            "Please try rephrasing your question or ask it in a simpler way."
         )
         return {
             "answer":                 answer,
