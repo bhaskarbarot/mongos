@@ -3933,5 +3933,299 @@
       "deals"
     ],
     "saved_at": "2026-05-20T06:44:30.663358"
+  },
+  {
+    "natural_query": "how many invoices are ?",
+    "sql": "SELECT COUNT(*) AS invoice_count FROM \"invoices\" WHERE NOT deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T07:18:38.935880"
+  },
+  {
+    "natural_query": "give me list of invoices",
+    "sql": "SELECT \n  i._id,\n  i.invoice_number,\n  i.payment_status,\n  i.grand_total,\n  i.currency,\n  c.\"companyName\",\n  i.invoice_date,\n  i.due_date,\n  i.payment_date,\n  u.name AS \"createdBy\"\nFROM \n  \"invoices\" i \n  LEFT JOIN \"companies\" c ON c._id = i.company \n  LEFT JOIN \"users\" u ON u._id = i.\"createdBy\"\nWHERE \n  NOT i.deleted \nORDER BY \n  i.\"createdAt\" DESC",
+    "tables": [
+      "companies",
+      "invoices",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:18:56.276365"
+  },
+  {
+    "natural_query": "which company associate with this invoice number ELSN/2026/062 ? (referring to invoices)",
+    "sql": "SELECT c.\"companyName\" \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE i.invoice_number = 'ELSN/2026/062' AND NOT i.deleted",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T07:19:43.527374"
+  },
+  {
+    "natural_query": "ELSN/2026/008 details ?",
+    "sql": "SELECT i.invoice_number, i.grand_total, i.currency, c.\"companyName\", u.name AS created_by \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nLEFT JOIN \"users\" u ON u._id = i.\"createdBy\" \nWHERE i.invoice_number ILIKE '%ELSN/2026/008%' AND NOT i.deleted",
+    "tables": [
+      "companies",
+      "invoices",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:20:30.251752"
+  },
+  {
+    "natural_query": "invoice with \u20b91.07 transaction(equivalent to $0.01 USD at current exchange rates).",
+    "sql": "SELECT i.invoice_number, i.grand_total, i.currency \nFROM \"invoices\" i \nWHERE i.grand_total = 1.07 AND i.currency = 'INR' \nORDER BY i.\"createdAt\" DESC",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T07:21:42.902937"
+  },
+  {
+    "natural_query": "give me deals created in last quarter? (referring to invoices)",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  d.\"createdAt\"\nFROM \n  \"deals\" d \nWHERE \n  NOT d.deleted \n  AND d.\"createdAt\" >= NOW() - INTERVAL '3 months' \nORDER BY \n  d.\"createdAt\" DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T07:22:32.464109"
+  },
+  {
+    "natural_query": "give me closed won deals ?",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  d.\"closeDate\", \n  d.\"dealWonAt\"\nFROM \n  \"deals\" d\nWHERE \n  d.\"dealWonAt\" IS NOT NULL \n  AND NOT d.deleted \nORDER BY \n  d.\"dealWonAt\" DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T07:24:10.404405"
+  },
+  {
+    "natural_query": "give me closed won deals ? with total?",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.type, \n  UPPER(COALESCE(d.currency, 'USD')) AS currency, \n  COALESCE(d.grand_total, 0) AS total \nFROM \n  \"deals\" d \nWHERE \n  d.\"dealWonAt\" IS NOT NULL \n  AND NOT d.deleted \nORDER BY \n  d.\"createdAt\" DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T07:25:06.861124"
+  },
+  {
+    "natural_query": "give me name of total closed won deals?",
+    "sql": "SELECT \n  COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END), 0) AS total_won_deals,\n  COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN d.grand_total ELSE 0 END), 0) AS total_revenue,\n  d.name \nFROM \"deals\" d \nWHERE NOT d.deleted \nGROUP BY d.name \nHAVING SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END) > 0 \nORDER BY total_revenue DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T07:25:58.686398"
+  },
+  {
+    "natural_query": "count of closed won deals of 2026?",
+    "sql": "SELECT COUNT(*) AS closed_won_deals \nFROM \"deals\" d \nWHERE d.\"dealWonAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND EXTRACT(YEAR FROM d.\"dealWonAt\") = 2026",
+    "tables": [
+      "d",
+      "deals"
+    ],
+    "saved_at": "2026-05-20T07:26:52.618182"
+  },
+  {
+    "natural_query": "count of closed won deals last quarter? (referring to deals)",
+    "sql": "SELECT COUNT(*) AS closed_won_count \nFROM \"deals\" d \nWHERE d.\"dealWonAt\" IS NOT NULL \n  AND NOT d.deleted \n  AND EXTRACT(YEAR FROM d.\"dealWonAt\") = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND EXTRACT(QUARTER FROM d.\"dealWonAt\") = EXTRACT(QUARTER FROM CURRENT_DATE) - 1",
+    "tables": [
+      "d",
+      "deals"
+    ],
+    "saved_at": "2026-05-20T07:27:36.467375"
+  },
+  {
+    "natural_query": "ketul trivedi task status?",
+    "sql": "SELECT ct.status \nFROM \"createtasks\" ct \nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\" \nWHERE u.name ILIKE '%ketul trivedi%' \nAND NOT ct.deleted \nORDER BY ct.\"createdAt\" DESC \nLIMIT 1",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:28:31.417351"
+  },
+  {
+    "natural_query": "give me all task status of ketul trived?",
+    "sql": "SELECT ct.status \nFROM \"createtasks\" ct \nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\" \nWHERE u.name ILIKE '%ketul%' AND NOT ct.deleted",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:29:02.546546"
+  },
+  {
+    "natural_query": "what task are completed by ketul?",
+    "sql": "SELECT ct.\"Task\", ct.status, ct.priority, ct.due_date \nFROM \"createtasks\" ct \nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\" \nWHERE u.name ILIKE '%ketul%' AND ct.status = 'Completed' AND NOT ct.deleted",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:29:35.432916"
+  },
+  {
+    "natural_query": "show createtasks by tasks",
+    "sql": "SELECT \n  t.\"Task\", \n  t.status, \n  t.priority, \n  t.due_date, \n  u.name AS \"createdBy\", \n  c.\"companyName\" AS company\nFROM \n  \"createtasks\" t \n  LEFT JOIN \"users\" u ON u._id = t.\"createdBy\"\n  LEFT JOIN \"companies\" c ON c._id = t.\"companyId\"\nWHERE \n  NOT t.deleted \n  AND t.status IN ('Completed', 'Pending') \nORDER BY \n  t.\"createdAt\" DESC",
+    "tables": [
+      "companies",
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:30:29.736894"
+  },
+  {
+    "natural_query": "give me all the tasks of ketul ?",
+    "sql": "SELECT ct.\"Task\", ct.status, ct.priority, ct.due_date, u.name AS created_by \nFROM \"createtasks\" ct \nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\" \nWHERE u.name ILIKE '%ketul%' AND NOT ct.deleted \nORDER BY ct.\"createdAt\" DESC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:31:48.038295"
+  },
+  {
+    "natural_query": "give me completed task of ketul?",
+    "sql": "SELECT ct.\"Task\", ct.status, ct.priority, ct.due_date, u.name AS created_by \nFROM \"createtasks\" ct \nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\" \nWHERE ct.status = 'Completed' AND NOT ct.deleted AND u.name ILIKE '%ketul%' ORDER BY ct.\"createdAt\" DESC",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:32:28.153903"
+  },
+  {
+    "natural_query": "give me all completed tasks?",
+    "sql": "SELECT ct.\"Task\", ct.status, ct.priority, ct.due_date, u.name AS created_by \nFROM \"createtasks\" ct \nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\" \nWHERE ct.status = 'Completed' AND NOT ct.deleted",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:32:46.756047"
+  },
+  {
+    "natural_query": "how many outreaches so far?",
+    "sql": "SELECT COUNT(*) AS outreach_count FROM \"outreaches\" WHERE NOT \"isDeleted\"",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-20T07:33:22.858414"
+  },
+  {
+    "natural_query": "give the list of it? (referring to targets)",
+    "sql": "SELECT t._id, t.\"userId\", t.month, t.year, t.\"targetInUSD\", t.\"teamName\", t.\"createdAt\" \nFROM \"targets\" t \nORDER BY t.\"createdAt\" DESC",
+    "tables": [
+      "targets"
+    ],
+    "saved_at": "2026-05-20T07:33:42.919153"
+  },
+  {
+    "natural_query": "give the list of outreaches?",
+    "sql": "SELECT \n  o._id, \n  o.name, \n  o.email, \n  o.status, \n  o.\"leadStatus\", \n  o.priority, \n  o.\"createdAt\"\nFROM \n  \"outreaches\" o \nWHERE \n  NOT o.\"isDeleted\" \nORDER BY \n  o.\"createdAt\" DESC",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-20T07:34:42.062590"
+  },
+  {
+    "natural_query": "Craig Mulcahy did we got the deal with him?",
+    "sql": "SELECT d.name, d.stage, d.\"dealWonAt\", d.\"dealLostAt\" \nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE u.name ILIKE '%Craig Mulcahy%' AND NOT d.deleted \nORDER BY d.\"createdAt\" DESC \nLIMIT 1",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:35:44.151571"
+  },
+  {
+    "natural_query": "how many of the outreaches are ccontacted?",
+    "sql": "SELECT COUNT(*) AS contacted_outreaches FROM \"outreaches\" WHERE NOT \"isDeleted\" AND status = 'Contacted'",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-20T07:36:42.824787"
+  },
+  {
+    "natural_query": "how many of the outreaches are not contacted?",
+    "sql": "SELECT COUNT(*) AS outreaches_not_contacted \nFROM \"outreaches\" o \nWHERE NOT o.\"isDeleted\" AND o.status = 'Not Contacted'",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-20T07:38:05.742143"
+  },
+  {
+    "natural_query": "give me all the outreaches count who dont have the status as contacted?",
+    "sql": "SELECT COUNT(*) AS outreaches_count \nFROM \"outreaches\" o \nWHERE NOT o.\"isDeleted\" AND o.status != 'Contacted'",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-20T07:39:15.023173"
+  },
+  {
+    "natural_query": "who is rajsu?",
+    "sql": "SELECT name, email FROM \"users\" WHERE name ILIKE '%rajsu%' AND \"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:39:38.184458"
+  },
+  {
+    "natural_query": "who is ketul?",
+    "sql": "SELECT name, email, department FROM \"users\" WHERE name ILIKE '%ketul%' AND \"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:40:48.197684"
+  },
+  {
+    "natural_query": "demo@weekmate.com whso gmail?",
+    "sql": "SELECT u.name, u.email \nFROM \"users\" u \nWHERE u.email ILIKE '%@gmail.com%' OR u.email ILIKE '%@weekmate.com%' \n  AND u.email ILIKE '%demo%' \n  AND u.\"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:42:30.621701"
+  },
+  {
+    "natural_query": "details of kunal",
+    "sql": "SELECT _id, name, email, department, \"isActive\", \"isAdmin\", \"createdAt\" \nFROM \"users\" \nWHERE name ILIKE '%kunal%' AND \"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-20T07:44:17.958001"
+  },
+  {
+    "natural_query": "hold par ketli deals padi chhe?",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nWHERE d.type = 'Support' AND \n      d.stage = 'On Hold' AND \n      NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T08:41:54.344851"
+  },
+  {
+    "natural_query": "give me all deals with status?",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency \nFROM \n  \"deals\" d \n  LEFT JOIN \"status\" s ON s._id = d.stage \nWHERE \n  NOT d.deleted \nORDER BY \n  d.\"createdAt\" DESC",
+    "tables": [
+      "deals",
+      "status"
+    ],
+    "saved_at": "2026-05-20T08:42:21.991515"
+  },
+  {
+    "natural_query": "give me deals b stages count",
+    "sql": "SELECT \n  d.stage, \n  COUNT(*) AS stage_count\nFROM \n  \"deals\" d\nWHERE \n  NOT d.deleted\nGROUP BY \n  d.stage\nORDER BY \n  stage_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T08:42:48.912490"
+  },
+  {
+    "natural_query": "SELECT u.name FROM users u JOIN deals d ON u._id = d.owner WHERE EXTRACT(MONTH FROM d.\"dealWonAt\") = EXTRACT(MONTH FROM NOW() - INTERVAL '1 month') AND EXTRACT(YEAR FROM d.\"dealWonAt\") = EXTRACT(YEAR FROM NOW() - INTERVAL '1 month')",
+    "sql": "SELECT u.name \nFROM \"users\" u \nJOIN \"deals\" d ON u._id = d.owner \nWHERE NOT d.deleted \nAND d.\"dealWonAt\" IS NOT NULL \nAND EXTRACT(MONTH FROM d.\"dealWonAt\") = EXTRACT(MONTH FROM (NOW() - INTERVAL '1 month')) \nAND EXTRACT(YEAR FROM d.\"dealWonAt\") = EXTRACT(YEAR FROM (NOW() - INTERVAL '1 month'))",
+    "tables": [
+      "d",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-20T08:43:42.574908"
+  },
+  {
+    "natural_query": "targets where EXTRACT(MONTH FROM targets.\"targetDate\") = EXTRACT(MONTH FROM CURRENT_DATE - INTERVAL '1 month') AND targets.\"achieved\" = true",
+    "sql": "SELECT t._id, t.\"userId\", t.month, t.year, t.\"targetInUSD\", t.\"teamName\", t.\"createdAt\" \nFROM \"targets\" t \nWHERE EXTRACT(MONTH FROM t.\"createdAt\") = EXTRACT(MONTH FROM (CURRENT_DATE - INTERVAL '1 month')) \nAND NOT EXISTS (\n  SELECT 1 \n  FROM \"sales\" s \n  WHERE s.\"salesOwner\" = t.\"userId\" \n  AND EXTRACT(YEAR FROM s.\"createdAt\") = t.year \n  AND EXTRACT(MONTH FROM s.\"createdAt\") = t.month\n)",
+    "tables": [
+      "s",
+      "sales",
+      "t",
+      "targets"
+    ],
+    "saved_at": "2026-05-20T08:44:49.638205"
   }
 ]
