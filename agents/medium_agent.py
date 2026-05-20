@@ -60,19 +60,38 @@ def _date_context() -> str:
     months_6  = (now - timedelta(days=180)).strftime("%Y-%m-%d")
     months_12 = (now - timedelta(days=365)).strftime("%Y-%m-%d")
 
+    # Last quarter (the previous completed calendar quarter)
+    current_q   = (now.month - 1) // 3 + 1          # 1..4
+    last_q      = current_q - 1 if current_q > 1 else 4
+    last_q_year = this_month_year if current_q > 1 else this_month_year - 1
+    last_q_months = {1: (1,2,3), 2: (4,5,6), 3: (7,8,9), 4: (10,11,12)}[last_q]
+    lq_in_list  = ",".join(str(m) for m in last_q_months)
+
     return (
-        f"-- CURRENT DATE CONTEXT (use for ALL date filters):\n"
+        f"-- CURRENT DATE CONTEXT (MANDATORY: apply these exact values for any time-based query):\n"
         f"-- TODAY          : {today} ({today_full})\n"
         f"-- THIS MONTH     : {this_month_name}  → month={this_month_num}, year={this_month_year}\n"
         f"-- LAST MONTH     : {last_month_name}  → month={last_month_num}, year={last_month_year}\n"
-        f"--                  SQL: EXTRACT(MONTH FROM col)={last_month_num} AND EXTRACT(YEAR FROM col)={last_month_year}\n"
-        f"-- LAST 7 DAYS    : {days_7} to {today}   → SQL: col >= '{days_7}'\n"
-        f"-- LAST 30 DAYS   : {days_30} to {today}  → SQL: col >= '{days_30}'\n"
-        f"-- LAST 3 MONTHS  : {months_3} to {today} → SQL: col >= '{months_3}'\n"
-        f"-- LAST 6 MONTHS  : {months_6} to {today} → SQL: col >= '{months_6}'\n"
-        f"-- LAST 12 MONTHS : {months_12} to {today}→ SQL: col >= '{months_12}'\n"
-        f"-- THIS YEAR      : year={this_month_year}  → SQL: EXTRACT(YEAR FROM col)={this_month_year}\n"
+        f"--                  SQL: EXTRACT(MONTH FROM <date_col>)={last_month_num} AND EXTRACT(YEAR FROM <date_col>)={last_month_year}\n"
+        f"-- LAST QUARTER   : Q{last_q} {last_q_year} (months {lq_in_list}) — the PREVIOUS completed quarter\n"
+        f"--                  SQL: EXTRACT(MONTH FROM <date_col>) IN ({lq_in_list}) AND EXTRACT(YEAR FROM <date_col>)={last_q_year}\n"
+        f"--                  ✗ NEVER use EXTRACT(QUARTER FROM ...) — always use month IN list above\n"
+        f"-- LAST 7 DAYS    : {days_7} to {today}   → SQL: <date_col> >= '{days_7}'\n"
+        f"-- LAST 30 DAYS   : {days_30} to {today}  → SQL: <date_col> >= '{days_30}'\n"
+        f"-- LAST 3 MONTHS  : {months_3} to {today} → SQL: <date_col> >= '{months_3}'\n"
+        f"-- LAST 6 MONTHS  : {months_6} to {today} → SQL: <date_col> >= '{months_6}'\n"
+        f"-- LAST 12 MONTHS : {months_12} to {today}→ SQL: <date_col> >= '{months_12}'\n"
+        f"-- THIS YEAR      : year={this_month_year}  → SQL: EXTRACT(YEAR FROM <date_col>)={this_month_year}\n"
         f"-- LAST YEAR      : year={this_month_year-1}\n"
+        f"-- DATE COLUMN PER TABLE (replace <date_col> with correct column):\n"
+        f"--   invoices revenue  → payment_date   (ALWAYS use payment_date for revenue time filters)\n"
+        f"--   invoices created  → createdAt\n"
+        f"--   deals             → createdAt (created), dealWonAt (won), dealLostAt (lost)\n"
+        f"--   sales             → sales_date\n"
+        f"--   contacts/companies→ createdAt\n"
+        f"--   tasks             → due_date (due), createdAt (created)\n"
+        f"-- RULE: If the query mentions ANY time period (last month, this year, last 7 days etc.)\n"
+        f"--       you MUST add the corresponding date filter from above — NEVER omit it.\n"
     )
 
 

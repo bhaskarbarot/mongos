@@ -4788,5 +4788,154 @@
       "users"
     ],
     "saved_at": "2026-05-20T10:35:39.204693"
+  },
+  {
+    "natural_query": "give me revenue of last month",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS revenue_last_month \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND i.payment_date >= '2026-04-20' \n  AND i.payment_date < '2026-05-01'",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:01:01.634619"
+  },
+  {
+    "natural_query": "give me last month revenue",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 4 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:11:50.643372"
+  },
+  {
+    "natural_query": "give me last quarter revenue",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd\nFROM \"invoices\" i\nWHERE NOT i.deleted\n  AND i.payment_status = 'paid'\n  AND EXTRACT(YEAR FROM i.payment_date) = 2026\n  AND EXTRACT(QUARTER FROM i.payment_date) = 2",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:11:54.507195"
+  },
+  {
+    "natural_query": "i want last 3 month revenue",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND i.payment_date >= '2026-02-19'",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:11:58.072565"
+  },
+  {
+    "natural_query": "give me last year revenue",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(YEAR FROM i.payment_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 1",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:12:03.746250"
+  },
+  {
+    "natural_query": "give me 2026 revenue",
+    "sql": "SELECT COALESCE(SUM(grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" \nWHERE payment_status = 'paid' \n  AND NOT deleted \n  AND EXTRACT(YEAR FROM payment_date) = 2026",
+    "tables": [
+      "invoices",
+      "payment_date"
+    ],
+    "saved_at": "2026-05-20T11:12:07.669507"
+  },
+  {
+    "natural_query": "revenue of last month",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 4 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:15:29.888995"
+  },
+  {
+    "natural_query": "show invoices by total",
+    "sql": "SELECT i.invoice_number, i.grandtotal_in_usd, i.currency \nFROM \"invoices\" i \nWHERE NOT i.deleted \nORDER BY i.grandtotal_in_usd DESC NULLS LAST",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:15:56.827300"
+  },
+  {
+    "natural_query": "revenue of December 2025",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd\nFROM \"invoices\" i\nWHERE NOT i.deleted\n  AND i.payment_status = 'paid'\n  AND EXTRACT(MONTH FROM i.payment_date) = 12\n  AND EXTRACT(YEAR FROM i.payment_date) = 2025",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:16:18.871899"
+  },
+  {
+    "natural_query": "revenue of april 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 4 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:17:04.806390"
+  },
+  {
+    "natural_query": "SELECT SUM(grandtotal_in_usd) FROM invoices WHERE payment_status='paid' AND payment_date >= '2026-01-20'",
+    "sql": "SELECT COALESCE(SUM(grandtotal_in_usd), 0) AS total_revenue_usd \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND i.payment_date >= '2026-01-20'",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:17:28.368447"
+  },
+  {
+    "natural_query": "give me revenue of january 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd\nFROM \"invoices\" i\nWHERE NOT i.deleted\n  AND i.payment_status = 'paid'\n  AND EXTRACT(MONTH FROM i.payment_date) = 1\n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:18:19.154471"
+  },
+  {
+    "natural_query": "revenue of january 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026 \n  AND EXTRACT(MONTH FROM i.payment_date) = 1",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:18:37.458416"
+  },
+  {
+    "natural_query": "give me revenue of february 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS revenue_february_2026 \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 2 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:19:35.888761"
+  },
+  {
+    "natural_query": "give me revenue of march 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 3 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:19:49.201465"
+  },
+  {
+    "natural_query": "give me revenue of april 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd\nFROM \"invoices\" i\nWHERE NOT i.deleted\n  AND i.payment_status = 'paid'\n  AND EXTRACT(MONTH FROM i.payment_date) = 4\n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:20:05.467505"
+  },
+  {
+    "natural_query": "give me revenue of may 2026.",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 5 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T11:20:26.251422"
   }
 ]

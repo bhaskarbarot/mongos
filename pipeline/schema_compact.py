@@ -362,4 +362,20 @@ RULES:
     -- For LAST N MONTHS range — use IN list (never chained <=):
     ✗ WRONG: WHERE EXTRACT(MONTH FROM CURRENT_DATE) - 2 <= t.month <= EXTRACT(MONTH FROM CURRENT_DATE)
     ✓ CORRECT: WHERE t.month IN (2, 3, 4) AND t.year = 2026
-    ✓ CORRECT: WHERE t.month BETWEEN 2 AND 4 AND t.year = 2026"""
+    ✓ CORRECT: WHERE t.month BETWEEN 2 AND 4 AND t.year = 2026
+
+22. DATE FILTER — MANDATORY RULE:
+    The schema starts with CURRENT DATE CONTEXT. If the user query mentions ANY time period
+    (last month, this year, last 7 days, last quarter, etc.) you MUST add the date filter.
+    ✗ NEVER generate a query without a date filter when the user mentions a time period.
+    ✓ Copy the exact SQL snippet from CURRENT DATE CONTEXT and replace <date_col> with:
+        invoices revenue  → payment_date
+        invoices general  → "createdAt"
+        deals             → "createdAt"
+        sales             → sales_date
+        contacts          → "createdAt"
+
+    Examples:
+    "last month revenue"  → AND EXTRACT(MONTH FROM i.payment_date)=4 AND EXTRACT(YEAR FROM i.payment_date)=2026
+    "this year deals"     → AND EXTRACT(YEAR FROM d."createdAt")=2026
+    "last 7 days"         → AND d."createdAt" >= '2026-05-13'"""
