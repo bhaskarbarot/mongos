@@ -183,7 +183,7 @@ RULES:
 2. NEVER SELECT * — always list explicit columns
 3. JOIN key is _id: LEFT JOIN "users" u ON u._id = d.owner
 4. JOINs: ALWAYS prefix all columns with alias — d.name NOT name, d.deleted NOT deleted
-5. Soft delete: WHERE NOT t.deleted  — EXCEPT vendors (NO deleted column — omit filter)
+5. Soft delete: WHERE NOT t.deleted  — EXCEPT vendors, bills, activitylogs (NO deleted column — omit filter)
    JOIN soft delete: ALWAYS add deleted filter ON the JOIN clause too:
      ✓ LEFT JOIN "deals" d ON d.company = c._id AND NOT d.deleted
      ✗ NEVER: LEFT JOIN "deals" d ON d.company = c._id  (missing deleted filter = counts deleted rows!)
@@ -200,18 +200,33 @@ RULES:
 12. Only SELECT — never UPDATE/DELETE/INSERT/DROP.
 13. NEVER use :param or $1 placeholders. Write concrete SQL only (use EXTRACT, CURRENT_DATE, literals).
 14. FK COLUMN NAMES — use EXACT names, never guess with Id/id suffix:
-    invoices  → company      (LEFT JOIN "companies" c ON c._id = i.company)
-    deals     → company      (LEFT JOIN "companies" c ON c._id = d.company)
-    sales     → company      (LEFT JOIN "companies" c ON c._id = s.company)
-    companies → source       (LEFT JOIN "sources"   s ON s._id = c.source)
-    companies → region       (LEFT JOIN "regions"   r ON r._id = c.region)
-    createtasks→ companyId   (createtasks is the ONLY table with companyId column)
+    invoices     → company      (LEFT JOIN "companies" c ON c._id = i.company)
+    deals        → company      (LEFT JOIN "companies" c ON c._id = d.company)
+    sales        → company      (LEFT JOIN "companies" c ON c._id = s.company)
+    companies    → source       (LEFT JOIN "sources"   s ON s._id = c.source)
+    companies    → region       (LEFT JOIN "regions"   r ON r._id = c.region)
+    createtasks  → companyId    (createtasks is the ONLY table with companyId column)
+    bills        → vendor       (LEFT JOIN "vendors"   v ON v._id = b.vendor)
+    activitylogs → userId       (LEFT JOIN "users"     u ON u._id = al."userId")
     ✗ NEVER write: i.companyId, d.companyId, s.companyId, c.sourceId, c.regionId
+    ✗ NEVER join bills to companies — bills link to VENDORS not companies:
+      ✗ WRONG: LEFT JOIN "bills" b ON b.vendor = c._id   (c is company — bills have no company FK)
+      ✓ RIGHT:  FROM "vendors" v LEFT JOIN "bills" b ON b.vendor = v._id
+    "vendors with bills" / "which vendor has bills" — ALWAYS add HAVING COUNT(b._id) > 0:
+      ✓ SELECT v."companyName", COUNT(b._id) AS bill_count
+        FROM "vendors" v LEFT JOIN "bills" b ON b.vendor = v._id
+        GROUP BY v._id, v."companyName"
+        HAVING COUNT(b._id) > 0
+        ORDER BY bill_count DESC
+      ✗ NEVER omit HAVING — LEFT JOIN without it returns ALL vendors including those with 0 bills
 15. COLUMN EXISTENCE RULES (these columns do NOT exist — never generate them):
     ✗ companies.currency  — currency is on invoices/deals/sales, NOT on companies
     ✗ sales.closeDate     — sales uses sales_date (TEXT). closeDate is on deals only.
     ✗ invoices.productId  — invoices have no direct product FK column
     ✗ outreaches.leadId   — outreaches use assignedTo or email to link contacts
+    ✗ vendors.name        — vendors use "companyName" not name: SELECT v."companyName" FROM "vendors" v
+    ✗ bills.deleted       — bills table has NO deleted column, never add WHERE NOT b.deleted
+    ✗ activitylogs.deleted — activitylogs has NO deleted column, never add WHERE NOT al.deleted
 16. REVENUE / AMOUNT QUERIES — MANDATORY RULES (always apply):
 
     REVENUE = paid invoices only, dated by when payment was received.

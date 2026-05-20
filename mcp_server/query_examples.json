@@ -4937,5 +4937,234 @@
       "invoices"
     ],
     "saved_at": "2026-05-20T11:20:26.251422"
+  },
+  {
+    "natural_query": "how many activities?",
+    "sql": "SELECT COUNT(*) AS activity_count FROM \"activities\"",
+    "tables": [
+      "activities"
+    ],
+    "saved_at": "2026-05-20T11:23:33.372601"
+  },
+  {
+    "natural_query": "name of activities?",
+    "sql": "SELECT name FROM \"activities\"",
+    "tables": [
+      "activities"
+    ],
+    "saved_at": "2026-05-20T11:23:45.437905"
+  },
+  {
+    "natural_query": "activities created at?",
+    "sql": "SELECT \"createdAt\" FROM \"activities\"",
+    "tables": [
+      "activities"
+    ],
+    "saved_at": "2026-05-20T11:24:04.672955"
+  },
+  {
+    "natural_query": "how many activity events",
+    "sql": "SELECT COUNT(*) AS event_count FROM \"activityevents\"",
+    "tables": [
+      "activityevents"
+    ],
+    "saved_at": "2026-05-20T11:24:49.472702"
+  },
+  {
+    "natural_query": "name acticity events?",
+    "sql": "SELECT name FROM \"activities\"",
+    "tables": [
+      "activities"
+    ],
+    "saved_at": "2026-05-20T11:25:03.650414"
+  },
+  {
+    "natural_query": "name activityevents ?",
+    "sql": "SELECT \"ActivityEvent\" FROM \"activityevents\"",
+    "tables": [
+      "activityevents"
+    ],
+    "saved_at": "2026-05-20T11:25:26.859757"
+  },
+  {
+    "natural_query": "ID of activityevent \"Bidding Portal\"?",
+    "sql": "SELECT _id FROM \"activityevents\" WHERE \"ActivityEvent\" = 'Bidding Portal'",
+    "tables": [
+      "activityevents"
+    ],
+    "saved_at": "2026-05-20T11:26:10.257020"
+  },
+  {
+    "natural_query": "\"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)\u2026\" what is this? (referring to contacts)",
+    "sql": "SELECT \"firstName\", \"lastName\", email, \"jobTitle\", \"phoneNumber\" \nFROM \"contacts\" \nWHERE \"lifecycleStage\" = 'Lead' \n  AND \"leadStatus\" = 'New' \n  AND \"createdAt\"::timestamptz::date::text ILIKE '%Mozilla%' \n  AND NOT deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-20T11:27:07.872893"
+  },
+  {
+    "natural_query": "how many activity logs?",
+    "sql": "SELECT COUNT(*) AS activity_log_count FROM \"activitylogs\"",
+    "tables": [
+      "activitylogs"
+    ],
+    "saved_at": "2026-05-20T11:29:02.713946"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM activitylogs",
+    "sql": "SELECT COUNT(*) AS activitylog_count FROM \"activitylogs\"",
+    "tables": [
+      "activitylogs"
+    ],
+    "saved_at": "2026-05-20T11:29:55.120081"
+  },
+  {
+    "natural_query": "SELECT al.type, COUNT(*) as count FROM activitylogs al GROUP BY al.type",
+    "sql": "SELECT \n  al.action AS type, \n  COUNT(*) AS count \nFROM \n  \"activitylogs\" al \nGROUP BY \n  al.action \nORDER BY \n  count DESC",
+    "tables": [
+      "activitylogs"
+    ],
+    "saved_at": "2026-05-20T11:29:55.143233"
+  },
+  {
+    "natural_query": "SELECT u.name, COUNT(al.id) as activity_count FROM activitylogs al JOIN users u ON al.user_id = u.id GROUP BY u.name ORDER BY activity_count DESC LIMIT 10",
+    "sql": "SELECT u.name, \n       COALESCE(COUNT(al._id), 0) AS activity_count \nFROM \"users\" u \nLEFT JOIN \"activitylogs\" al ON al.\"userId\" = u._id \nGROUP BY u._id, u.name \nORDER BY activity_count DESC \nLIMIT 10",
+    "tables": [
+      "activitylogs",
+      "users"
+    ],
+    "saved_at": "2026-05-20T11:29:55.167230"
+  },
+  {
+    "natural_query": "give me user ID of ketul trivedi?",
+    "sql": "SELECT _id FROM \"users\" WHERE name ILIKE '%ketul trivedi%'",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-20T11:30:48.183096"
+  },
+  {
+    "natural_query": "Give me activity logs of ketul trivedi?",
+    "sql": "SELECT al.action, al.module, al.\"recordName\", al.\"createdAt\" \nFROM \"activitylogs\" al \nLEFT JOIN \"users\" u ON u._id = al.\"userId\" \nWHERE u.name ILIKE '%ketul trivedi%' \nORDER BY al.\"createdAt\" DESC",
+    "tables": [
+      "activitylogs",
+      "users"
+    ],
+    "saved_at": "2026-05-20T11:31:16.181765"
+  },
+  {
+    "natural_query": "what is ai notes summarise?",
+    "sql": "SELECT COALESCE(COUNT(*), 0) AS total_notes \nFROM \"ai_notes\"",
+    "tables": [
+      "ai_notes"
+    ],
+    "saved_at": "2026-05-20T11:32:26.980605"
+  },
+  {
+    "natural_query": "the company has bills ? If yes give me the count of bills . And then breif each bill with amount and id.",
+    "sql": "SELECT \n  EXISTS (\n    SELECT 1 \n    FROM \"bills\" \n    WHERE \"vendor\" = c._id\n  ) AS has_bills,\n  COUNT(b._id) AS bill_count,\n  json_agg(json_build_object('bill_id', b._id, 'amount', b.\"netPayableAmount\")) AS bills\nFROM \"companies\" c\nLEFT JOIN \"bills\" b ON b.\"vendor\" = c._id \nWHERE NOT c.deleted \nGROUP BY c._id",
+    "tables": [
+      "bills",
+      "companies"
+    ],
+    "saved_at": "2026-05-20T11:33:45.517894"
+  },
+  {
+    "natural_query": "how many bills?",
+    "sql": "SELECT COUNT(*) AS bill_count FROM \"bills\"",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:34:54.447423"
+  },
+  {
+    "natural_query": "net payable amount of all bills?",
+    "sql": "SELECT COALESCE(SUM(b.\"netPayableAmount\"), 0) AS total_net_payable \nFROM \"bills\" b",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:35:26.434810"
+  },
+  {
+    "natural_query": "net payable amount of all bills? give individual list?",
+    "sql": "SELECT _id, \"systemBillNo\", \"billDate\", \"dueDate\", status, \"netPayableAmount\", subtotal, \"gstPercent\", \"billType\" \nFROM \"bills\" \nORDER BY \"netPayableAmount\" DESC",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:35:56.542190"
+  },
+  {
+    "natural_query": "Sum of the net payable amount of all bills?",
+    "sql": "SELECT COALESCE(SUM(b.\"netPayableAmount\"), 0) AS total_net_payable FROM \"bills\" b",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:40:02.104576"
+  },
+  {
+    "natural_query": "net payable amount of all bills? give individual list? AI",
+    "sql": "SELECT \n  b.\"systemBillNo\", \n  b.\"billDate\", \n  b.\"dueDate\", \n  b.status, \n  b.\"netPayableAmount\", \n  b.\"billType\", \n  b.\"createdAt\"\nFROM \n  \"bills\" b \nORDER BY \n  b.\"createdAt\" DESC",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:40:33.395653"
+  },
+  {
+    "natural_query": "net payable amount of all bills? with list",
+    "sql": "SELECT \"netPayableAmount\", \"systemBillNo\" FROM \"bills\"",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:41:58.180387"
+  },
+  {
+    "natural_query": "Give me activity logs of ketul trivedi",
+    "sql": "SELECT al._id, al.action, al.module, al.\"recordId\", al.\"recordName\", al.\"createdAt\" \nFROM \"activitylogs\" al \nJOIN \"users\" u ON u._id = al.\"userId\" \nWHERE u.name ILIKE '%ketul trivedi%' \nORDER BY al.\"createdAt\" DESC",
+    "tables": [
+      "activitylogs",
+      "users"
+    ],
+    "saved_at": "2026-05-20T11:50:19.705950"
+  },
+  {
+    "natural_query": "net payable amount of all bills? give individual list",
+    "sql": "SELECT \"netPayableAmount\", \"systemBillNo\", \"billDate\", \"dueDate\" \nFROM \"bills\" \nORDER BY \"netPayableAmount\" DESC",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:50:23.660327"
+  },
+  {
+    "natural_query": "which vendor has bills and how many bills does each vendor have",
+    "sql": "SELECT \n  v.\"companyName\", \n  COUNT(b._id) AS bill_count\nFROM \n  \"vendors\" v\n  LEFT JOIN \"bills\" b ON b.vendor = v._id\nGROUP BY \n  v._id, \n  v.\"companyName\"\nHAVING \n  COUNT(b._id) > 0\nORDER BY \n  bill_count DESC",
+    "tables": [
+      "bills",
+      "vendors"
+    ],
+    "saved_at": "2026-05-20T11:55:55.669488"
+  },
+  {
+    "natural_query": "net payable amount of all bills give individual list",
+    "sql": "SELECT \n  b.\"systemBillNo\", \n  b.\"billDate\", \n  b.\"dueDate\", \n  b.status, \n  b.\"netPayableAmount\", \n  b.\"billType\", \n  b.\"createdAt\" \nFROM \n  \"bills\" b \nORDER BY \n  b.\"createdAt\" DESC",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:55:59.389611"
+  },
+  {
+    "natural_query": "net payable amount of all bills with list",
+    "sql": "SELECT \n  b.\"systemBillNo\", \n  b.\"billDate\", \n  b.\"dueDate\", \n  b.status, \n  b.\"netPayableAmount\", \n  b.\"billType\" \nFROM \n  \"bills\" b \nORDER BY \n  b.\"createdAt\" DESC",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T11:56:03.102540"
+  },
+  {
+    "natural_query": "net payable amount of all bills",
+    "sql": "SELECT COALESCE(SUM(b.\"netPayableAmount\"), 0) AS total_net_payable_amount \nFROM \"bills\" b",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-20T12:13:50.085682"
   }
 ]

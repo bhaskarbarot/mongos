@@ -337,11 +337,13 @@ try:
                 "3. Use business language: pipeline, revenue, conversion, performance\n"
                 "4. If the result is 0 or empty, state clearly that none were found\n"
                 "5. NEVER invent numbers not present in the data provided\n"
-                "6. Maximum 80 words — be concise and actionable"
+                "6. Maximum 80 words — be concise and actionable\n"
+                "7. NEVER write '$0' or 'no amount provided' unless the actual data value IS 0 or NULL\n"
+                "8. If you cannot see a value clearly in the data, write 'see table below' — never guess"
             )
             user = (
                 f'User asked: "{query}"\n'
-                f"Database result:\n{data_summary[:600]}\n\n"
+                f"Database result:\n{data_summary[:2000]}\n\n"
                 "Write the 2-4 sentence professional summary:"
             )
             result = llm_call("narrate", system, user, max_tokens=180)
@@ -388,9 +390,10 @@ def _narrate_result(query: str, result_data: Dict) -> str:
             narrate_task = Task(
                 description=(
                     f'The user asked: "{query}"\n\n'
-                    f"Database returned this data:\n{raw_text[:800]}\n\n"
+                    f"Database returned this data:\n{raw_text[:2000]}\n\n"
                     "Use the format_data_result tool to produce a professional 2-4 sentence summary. "
-                    "Bold all key numbers. NEVER invent numbers not in the data."
+                    "Bold all key numbers. NEVER invent numbers not in the data. "
+                    "If a value is not visible in the data above, say 'see table below' — never guess or write $0."
                 ),
                 expected_output=(
                     "A 2-4 sentence professional business summary with all numbers bolded. "
@@ -421,9 +424,11 @@ def _narrate_result(query: str, result_data: Dict) -> str:
         "3. NEVER invent numbers not in the data provided\n"
         "4. If result is 0 or empty → state clearly that none were found\n"
         "5. If data shows 'No records found' → do NOT make up an answer\n"
-        "6. Max 80 words — concise and factual"
+        "6. Max 80 words — concise and factual\n"
+        "7. NEVER write '$0' or 'no amount provided' unless the actual data value IS 0 or NULL\n"
+        "8. If you cannot see a value clearly in the data, write 'see table below' — never guess"
     )
-    user = f'User asked: "{query}"\nData:\n{raw_text[:600]}\n\nWrite factual summary (only use numbers from data above):'
+    user = f'User asked: "{query}"\nData:\n{raw_text[:2000]}\n\nWrite factual summary (only use numbers from data above):'
     narrated = llm_call("narrate", system, user, max_tokens=180)
 
     if narrated and len(narrated.strip()) > 15:
