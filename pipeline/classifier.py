@@ -94,10 +94,12 @@ _FORCE_COMPLEX: List[re.Pattern] = [
     # 360 / deep reports
     re.compile(r"\b360\s*(view|report|degree|analysis)?\b",                     re.I),
     re.compile(r"\b(deep|full|complete)\s*(analysis|report|summary|review)\b",  re.I),
-    # Trend (3+ periods)
+    # Trend (3+ periods) — only when asking for trend/analysis, NOT simple counts
     re.compile(r"\btrend\s*(analysis|over|across|by\s+month|by\s+quarter)?\b",  re.I),
     re.compile(r"\b(monthly|quarterly|yearly)\s+trend\b",                        re.I),
-    re.compile(r"\b(last\s+[3-9]|past\s+[3-9])\s+(month|quarter|year)s?\b",   re.I),
+    # "last N months" only triggers COMPLEX when paired with trend/analysis/compare words
+    re.compile(r"\b(last|past)\s+[3-9]\s+(month|quarter|year)s?\b.{0,30}\b(trend|analysis|growth|pattern|anomaly|compare)\b", re.I),
+    re.compile(r"\b(trend|analysis|growth|pattern|anomaly|compare)\b.{0,30}\b(last|past)\s+[3-9]\s+(month|quarter|year)s?\b", re.I),
     # Anomaly / pattern
     re.compile(r"\b(anomaly|anomalies|outlier|pattern\s+find|root\s+cause)\b",  re.I),
     re.compile(r"\bwhy\s+is\s+.*(drop|fall|declin|low|down)\b",                 re.I),
@@ -134,9 +136,14 @@ _FORCE_MEDIUM: List[re.Pattern] = [
     re.compile(r"\b(sales\s+rep|rep\s+performance|owner\s+performance)\b",      re.I),
     # Funnel performance (multi-stage analysis)
     re.compile(r"\bfunnel\s+performance\b",                                     re.I),
-    # Deals stuck for N days
+    # Deals stuck / pipeline health
     re.compile(r"\b(stuck|not\s+moved?|stagnant).*(deal|pipeline)\b",           re.I),
     re.compile(r"\bdeal.*not\s+moved?\s+in\s+\d+\s+day\b",                     re.I),
+    re.compile(r"\bdeal[s]?\s+stuck\b",                                         re.I),
+    # Cross-entity risk analysis
+    re.compile(r"\bcompan(y|ies)\s+(with|having)\s+(overdue|unpaid|pending)\b", re.I),
+    re.compile(r"\boverdue.*(compan|customer|client)\b",                        re.I),
+    re.compile(r"\bwhich\s+compan.*(invoice|payment|overdue)\b",                re.I),
 ]
 
 
@@ -177,123 +184,86 @@ def _pre_classify(query: str) -> Optional[Dict]:
 # LLM SYSTEM PROMPT  (Layer 2 — enhanced with agent capability map)
 # ══════════════════════════════════════════════════════════════════════════════
 
-_SYSTEM_PROMPT = """You are an agent-aware CRM query classifier. Route each query to the RIGHT agent
-based on BOTH complexity AND what each agent is designed to do.
+_SYSTEM_PROMPT = """You are a CRM query classifier. Output ONLY valid JSON, no other text.
 
-OUTPUT RULE: Respond with ONLY a valid JSON object. No text outside the JSON.
-Format:
-{
-  "type": "SIMPLE" | "MEDIUM" | "COMPLEX",
-  "reason": "<one concise sentence: complexity + which agent capability this maps to>",
-  "tables_needed": ["<table1>", "<table2>"],
-  "requires_calculation": true | false,
-  "requires_multi_period": true | false
-}
+JSON format:
+{"type":"SIMPLE"|"MEDIUM"|"COMPLEX","reason":"<10 words max>","tables_needed":["t1"],"requires_calculation":true|false,"requires_multi_period":true|false}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AGENT CAPABILITY MAP — route to the agent that CAN do the work:
+DECISION RULE — ask yourself these 3 questions in order:
 
-┌─ SIMPLE AGENT (< 5s, 1 SQL query, CrewAI) ──────────────────────────────────┐
-│ USE FOR:                                                                      │
-│  • Counts: "how many deals", "total contacts", "count invoices"              │
-│  • Lists/filters: "open deals", "pending tasks", "paid invoices in INR"      │
-│  • Ordinal: "1st invoice", "last 5 contacts", "2nd deal"                     │
-│  • Entity search: "details of Wiegand LLC", "deals by ketul", "find ELSN"    │
-│  • Aggregation per dimension: "deals by stage", "revenue by currency"        │
-│  • Single date filter: "revenue this year", "deals lost in July"             │
-│  • Named lookups: "status of SO00080", "invoice ELSN/2026/020"               │
-│  • Simple status checks: "overdue invoices", "draft sales orders"            │
-│                                                                               │
-│ DO NOT SEND TO SIMPLE:                                                        │
-│  ✗ KPI reports / dashboards / executive summaries                             │
-│  ✗ Leaderboards with multiple metrics                                         │
-│  ✗ Trend analysis across 3+ periods                                           │
-│  ✗ Win rate %, conversion %, growth % calculations                            │
-│  ✗ Target vs achieved (multi-table join + calculation)                        │
-└───────────────────────────────────────────────────────────────────────────────┘
+Q1: Does the user want a COMPREHENSIVE REPORT covering multiple business areas?
+  YES → COMPLEX (report/dashboard/summary/leaderboard/360/today's status/KPI)
 
-┌─ MEDIUM AGENT (< 15s, 2-3 SQL queries, LangGraph) ─────────────────────────┐
-│ USE FOR:                                                                      │
-│  • 2-period comparisons: "this month vs last month revenue"                  │
-│  • Derived metrics: "win rate", "conversion rate %", "growth %"              │
-│  • Cross-entity analysis: "companies with overdue invoices"                  │
-│  • Target vs achieved: "target vs achieved for all users"                    │
-│  • Risk analysis: "customers not given business in 3 months"                 │
-│  • Rep performance (single metric): "which rep closed most deals"            │
-│  • Funnel performance: stage-by-stage breakdown with conversion              │
-│  • Pipeline health: deals stuck, not moved in N days                         │
-│                                                                               │
-│ DO NOT SEND TO MEDIUM:                                                        │
-│  ✗ Full KPI dashboards (→ COMPLEX)                                            │
-│  ✗ Trend analysis 3+ periods (→ COMPLEX)                                     │
-│  ✗ Leaderboards with all metrics (→ COMPLEX)                                 │
-└───────────────────────────────────────────────────────────────────────────────┘
+Q2: Does this need a RATIO, COMPARISON, or RISK ANALYSIS across 2+ tables?
+  YES → MEDIUM (win rate, month vs month, rep ranking, stuck deals, overdue by company, targets vs actual)
 
-┌─ COMPLEX AGENT (< 30s, 4-8 SQL queries, LangGraph + Stats) ────────────────┐
-│ USE FOR:                                                                      │
-│  • KPI report / KPI dashboard (revenue + deals + tasks + targets together)   │
-│  • Executive summary / business health report                                │
-│  • Full leaderboard (multiple reps × multiple metrics)                       │
-│  • 360 company view (deals + invoices + tasks + contacts + activity)         │
-│  • Trend analysis across 3+ months / quarters / years                        │
-│  • Anomaly detection / pattern finding / "why is X dropping"                 │
-│  • Statistical analysis (growth rates, outliers, rankings)                   │
-│  • Multi-section report (pipeline + revenue + team + targets combined)       │
-│  • Top performing analysis with monthly trend breakdown                      │
-│  • Today/yesterday status (multi-table activity summary)                     │
-└───────────────────────────────────────────────────────────────────────────────┘
+Q3: Can ONE SQL query answer this?
+  YES → SIMPLE (count, list, filter, single metric, lookup, basic date range)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ROUTING EXAMPLES:
+AGENT CAPABILITIES (what each agent actually does):
 
-"how many deals are there"                    → SIMPLE  (count, deals only)
-"list all open deals"                         → SIMPLE  (filter, deals only)
-"total revenue this year"                     → SIMPLE  (SUM on invoices)
-"give me 1st invoice details"                 → SIMPLE  (ordinal lookup)
-"details of Wiegand LLC Systems"              → SIMPLE  (ILIKE entity search)
-"pending invoices"                            → SIMPLE  (filter on invoices)
-"deals by stage"                              → SIMPLE  (GROUP BY, 1 table)
-"top 10 customers by revenue"                 → SIMPLE  (invoices+companies JOIN)
-"overdue invoice aging by company"            → SIMPLE  (invoices+companies, filter+sum)
+SIMPLE — 1 SQL query, 1-2 tables, single focused answer
+  ✓ Counts: "how many deals", "total contacts"
+  ✓ Lists: "show open deals", "list pending tasks"
+  ✓ Filters: "paid invoices in INR", "deals by stage"
+  ✓ Date range: "revenue this year", "deals last 6 months" (COUNT + date = still 1 SQL)
+  ✓ Lookups: "details of company X", "status of SO-080"
+  ✓ Simple JOIN: "top 10 customers by revenue" (invoices + companies, 1 SQL)
+  ✗ Cannot do: percentages, 2-period compare, risk analysis, reports, trend
 
-"revenue this month vs last month"            → MEDIUM  (2-period comparison)
-"win rate this quarter"                       → MEDIUM  (derived metric, deals)
-"target vs achieved for all users"            → MEDIUM  (users+targets+sales join)
-"which sales rep closed most deals"           → MEDIUM  (cross-rep, single metric)
-"customers not given business in 3 months"    → MEDIUM  (risk analysis)
-"funnel performance by stage"                 → MEDIUM  (multi-stage analysis)
-"high activity companies with weak payment"   → MEDIUM  (cross-entity)
+MEDIUM — 2-3 SQL queries run in parallel, calculations across tables
+  ✓ 2-period compare: "this month vs last month revenue"
+  ✓ Derived %: "win rate", "conversion rate", "growth %"
+  ✓ Pipeline health: "deals stuck for 30 days", "deals not moved in 2 weeks"
+  ✓ Cross-entity risk: "companies with overdue invoices" (which companies? = 2 SQL)
+  ✓ Cross-entity risk: "customers no business in 3 months" (2-3 SQL with conditions)
+  ✓ Rep ranking: "which rep closed most deals" (deals + users, ranked)
+  ✓ Target vs actual: "target vs achieved" (targets + sales + users)
+  ✓ Funnel: "funnel performance by stage" (multi-stage counts)
+  ✗ Cannot do: full dashboards, trend 3+ periods, full leaderboard all metrics
 
-"give me kpi report"                          → COMPLEX (multi-KPI dashboard)
-"executive summary of business health"        → COMPLEX (full report)
-"full sales leaderboard with all metrics"     → COMPLEX (multi-rep, multi-metric)
-"top performing sales owners monthly trend"   → COMPLEX (trend + stats)
-"360 view of our top company"                 → COMPLEX (all tables)
-"why is conversion dropping last 3 months"    → COMPLEX (trend + anomaly)
-"give me todays status"                       → COMPLEX (multi-table activity)
+COMPLEX — 4-8 SQL queries, synthesis engine, multi-section reports
+  ✓ Report/Dashboard: "deals report", "kpi report", "business health report"
+  ✓ Executive summary: everything in one — revenue + deals + tasks + targets
+  ✓ Full leaderboard: all reps × all metrics × all time periods
+  ✓ Today's/yesterday's status: ALL tables combined (deals+invoices+tasks+sales)
+  ✓ 360 view: "360 of top company" = deals+invoices+tasks+contacts+activity
+  ✓ Trend 3+ periods: "monthly trend last 6 months", "quarterly breakdown"
+  ✓ Anomaly: "why is X dropping last 3 months"
+  KEY: user wants EVERYTHING about a topic or MULTI-SECTION report
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-IMPORTANT:
-  • Short query ≠ SIMPLE  ("KPI" = 1 word but → COMPLEX)
-  • Long query ≠ COMPLEX  ("give me all deals with year wise stages count" → SIMPLE)
-  • A "summary" of a specific entity (deals, contacts) = SIMPLE
-  • A "summary" of the business / team / performance = COMPLEX
-  • "report" on a specific filter = SIMPLE; "report" on the whole business = COMPLEX
+CRITICAL BOUNDARIES (common mistakes to avoid):
+
+"overdue invoices" = SIMPLE (filter 1 table)
+"companies WITH overdue invoices" = MEDIUM (which companies? cross-table risk)
+
+"deals count last 6 months" = SIMPLE (1 SQL count + date filter)
+"deals stuck for 30 days" = MEDIUM (pipeline health, needs activity date logic)
+
+"deals report" = COMPLEX (open+won+lost+pipeline value = multi-section)
+"list open deals" = SIMPLE (1 SQL filter)
+
+"today's status" = COMPLEX (all tables combined)
+"status of invoice X" = SIMPLE (1 record lookup)
+
+"customers no business in 3 months" = MEDIUM (risk: companies + invoices join)
+NOT COMPLEX — it's 2-3 SQL but no multi-section narrative needed
 """
 
 
 def _build_user_prompt(query: str, available_tables: List[str]) -> str:
-    """Build the classification request with live table context."""
-    tables_str = ", ".join(available_tables) if available_tables else "unknown"
-    return (
-        f"Available CRM tables: {tables_str}\n\n"
-        f'Query to classify: "{query}"\n\n'
-        "Respond ONLY with the JSON object."
-    )
+    """Build the classification request — minimal tokens, just the query."""
+    return f'Classify: "{query}"'
 
 
 def _parse_llm_response(raw: str) -> Optional[Dict]:
-    """Parse and validate the LLM's JSON classification response."""
+    """Parse and validate the LLM's JSON classification response.
+
+    Handles truncated responses (rate-limit cutoffs) by extracting the
+    'type' field even if the JSON is incomplete.
+    """
     if not raw:
         return None
 
@@ -303,14 +273,33 @@ def _parse_llm_response(raw: str) -> Optional[Dict]:
         cleaned = "\n".join(l for l in lines if not l.startswith("```")).strip()
 
     start = cleaned.find("{")
-    end   = cleaned.rfind("}") + 1
-    if start == -1 or end == 0:
+    if start == -1:
         return None
 
-    try:
-        parsed = json.loads(cleaned[start:end])
-    except json.JSONDecodeError as exc:
-        LOGGER.debug("Classifier JSON parse failed: %s | raw: %.150s", exc, raw)
+    # ── Try full JSON parse first ─────────────────────────────────────────────
+    end = cleaned.rfind("}") + 1
+    parsed = None
+    if end > 0:
+        try:
+            parsed = json.loads(cleaned[start:end])
+        except json.JSONDecodeError:
+            pass
+
+    # ── Fallback: extract "type" via regex when JSON is truncated ────────────
+    if parsed is None:
+        type_match = re.search(r'"type"\s*:\s*"(SIMPLE|MEDIUM|COMPLEX)"', cleaned, re.I)
+        if type_match:
+            intent_type = type_match.group(1).upper()
+            LOGGER.info("Classifier: extracted type from truncated JSON: %s", intent_type)
+            return {
+                "type":                  intent_type,
+                "reason":                "LLM classified (truncated response)",
+                "tables_needed":         [],
+                "requires_calculation":  intent_type != "SIMPLE",
+                "requires_multi_period": intent_type == "COMPLEX",
+                "routed_by":             "llm",
+            }
+        LOGGER.debug("Classifier JSON parse failed — no type found | raw: %.150s", raw)
         return None
 
     intent_type = str(parsed.get("type", "")).upper().strip()
@@ -373,7 +362,7 @@ def classify(query: str) -> Dict:
         LOGGER.debug("Classifier: could not load table list: %s", exc)
 
     user_prompt = _build_user_prompt(query, available_tables)
-    raw = llm_call("classify", _SYSTEM_PROMPT, user_prompt, max_tokens=200)
+    raw = llm_call("classify", _SYSTEM_PROMPT, user_prompt, max_tokens=120)
 
     if raw:
         result = _parse_llm_response(raw)
