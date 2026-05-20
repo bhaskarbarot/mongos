@@ -18,11 +18,62 @@ import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait as futures_wait
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, TypedDict
 
 from config import settings
 
 LOGGER = logging.getLogger("sql_chatbot")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DATE CONTEXT HELPER  (shared by medium + complex agents)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _date_context() -> str:
+    """Return a compact current date/time context block for LLM prompts.
+
+    Gives agents awareness of today's date so they can correctly resolve
+    relative expressions like 'last month', 'last 7 days', 'this year'.
+    """
+    now        = datetime.now()
+    today      = now.strftime("%Y-%m-%d")
+    today_full = now.strftime("%A, %B %d, %Y")
+
+    # Last month
+    first_this_month  = now.replace(day=1)
+    last_month_end    = first_this_month - timedelta(days=1)
+    last_month_start  = last_month_end.replace(day=1)
+    last_month_num    = last_month_start.month
+    last_month_year   = last_month_start.year
+    last_month_name   = last_month_start.strftime("%B %Y")
+
+    # This month
+    this_month_num  = now.month
+    this_month_year = now.year
+    this_month_name = now.strftime("%B %Y")
+
+    # Common intervals
+    days_7    = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+    days_30   = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    months_3  = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+    months_6  = (now - timedelta(days=180)).strftime("%Y-%m-%d")
+    months_12 = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+
+    return (
+        f"-- CURRENT DATE CONTEXT (use for ALL date filters):\n"
+        f"-- TODAY          : {today} ({today_full})\n"
+        f"-- THIS MONTH     : {this_month_name}  → month={this_month_num}, year={this_month_year}\n"
+        f"-- LAST MONTH     : {last_month_name}  → month={last_month_num}, year={last_month_year}\n"
+        f"--                  SQL: EXTRACT(MONTH FROM col)={last_month_num} AND EXTRACT(YEAR FROM col)={last_month_year}\n"
+        f"-- LAST 7 DAYS    : {days_7} to {today}   → SQL: col >= '{days_7}'\n"
+        f"-- LAST 30 DAYS   : {days_30} to {today}  → SQL: col >= '{days_30}'\n"
+        f"-- LAST 3 MONTHS  : {months_3} to {today} → SQL: col >= '{months_3}'\n"
+        f"-- LAST 6 MONTHS  : {months_6} to {today} → SQL: col >= '{months_6}'\n"
+        f"-- LAST 12 MONTHS : {months_12} to {today}→ SQL: col >= '{months_12}'\n"
+        f"-- THIS YEAR      : year={this_month_year}  → SQL: EXTRACT(YEAR FROM col)={this_month_year}\n"
+        f"-- LAST YEAR      : year={this_month_year-1}\n"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -228,52 +279,83 @@ def format_results_for_llm(sql_results: List[Dict]) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def fetch_schema_node(state: MediumState) -> Dict:
-    """Node 1: Fetch live schema and table relationships from DB."""
+    """Node 1: Fetch live schema + inject current date context."""
     from pipeline.db_schema import build_schema_for_query, get_all_crm_tables
 
     tables_hint = state["classification"].get("tables_needed", [])
     schema_str  = build_schema_for_query(state["query"], hint_tables=tables_hint, max_tables=8)
 
+    # Prepend current date context so every downstream node knows today's date
+    schema_with_dates = _date_context() + "\n" + schema_str
+
     return {
         "schema": {
-            "schema_str":  schema_str,
+            "schema_str":  schema_with_dates,
             "all_tables":  get_all_crm_tables(),
         }
     }
 
 
 def decompose_node(state: MediumState) -> Dict:
-    """Node 2: Break the query into 2-4 atomic sub-queries using Groq Scout."""
+    """Node 2: Intent-preserving decomposition into 2-4 atomic sub-queries."""
     from pipeline.llm_router import call as llm_call
 
     all_tables  = state["schema"].get("all_tables", [])
     tables_str  = ", ".join(all_tables[:30])
     schema_str  = state["schema"].get("schema_str", "")
+    query       = state["query"]
 
     system = (
-        "You are a CRM query decomposer. Break the query into the MINIMUM number of "
-        "atomic, independently-answerable sub-queries (max 4).\n\n"
-        "OUTPUT RULES:\n"
-        "- Respond with ONLY a JSON array. No text before or after.\n"
-        '- Format: [{"sub_query": "...", "intent": "count|list|sum|compare|rank|lookup"}]\n'
-        "- Each sub_query must be answerable by ONE SQL query independently.\n"
-        "- Keep sub_queries under 20 words each.\n"
-        "- Minimum decomposition: if 1-2 queries suffice, use 1-2 (not 4).\n"
-        "- No sub-query should depend on another sub-query's result."
+        "You are a CRM query decomposer with deep SQL and domain knowledge.\n\n"
+        "YOUR JOB:\n"
+        "1. Understand what the user TRULY wants (don't change their intent)\n"
+        "2. Break it into the MINIMUM atomic sub-queries (max 4) each answerable by 1 SQL\n"
+        "3. Each sub-query must use the CORRECT tables for what it's measuring\n\n"
+
+        "OUTPUT: JSON array ONLY. No text outside the array.\n"
+        '[{"sub_query": "...", "intent": "count|list|sum|compare|rank|lookup"}]\n\n'
+
+        "INTENT PRESERVATION RULES (never break these):\n"
+        "- Keep the user's exact meaning — never substitute one metric for another\n"
+        "- 'achieve target' = compare targets.targetInUSD vs SUM(confirmed sales) — NEVER use deals\n"
+        "- 'revenue' = invoices.grandtotal_in_usd WHERE payment_status='paid'\n"
+        "- 'confirmed sales' = sales.grand_total_in_usd WHERE status='Confirm'\n"
+        "- 'last month' = the calendar month before today (see date context in schema)\n"
+        "- 'last 7 days' = from 7 days ago to today (see date context in schema)\n"
+        "- 'which rep/user' queries need: JOIN users table, GROUP BY user, ORDER BY metric\n\n"
+
+        "CRM TABLE ROUTING (use correct tables):\n"
+        "- Target achievement : targets (targetInUSD, userId, month, year) + sales (salesOwner, grand_total_in_usd) + users\n"
+        "- Revenue / income   : invoices (grandtotal_in_usd, payment_status='paid') — NOT deals\n"
+        "- Sales orders       : sales (grand_total_in_usd, status='Confirm', salesOwner)\n"
+        "- Won/lost deals     : deals (dealWonAt, dealLostAt, owner, stage)\n"
+        "- Pipeline health    : deals (lastActivity, stage, createdAt)\n"
+        "- Tasks              : createtasks (status, priority, due_date, createdBy)\n"
+        "- Users/reps         : users (name, isActive, department)\n"
+        "- Companies at risk  : companies + invoices/sales JOIN to check last activity\n\n"
+
+        "DATE RULE: The schema above has a CURRENT DATE CONTEXT block — use those exact\n"
+        "dates/months for any date filtering. Never guess dates.\n\n"
+
+        "SIZE RULE: Use minimum sub-queries needed:\n"
+        "- 1 sub-query: single metric with filter\n"
+        "- 2 sub-queries: compare two things OR one lookup + one calculation\n"
+        "- 3-4 sub-queries: multiple independent metrics needed\n"
+        "- NEVER create sub-queries that aren't needed to answer the query"
     )
+
     user = (
-        f"Available tables: {tables_str}\n"
-        f"Schema context:\n{schema_str[:600]}\n\n"
-        f'Query: "{state["query"]}"\n\n'
-        "JSON array:"
+        f"Schema (includes current date context):\n{schema_str[:800]}\n\n"
+        f"Available tables: {tables_str}\n\n"
+        f'Query: "{query}"\n\n'
+        "Decompose into sub-queries (JSON array only):"
     )
 
     raw = llm_call("decompose", system, user, max_tokens=500)
     sub_queries = _parse_sub_queries(raw)
 
     if not sub_queries:
-        # Graceful fallback: treat original query as single sub-query
-        sub_queries = [{"sub_query": state["query"], "intent": "general"}]
+        sub_queries = [{"sub_query": query, "intent": "general"}]
 
     LOGGER.info("Medium agent decomposed into %d sub-queries", len(sub_queries))
     return {"sub_queries": sub_queries}
@@ -415,20 +497,23 @@ def synthesize_node(state: MediumState) -> Dict:
 
     system = (
         "You are a CRM business analyst producing a professional response.\n\n"
-        "ABSOLUTE RULES:\n"
-        "1. Use ONLY data from the 'Database Results' section below. NEVER invent data.\n"
-        "2. Every number you state must appear in the results. If in doubt, omit it.\n"
-        "3. Bold ALL key numbers: **176 deals**, **$2.4M**, **42%**\n"
-        "4. If some sub-queries returned errors, note them as 'data unavailable for X'\n"
-        "5. Structure: brief executive summary (2-3 sentences), then data table/list\n"
-        "6. No generic advice unless the data supports a specific recommendation\n"
-        "7. Do NOT start with 'Based on the data' or similar preambles"
+        "ABSOLUTE ZERO-HALLUCINATION RULES:\n"
+        "1. Use ONLY numbers/names/dates that appear in 'Database Results' below\n"
+        "2. NEVER invent, estimate, or assume any value not in the results\n"
+        "3. If a sub-query returned 0 rows → say 'No records found for [topic]', don't guess\n"
+        "4. If a sub-query errored → say 'Data unavailable for [topic]', don't substitute\n"
+        "5. NEVER say a user achieved/failed a target unless targets+sales data confirms it\n"
+        "6. If same person appears in two conflicting results → flag the inconsistency\n"
+        "7. Bold ALL key numbers: **176 deals**, **$2.4M**, **42%**\n"
+        "8. Start directly with the finding — no 'Based on the data' preamble\n"
+        "9. Structure: 2-3 sentence summary + data table/list\n"
+        "10. If the data shows NO results for the period → clearly state that"
     )
     user = (
         f'User asked: "{state["query"]}"\n\n'
         f"Database Results:\n{data_block}\n\n"
         f"Analysis Notes:\n{analysis[:400]}\n\n"
-        "Write the professional business response:"
+        "Write the professional business response (only use facts from Database Results above):"
     )
 
     response = llm_call("synthesize", system, user, max_tokens=1200)

@@ -4227,5 +4227,163 @@
       "targets"
     ],
     "saved_at": "2026-05-20T08:44:49.638205"
+  },
+  {
+    "natural_query": "who achieve targets last month? give me names of them",
+    "sql": "SELECT u.name \nFROM \"users\" u \nLEFT JOIN \"targets\" t ON t.\"userId\" = u._id \nAND t.year = EXTRACT(YEAR FROM CURRENT_DATE) - 1 \nAND t.month = EXTRACT(MONTH FROM CURRENT_DATE) \nLEFT JOIN \"sales\" s ON s.\"salesOwner\" = u._id \nAND EXTRACT(YEAR FROM s.\"createdAt\") = t.year \nAND EXTRACT(MONTH FROM s.\"createdAt\") = t.month \nGROUP BY u._id, u.name, t.\"targetInUSD\" \nHAVING COALESCE(SUM(s.grand_total), 0) >= t.\"targetInUSD\"",
+    "tables": [
+      "s",
+      "sales",
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-20T09:21:45.227257"
+  },
+  {
+    "natural_query": "SELECT userId FROM targets WHERE EXTRACT(MONTH FROM targets.month) = 4 AND EXTRACT(YEAR FROM targets.month) = 2026 AND targetInUSD > (SELECT SUM(sales.grand_total_in_usd) FROM sales WHERE sales.salesOwner = targets.userId AND EXTRACT(MONTH FROM sales.confirmed_at) = 4 AND EXTRACT(YEAR FROM sales.confirmed_at) = 2026)",
+    "sql": "SELECT t.\"userId\" \nFROM \"targets\" t \nWHERE EXTRACT(MONTH FROM t.\"createdAt\") = 5 AND EXTRACT(YEAR FROM t.\"createdAt\") = 2026 \n  AND t.\"targetInUSD\" > \n  (SELECT COALESCE(SUM(s.grand_total_in_usd),0) \n   FROM \"sales\" s \n   WHERE s.\"salesOwner\" = t.\"userId\" \n     AND EXTRACT(MONTH FROM s.sales_date) = 5 \n     AND EXTRACT(YEAR FROM s.sales_date) = 2026 \n     AND s.status = 'Confirm' \n     AND NOT s.deleted)",
+    "tables": [
+      "s",
+      "sales",
+      "t",
+      "targets"
+    ],
+    "saved_at": "2026-05-20T09:21:50.911138"
+  },
+  {
+    "natural_query": "SELECT u.name FROM users u JOIN (SELECT userId FROM targets WHERE EXTRACT(MONTH FROM targets.month) = 4 AND EXTRACT(YEAR FROM targets.month) = 2026) t ON u.id = t.userId",
+    "sql": "SELECT u.name \nFROM \"users\" u \nJOIN \"targets\" t \nON u._id = t.\"userId\" \nWHERE t.month = 4 AND t.year = 2026",
+    "tables": [
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-20T09:21:50.929265"
+  },
+  {
+    "natural_query": "how many deals created in last 7 days",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nWHERE NOT d.deleted \n  AND d.\"createdAt\" >= NOW() - INTERVAL '7 days'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:25:26.064801"
+  },
+  {
+    "natural_query": "show invoices created last 30 days",
+    "sql": "SELECT \n  i.invoice_number, \n  i.grand_total, \n  i.currency, \n  c.\"companyName\", \n  i.invoice_date, \n  u.name AS created_by\nFROM \n  \"invoices\" i \n  LEFT JOIN \"companies\" c ON c._id = i.company \n  LEFT JOIN \"users\" u ON u._id = i.\"createdBy\"\nWHERE \n  NOT i.deleted \n  AND i.\"createdAt\" >= CURRENT_DATE - INTERVAL '30 days'\nORDER BY \n  i.\"createdAt\" DESC",
+    "tables": [
+      "companies",
+      "invoices",
+      "users"
+    ],
+    "saved_at": "2026-05-20T09:25:27.761986"
+  },
+  {
+    "natural_query": "total sales revenue last month",
+    "sql": "SELECT \n  UPPER(COALESCE(s.currency, 'USD')) AS currency, \n  COALESCE(SUM(s.grand_total), 0) AS total_sales\nFROM \n  \"sales\" s \nWHERE \n  s.status = 'Confirm' \n  AND NOT s.deleted \n  AND s.sales_date >= '2026-04-20' \n  AND s.sales_date < '2026-05-01'\nGROUP BY \n  1 \nORDER BY \n  2 DESC",
+    "tables": [
+      "sales"
+    ],
+    "saved_at": "2026-05-20T09:25:30.891261"
+  },
+  {
+    "natural_query": "how many open deals are there",
+    "sql": "SELECT COUNT(*) AS open_deal_count FROM \"deals\" d WHERE d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:25:33.026179"
+  },
+  {
+    "natural_query": "list all users",
+    "sql": "SELECT \n  u._id, \n  u.name, \n  u.email, \n  u.\"isActive\", \n  u.\"isAdmin\", \n  u.\"createdAt\" \nFROM \n  \"users\" u",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-20T09:25:35.020463"
+  },
+  {
+    "natural_query": "SELECT u.name, u.id FROM users u JOIN sales s ON u.id = s.salesOwner WHERE EXTRACT(YEAR FROM s.createdAt) = 2026 GROUP BY u.name, u.id ORDER BY COUNT(*) DESC LIMIT 1",
+    "sql": "SELECT \n  u.name, \n  u._id AS id \nFROM \n  \"users\" u \n  LEFT JOIN \"sales\" s ON u._id = s.\"salesOwner\" \nWHERE \n  EXTRACT(YEAR FROM s.\"createdAt\") = 2026 \n  AND NOT s.deleted \nGROUP BY \n  u.name, \n  u._id \nORDER BY \n  COUNT(*) DESC \nLIMIT 1",
+    "tables": [
+      "s",
+      "sales",
+      "users"
+    ],
+    "saved_at": "2026-05-20T09:25:39.442653"
+  },
+  {
+    "natural_query": "SELECT salesOwner, COUNT(*) as num_sales FROM sales WHERE EXTRACT(YEAR FROM createdAt) = 2026 GROUP BY salesOwner",
+    "sql": "SELECT \n  s.\"salesOwner\", \n  COUNT(*) AS num_sales \nFROM \n  \"sales\" s \nWHERE \n  EXTRACT(YEAR FROM s.\"createdAt\") = 2026 \n  AND NOT s.deleted \nGROUP BY \n  s.\"salesOwner\"",
+    "tables": [
+      "s",
+      "sales"
+    ],
+    "saved_at": "2026-05-20T09:25:39.476538"
+  },
+  {
+    "natural_query": "SELECT company_id FROM invoices WHERE payment_status != 'paid' AND due_date < '2026-05-20'",
+    "sql": "SELECT DISTINCT i.company FROM \"invoices\" i \nWHERE i.payment_status != 'paid' \n  AND i.due_date < '2026-05-20' \n  AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T09:25:43.928718"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals WHERE DATE(dealCreatedAt) = '2026-05-20'",
+    "sql": "SELECT COUNT(*) AS deal_count \nFROM \"deals\" d \nWHERE d.\"createdAt\" >= '2026-05-20' \n  AND d.\"createdAt\" < '2026-05-21' \n  AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:25:51.657883"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals",
+    "sql": "SELECT COUNT(*) AS deal_count FROM \"deals\" WHERE NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:25:51.684235"
+  },
+  {
+    "natural_query": "SELECT stage, SUM(value) FROM deals GROUP BY stage",
+    "sql": "SELECT \n  d.stage,\n  COALESCE(SUM(d.grand_total),0) AS value\nFROM \n  \"deals\" d\nWHERE \n  NOT d.deleted\nGROUP BY \n  d.stage\nORDER BY \n  value DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:25:51.700525"
+  },
+  {
+    "natural_query": "SELECT stage, COUNT(*) FROM deals GROUP BY stage",
+    "sql": "SELECT \n  d.stage, \n  COUNT(*) AS deal_count\nFROM \n  \"deals\" d\nWHERE \n  NOT d.deleted\nGROUP BY \n  d.stage\nORDER BY \n  deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:25:51.712584"
+  },
+  {
+    "natural_query": "how many tasks are overdue as of today",
+    "sql": "SELECT COUNT(*) AS overdue_task_count \nFROM \"createtasks\" ct \nWHERE ct.due_date < NOW() \n  AND ct.status != 'Completed' \n  AND NOT ct.deleted",
+    "tables": [
+      "createtasks"
+    ],
+    "saved_at": "2026-05-20T09:27:10.997458"
+  },
+  {
+    "natural_query": "show me deals closed last month",
+    "sql": "SELECT \n  d.name, \n  d.stage, \n  d.grand_total, \n  d.currency, \n  d.\"closeDate\", \n  d.\"dealLostAt\", \n  d.\"dealWonAt\"\nFROM \n  \"deals\" d \nWHERE \n  (d.\"dealLostAt\" IS NOT NULL OR d.\"dealWonAt\" IS NOT NULL) \n  AND NOT d.deleted \n  AND EXTRACT(MONTH FROM d.\"dealLostAt\") = 4 \n  AND EXTRACT(YEAR FROM d.\"dealLostAt\") = 2026 \n  OR (d.\"dealLostAt\" IS NULL AND d.\"dealWonAt\" IS NOT NULL \n  AND EXTRACT(MONTH FROM d.\"dealWonAt\") = 4 \n  AND EXTRACT(YEAR FROM d.\"dealWonAt\") = 2026) \nORDER BY \n  d.\"dealLostAt\" DESC NULLS LAST, \n  d.\"dealWonAt\" DESC NULLS LAST",
+    "tables": [
+      "d",
+      "deals"
+    ],
+    "saved_at": "2026-05-20T09:27:13.301790"
+  },
+  {
+    "natural_query": "which companies have not given business in last 3 months",
+    "sql": "SELECT c.\"companyName\", c._id \nFROM \"companies\" c \nWHERE NOT c.deleted \nAND c._id NOT IN (\n  SELECT i.company \n  FROM \"invoices\" i \n  WHERE NOT i.deleted \n  AND i.invoice_date >= NOW() - INTERVAL '3 months'\n  AND i.payment_status IN ('paid', 'partial_payment', 'confirmed')\n)\nAND c.\"lifecycleStage\" != 'Lead' \nAND c.\"lifecycleStage\" != 'Partner' \nAND c.\"leadStatus\" NOT IN ('New', 'Lost Lead', 'Attempted to Contact', 'Contact in Future') \nORDER BY c.\"companyName\"",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-20T09:27:18.146444"
   }
 ]

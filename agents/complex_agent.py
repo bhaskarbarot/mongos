@@ -36,6 +36,7 @@ from agents.medium_agent import (
     MediumState,
     _build_medium_graph,
     _get_graph as _get_medium_graph,
+    _date_context,
     extract_sql,
     extract_tables,
     extract_bad_column,
@@ -79,30 +80,35 @@ class ComplexState(TypedDict):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def plan_report_node(state: ComplexState) -> Dict:
-    """Node 0: LLM plans the report sections before decomposing.
-
-    Output: [{section_title, data_needed, sql_intent}]
-    This gives structure so decomposition produces the right sub-queries.
-    """
+    """Node 0: LLM plans report sections with date awareness and domain knowledge."""
     from pipeline.llm_router import call as llm_call
 
     all_tables = state["schema"].get("all_tables", [])
     tables_str = ", ".join(all_tables[:25])
+    date_ctx   = _date_context()
 
     system = (
-        "You are a CRM report planner. Given a user query, plan what sections the report "
-        "needs and what data each section requires.\n\n"
-        "OUTPUT: JSON array only. Format:\n"
+        "You are a CRM report planner. Plan report sections that together fully answer "
+        "the user's request.\n\n"
+        "OUTPUT: JSON array only.\n"
         '[{"section_title": "...", "data_needed": "...", "sql_intent": "count|sum|list|rank|compare"}]\n'
-        "Max 5 sections. Keep each data_needed description under 15 words."
+        "Max 5 sections. Keep each data_needed under 15 words.\n\n"
+        "RULES:\n"
+        "- Each section must map to a real DB table and real columns\n"
+        "- Preserve the user's EXACT intent in every section\n"
+        "- Use date context below for any time-based sections\n"
+        "- 'Today's status' sections should cover: new deals today, invoices due, tasks due, sales today\n"
+        "- 'KPI report' sections: revenue, deals pipeline, team performance, targets vs actual\n"
+        "- NEVER plan sections that require made-up data"
     )
     user = (
+        f"{date_ctx}\n"
         f"Available CRM tables: {tables_str}\n\n"
         f'Report request: "{state["query"]}"\n\n'
         "Plan the report sections (JSON array):"
     )
 
-    raw = llm_call("decompose", system, user, max_tokens=400)
+    raw = llm_call("decompose", system, user, max_tokens=500)
     sections = _parse_report_sections(raw)
 
     if not sections:
@@ -141,43 +147,67 @@ def _parse_report_sections(raw: Optional[str]) -> List[Dict[str, str]]:
 
 
 def complex_decompose_node(state: ComplexState) -> Dict:
-    """Decompose query using planned report sections as context (max 6 sub-queries)."""
+    """Decompose using planned report sections — intent-preserving, date-aware (max 6)."""
     from pipeline.llm_router import call as llm_call
 
     sections    = state.get("report_sections", [])
     all_tables  = state["schema"].get("all_tables", [])
     tables_str  = ", ".join(all_tables[:30])
     schema_str  = state["schema"].get("schema_str", "")
+    query       = state["query"]
 
-    # Build decomposition hint from planned sections
     sections_hint = "\n".join(
         f"- Section '{s['section_title']}': {s['data_needed']}"
         for s in sections
     )
 
     system = (
-        "You are a CRM query decomposer. Break the query into atomic, independently-answerable "
-        "sub-queries (max 6). Each sub-query must be answerable by ONE SQL query.\n\n"
-        "OUTPUT: JSON array only.\n"
+        "You are a CRM report decomposer with deep SQL and domain knowledge.\n\n"
+        "YOUR JOB:\n"
+        "1. Take the planned report sections and create ONE SQL sub-query per section\n"
+        "2. Each sub-query MUST use the CORRECT tables for what it measures\n"
+        "3. Preserve the user's EXACT intent — never substitute one metric for another\n\n"
+
+        "OUTPUT: JSON array ONLY.\n"
         '[{"sub_query": "...", "intent": "count|list|sum|compare|rank|lookup|trend"}]\n'
-        "Keep each sub_query under 20 words. No sub-query should depend on another."
+        "Max 6 sub-queries. Each answerable by ONE SQL independently.\n\n"
+
+        "INTENT PRESERVATION (never break these):\n"
+        "- Date references → use the CURRENT DATE CONTEXT in the schema\n"
+        "- 'today' = TODAY's date from context; 'last month' = LAST MONTH from context\n"
+        "- 'last 7 days' = 7 days ago to today from context\n"
+        "- 'achieve target' = targets.targetInUSD vs SUM(sales.grand_total_in_usd) — NEVER deals\n"
+        "- 'revenue' = invoices.grandtotal_in_usd WHERE payment_status='paid'\n"
+        "- 'which rep' = JOIN users, GROUP BY u.name, ORDER BY metric DESC\n\n"
+
+        "CRM TABLE ROUTING:\n"
+        "- Target achievement : targets + sales + users\n"
+        "- Revenue            : invoices (payment_status='paid')\n"
+        "- Sales performance  : sales (status='Confirm') + users\n"
+        "- Deal pipeline      : deals (stage, dealWonAt, dealLostAt)\n"
+        "- Tasks today/overdue: createtasks (due_date, status)\n"
+        "- Company health     : companies + invoices + deals\n"
+        "- Leaderboard        : users + sales + deals + targets\n\n"
+
+        "Zero hallucination: only reference tables and columns that exist in the schema."
     )
+
     user = (
-        f"Available tables: {tables_str}\n"
-        f"Report sections planned:\n{sections_hint}\n\n"
-        f"Schema:\n{schema_str[:500]}\n\n"
-        f'Full query: "{state["query"]}"\n\nJSON array:'
+        f"Schema (includes current date context):\n{schema_str[:800]}\n\n"
+        f"Available tables: {tables_str}\n\n"
+        f"Report sections to implement:\n{sections_hint}\n\n"
+        f'Full query: "{query}"\n\n'
+        "Create sub-queries (JSON array only):"
     )
 
     raw         = llm_call("decompose", system, user, max_tokens=700)
     sub_queries = _parse_sub_queries(raw)
 
     if not sub_queries:
-        # Fallback: one sub-query per planned section
         sub_queries = [
             {"sub_query": s["data_needed"], "intent": s["sql_intent"]}
             for s in sections[:6]
-        ] or [{"sub_query": state["query"], "intent": "general"}]
+        ] or [{"sub_query": query, "intent": "general"}]
 
     LOGGER.info("Complex agent: %d sub-queries", len(sub_queries))
     return {"sub_queries": sub_queries}
@@ -485,15 +515,19 @@ def deep_synthesis_node(state: ComplexState) -> Dict:
 
     system = (
         "You are a senior CRM business analyst writing an executive report.\n\n"
-        "ABSOLUTE RULES:\n"
-        "1. Use ONLY data from 'Database Results' below — NEVER invent numbers.\n"
-        "2. Every number you write must be traceable to the data below.\n"
+        "ABSOLUTE ZERO-HALLUCINATION RULES:\n"
+        "1. Use ONLY data from 'Database Results' below — NEVER invent any number\n"
+        "2. Every number, name, date you write must exist verbatim in the results\n"
         "3. Bold ALL key metrics: **176 deals**, **$2.4M**, **42%**\n"
-        "4. If a sub-query failed, state 'Data unavailable for [topic]'\n"
-        "5. Minimum 600 words — this is an executive report\n"
-        "6. Structure with markdown headers (##, ###)\n"
-        "7. Include a 'Key Insights' section with 3-5 actionable bullet points\n"
-        "8. Include a 'Recommendations' section only if data supports specific actions"
+        "4. If a sub-query failed or returned 0 rows → state 'Data unavailable for [topic]'\n"
+        "5. NEVER say someone achieved/missed a target unless targets+sales data confirms it\n"
+        "6. NEVER extrapolate, estimate, or fill in missing data with assumptions\n"
+        "7. If the results show 0 or empty for a period → explicitly state 'none found'\n"
+        "8. Minimum 600 words — this is an executive report\n"
+        "9. Structure with markdown headers (##, ###)\n"
+        "10. Include a 'Key Insights' section with 3-5 actionable bullet points\n"
+        "11. Include a 'Recommendations' section ONLY if the data supports specific actions\n"
+        "12. Do NOT start with 'Based on the data provided'"
     )
 
     user = (

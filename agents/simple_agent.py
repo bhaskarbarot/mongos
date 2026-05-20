@@ -24,6 +24,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from config import settings
+from agents.medium_agent import _date_context
 
 LOGGER = logging.getLogger("sql_chatbot")
 
@@ -183,6 +184,8 @@ def _generate_execute_selfheal(
             hint_tables=extra,
             max_tables=6 if attempt < 3 else 10,
         )
+        # Prepend current date context so the LLM knows today's date for filters
+        schema_str = _date_context() + "\n" + schema_str
 
         # ── Build user prompt ─────────────────────────────────────────────────
         if attempt == 1 and cached_sql:
@@ -190,7 +193,7 @@ def _generate_execute_selfheal(
             LOGGER.info("Simple agent: using cached SQL for attempt 1")
         else:
             parts = [f"-- Few-shot examples:\n{examples_str}",
-                     f"\n-- Schema:\n{schema_str}",
+                     f"\n-- Schema (includes current date):\n{schema_str}",
                      f"\nQuestion: {query}"]
             if heal_hint:
                 parts.append(f"\n-- Self-heal hint: {heal_hint}")
@@ -399,10 +402,15 @@ def _narrate_result(query: str, result_data: Dict) -> str:
     system = (
         "You are a senior CRM business analyst. Write a professional 2-4 sentence "
         "business summary from raw database data.\n"
-        "Rules: start with the finding, bold key numbers (**176**), never invent data, "
-        "max 80 words."
+        "RULES:\n"
+        "1. Start directly with the finding — no preamble\n"
+        "2. Bold ALL key numbers: **176 deals**, **$2.4M**\n"
+        "3. NEVER invent numbers not in the data provided\n"
+        "4. If result is 0 or empty → state clearly that none were found\n"
+        "5. If data shows 'No records found' → do NOT make up an answer\n"
+        "6. Max 80 words — concise and factual"
     )
-    user = f'User asked: "{query}"\nData:\n{raw_text[:600]}\n\nSummary:'
+    user = f'User asked: "{query}"\nData:\n{raw_text[:600]}\n\nWrite factual summary (only use numbers from data above):'
     narrated = llm_call("narrate", system, user, max_tokens=180)
 
     if narrated and len(narrated.strip()) > 15:
