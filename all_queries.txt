@@ -1,0 +1,910 @@
+================================================================================
+  ALL_QUERIES.TXT — CRM AI Assistant Query Bank
+  Database: mongos_sync (PostgreSQL)
+  Total tables: 58 | Active tables with data: 48
+  Built from: live schema + column analysis + CRM business context
+================================================================================
+
+TABLE SIZE LEGEND:
+  HUGE   = 100+ rows, many columns → unlimited queries (3:2:1 simple:medium:complex)
+  MEDIUM = 15-100 rows             → 6-8 queries
+  SMALL  = 1-14 rows               → max 5 queries (3S + 1M + 1C)
+  EMPTY  = 0 rows                  → skipped
+
+QUERY TYPE:
+  [S] = Simple  : single metric, count, list, filter, basic aggregation
+  [M] = Medium  : 2-table join, business comparison, period analysis
+  [C] = Complex : multi-table, deep analysis, ranking, leaderboard, 360-view
+
+================================================================================
+  TABLE 1: deals (176 rows, 32 cols) — HUGE
+  Columns: name, stage, owner, company, dealWonAt, dealLostAt, closeDate,
+           grand_total, grand_total_in_usd, currency, type, contact,
+           deleted, createdAt, lastActivity, project_type, business_analyst
+================================================================================
+
+[S] How many total deals are there?
+[S] How many open deals are currently in the pipeline?
+[S] How many deals were won this year?
+[S] How many deals were lost this year?
+[S] List all deals in the "Proposal Sent" stage.
+[S] What are the different deal stages and how many deals are in each?
+[S] Show me all deals created in the last 30 days.
+[S] Which deals have a close date this month?
+[S] How many deals are in the negotiation stage?
+[S] What is the total pipeline value of all open deals?
+[S] List all deals with currency USD.
+[S] How many deals of type "New Business" are there?
+[S] Show all deals that have not had any activity in the last 30 days.
+[S] What is the average deal value?
+[S] How many deals were created this month?
+
+[M] How many deals does each sales rep own, and what is their total pipeline value?
+[M] Which company has the highest number of active deals?
+[M] What is the win rate (won vs total closed) by sales rep?
+[M] Show me deals won this quarter grouped by deal stage they were in before winning.
+[M] Which deals have been open for more than 90 days without closing?
+[M] Compare won deals vs lost deals count by month for this year.
+[M] What is the total deal value won per company this year?
+[M] Which sales rep has the highest total won deal value this year?
+[M] Show all deals with their company name, owner name, and current stage.
+[M] What deal types (New Business, Upsell, Cross-sell) generate the most revenue?
+
+[C] Give me a complete sales pipeline leaderboard — each rep ranked by win rate, total won value, open pipeline value, and number of lost deals.
+[C] Which deals are at risk? Show deals open more than 60 days, no activity in 14 days, with owner and company details.
+[C] Compare this year vs last year: total deals created, won, lost, and average deal size by quarter.
+[C] Give me a 360 analysis of the top 5 deal stages — count, total value, average age, and win/loss rate from each stage.
+[C] Which companies have the highest deal conversion rate (won/total deals) with at least 3 deals?
+
+================================================================================
+  TABLE 2: invoices (171 rows, 50 cols) — HUGE
+  Columns: invoice_number, company, invoiceOwner, grand_total, grandtotal_in_usd,
+           payment_status, payment_date, invoice_date, due_date, currency,
+           deleted, createdAt, payment_mode, approval_status, items
+================================================================================
+
+[S] How many invoices are there in total?
+[S] How many invoices are unpaid?
+[S] How many invoices are overdue (past due date and not paid)?
+[S] What is the total revenue this year (paid invoices by payment date)?
+[S] List all invoices with payment status "paid".
+[S] What is the total value of all pending invoices?
+[S] How many invoices were raised this month?
+[S] Show all cancelled invoices.
+[S] What is the total revenue last month?
+[S] How many invoices have approval status "approved"?
+[S] What is the average invoice value?
+[S] Show all invoices due in the next 7 days.
+[S] What is the total revenue last quarter?
+[S] How many invoices are in draft status?
+[S] What is total revenue for 2025?
+
+[M] Which company has the highest total invoice value (paid)?
+[M] What is the monthly revenue trend for this year?
+[M] Which sales rep (invoiceOwner) has generated the most revenue?
+[M] Show all overdue invoices with company name, amount, and days overdue.
+[M] What is the total outstanding (unpaid) amount by company?
+[M] Compare paid vs unpaid invoice value by month this year.
+[M] Which payment mode (bank transfer, online, etc.) is most common?
+[M] Show revenue by currency breakdown for this year.
+[M] What is the average payment cycle (invoice date to payment date) in days?
+[M] Which companies have not paid any invoice in the last 6 months?
+
+[C] Give me a full accounts receivable aging report — invoices grouped by 0-30, 31-60, 61-90, 90+ days overdue with company and amount.
+[C] Revenue leaderboard: rank all sales reps by total revenue collected (paid invoices) this year with monthly breakdown.
+[C] Identify top 10 clients by total revenue paid, with their invoice count, average invoice value, and payment cycle.
+[C] Compare revenue this year vs last year by quarter with growth percentage.
+[C] Which companies have partial payments? Show invoice total, amount paid, and outstanding balance.
+
+================================================================================
+  TABLE 3: contacts (166 rows, 21 cols) — HUGE
+  Columns: firstName, lastName, email, phoneNumber, jobTitle, company,
+           contactOwner, lifecycleStage, leadStatus, source, birthday,
+           deleted, createdAt, lastActivity, isPrimary
+================================================================================
+
+[S] How many contacts are there in total?
+[S] How many contacts were added this month?
+[S] List all contacts in the "Lead" lifecycle stage.
+[S] How many contacts have no email address?
+[S] Show all contacts with job title "CEO" or "Founder".
+[S] How many contacts are there per lifecycle stage?
+[S] List all contacts added in the last 7 days.
+[S] Which contacts have not been active in the last 60 days?
+[S] How many contacts came from each lead source?
+[S] Show all primary contacts of companies.
+
+[M] How many contacts does each company have?
+[M] Which sales rep (contactOwner) manages the most contacts?
+[M] Show contacts with their company name, owner, and lifecycle stage.
+[M] Which lead source brings in the most contacts?
+[M] How many contacts were converted from lead to customer this year?
+[M] Which companies have more than 5 contacts?
+[M] Show contacts whose birthday is this month.
+
+[C] Give me a contact quality analysis — contacts per company, percentage with email, percentage with phone, percentage with activity in last 30 days.
+[C] Which contacts are in companies that also have open deals? Show contact name, company, deal stage, and deal value.
+[C] Build a contact growth report — new contacts added per month for the last 12 months with cumulative total.
+
+================================================================================
+  TABLE 4: companies (146 rows, 43 cols) — HUGE
+  Columns: companyName, deleted, companyOwner, industry, country, region,
+           lifecycleStage, leadStatus, source, annualRevenue, createdAt,
+           lastActivity, leadWonAt, leadLostAt, clientHealth, Currency, tags
+================================================================================
+
+[S] How many companies are there in total?
+[S] How many companies are active customers (lifecycle stage = Customer)?
+[S] How many companies are in each lifecycle stage?
+[S] List all companies in the technology industry.
+[S] How many companies were added this month?
+[S] Which companies have not had any activity in the last 30 days?
+[S] How many companies are in each country?
+[S] List all companies owned by a specific sales rep.
+[S] How many companies have "healthy" client health status?
+[S] Show all companies that were won as leads this year.
+
+[M] Which sales rep owns the most companies?
+[M] Show companies with their deal count and total deal value.
+[M] Which industry has the most companies?
+[M] How many companies converted from lead to customer each month this year?
+[M] Show companies with their invoice count and total revenue paid.
+[M] Which region has the highest number of companies?
+[M] Show top 10 companies by annual revenue.
+[M] Which companies have open deals AND unpaid invoices?
+
+[C] Give me a company health dashboard — for each company show: owner, lifecycle stage, total deals (open/won/lost), total revenue, last activity date, and open task count.
+[C] Which companies are at churn risk? Show companies with: no paid invoice in 6 months, no activity in 30 days, and lifecycle stage = Customer.
+[C] Company acquisition analysis: how many companies were acquired per month per rep with conversion rate from lead to customer.
+[C] Compare companies by region — number of companies, total revenue, average deal size, win rate.
+[C] Identify cross-sell/upsell opportunities: companies that are customers but have no deal in the last 6 months.
+
+================================================================================
+  TABLE 5: sales (121 rows, 32 cols) — HUGE
+  Columns: salesOwner, company, grand_total, grand_total_in_usd, currency,
+           status, sales_date, sales_number, items, deleted, createdAt,
+           tax_amount, discount_amount, subtotal
+================================================================================
+
+[S] How many sales orders are there in total?
+[S] How many confirmed sales orders are there?
+[S] What is the total confirmed sales value this year?
+[S] How many sales orders were created this month?
+[S] List all sales orders with status "Confirm".
+[S] What is the average sales order value?
+[S] Show all sales orders created in the last 30 days.
+[S] How many sales orders are in draft status?
+[S] What is the total discount given across all confirmed sales?
+
+[M] Which sales rep has the highest total confirmed sales value this year?
+[M] What is the monthly confirmed sales trend for this year?
+[M] Which company has generated the most sales order value?
+[M] Show top 10 sales orders by value with company and rep name.
+[M] Compare confirmed vs non-confirmed orders by month.
+[M] What is the total sales revenue per currency?
+[M] Which sales rep has the most confirmed orders this quarter?
+
+[C] Sales performance leaderboard — rank all reps by confirmed sales value, order count, average order value, and growth vs last quarter.
+[C] Compare sales vs invoice revenue by month — are all confirmed sales being invoiced?
+[C] Monthly sales trend analysis for last 12 months: total value, order count, average value, and top rep of each month.
+[C] Which products (from sales items JSONB) are ordered most frequently and what is their combined revenue?
+
+================================================================================
+  TABLE 6: outreaches (564 rows, 27 cols) — HUGE
+  Columns: name, email, phone, country, status, leadStatus, priority,
+           campaign, region, assignedTo, createdBy, convertedDate,
+           isDeleted, createdAt, interestedDate, designation, city
+================================================================================
+
+[S] How many total outreach prospects are there?
+[S] How many outreach prospects are in "Interested" status?
+[S] How many prospects were contacted this month?
+[S] How many prospects have been converted to leads?
+[S] How many prospects are assigned to each sales rep?
+[S] How many prospects came from each campaign?
+[S] List all high priority outreach prospects.
+[S] How many prospects are from each country?
+[S] Show all prospects with no contact yet.
+
+[M] Which campaign has the highest conversion rate (converted/total)?
+[M] Which sales rep has the most prospect conversions this year?
+[M] Show conversion funnel: total prospects → interested → converted with percentages.
+[M] How many prospects were added and converted each month this year?
+[M] Which region has the most outreach prospects?
+[M] What is the average time from first contact to conversion in days?
+
+[C] Outreach funnel analysis: by campaign — prospects added, contacted, interested, converted, with conversion rate and average conversion time.
+[C] Rep performance on outreach: assigned count, contacted, converted, conversion rate ranked by best performer.
+[C] Monthly outreach health report: new prospects, conversion rate, stale prospects (no update in 30 days), by rep and region.
+
+================================================================================
+  TABLE 7: products (2161 rows, 16 cols) — HUGE
+  Columns: name, product_type, unit_cost, currency, technology, tax_rate,
+           isActive, billing_frequency, isNoBillable, sku, description_long,
+           description_short, createdAt
+================================================================================
+
+[S] How many active products are there?
+[S] What is the total number of products?
+[S] List all products with billing frequency "Monthly".
+[S] How many products are in each product type?
+[S] What is the average unit cost of active products?
+[S] Show all products with tax rate above 18%.
+[S] How many products are non-billable?
+[S] List all products with currency INR.
+[S] Show all products added this year.
+[S] What are the most expensive 10 products?
+
+[M] How many products are associated with each technology?
+[M] What is the average unit cost by product type?
+[M] Show active products grouped by billing frequency with total count and average cost.
+[M] Which products have no SKU assigned?
+[M] Show products by currency — count and average unit cost per currency.
+
+[C] Product catalog analysis: by product type — active count, average price, billable vs non-billable, monthly vs annual billing breakdown.
+[C] Which products are most referenced in sales orders? (from sales.items JSONB) Show product name, order frequency, total revenue.
+[C] Price tier analysis: group products into low (<$100), medium ($100-$1000), high (>$1000) tiers by product type and billing frequency.
+
+================================================================================
+  TABLE 8: commonnotes (113 rows, 17 cols) — HUGE
+  Columns: note, type, createdBy, isPinned, companyId, dealId, contactId,
+           invoiceId, salesId, isLog, isFromTaskhub, attachment, mentionedUsers,
+           createdAt
+================================================================================
+
+[S] How many notes are there in total?
+[S] How many notes are pinned?
+[S] How many notes are associated with deals?
+[S] How many notes are associated with companies?
+[S] How many notes were added this week?
+[S] How many notes have attachments?
+
+[M] Which user has added the most notes?
+[M] Show notes breakdown by type (note, log, etc.) with count.
+[M] Which deal has the most notes?
+[M] Which company has the most notes?
+
+[C] Notes activity report: notes added per user per month for last 3 months, broken down by associated module (deal, company, contact, invoice).
+
+================================================================================
+  TABLE 9: createtasks (74 rows, 27 cols) — MEDIUM
+  Columns: Task, category, status, priority, createdBy, companyId,
+           due_date, deleted, closedDate, contectId, dealsId, invoiceId,
+           salesId, time, note, reminder, createdAt
+================================================================================
+
+[S] How many open tasks are there?
+[S] How many tasks are overdue (past due date and not closed)?
+[S] How many high priority tasks are pending?
+[S] How many tasks are due today?
+[S] How many tasks were completed this month?
+[S] Show all tasks with no due date set.
+
+[M] Which user has the most open tasks?
+[M] Show task breakdown by priority (high, medium, low) and status.
+[M] Which company has the most open tasks assigned?
+[M] How many tasks are linked to deals vs companies vs contacts?
+
+[C] Task overdue analysis: show all overdue tasks with owner, company/deal linked, days overdue, priority — sorted by most critical.
+[C] Task completion rate by user this month: assigned vs completed with average completion time.
+
+================================================================================
+  TABLE 10: targets (19 rows, 11 cols) — MEDIUM
+  Columns: userId, month, year, targetInUSD, teamName, createdBy,
+           createdAt, updatedAt
+================================================================================
+
+[S] What are the sales targets set for this month?
+[S] What are the targets for this year?
+[S] Which user has the highest target this month?
+[S] Show all targets for Q1 2026.
+
+[M] Who achieved their target last month? Show name, target, achieved, and gap.
+[M] Who did not achieve their target last 3 months?
+[M] What is the team-wise target total for this quarter?
+[M] Show target vs actual achieved comparison for all reps this year.
+
+[C] Target achievement leaderboard: for each sales rep show — target, achieved, gap, achievement percentage, and months hit vs missed in 2026.
+[C] Target trend analysis: for each rep show monthly target vs actual for last 6 months with cumulative achievement rate.
+
+================================================================================
+  TABLE 11: users (15 rows, 22 cols) — MEDIUM
+  Columns: name, email, department, isActive, isAdmin, isSuperAdmin,
+           isRegionHead, regionId, reporting_manager, lastLogin, createdAt
+================================================================================
+
+[S] How many active users are there?
+[S] How many admin users are there?
+[S] List all active sales reps (non-admin users).
+[S] Which user logged in most recently?
+[S] How many users are in each department?
+
+[M] Show each user with their deal count, invoice count, and total revenue.
+[M] Which user has the most active deals?
+[M] Show users who have not logged in for 30+ days.
+
+[C] Full user performance summary: for each active rep show — deals (open/won/lost), revenue collected, targets hit, tasks overdue, contacts managed.
+
+================================================================================
+  TABLE 12: emails (48 rows, 15 cols) — MEDIUM
+  Columns: user, messageId, threadId, from, to, cc, subject, date,
+           snippet, body, createdAt
+================================================================================
+
+[S] How many emails are tracked in the system?
+[S] How many emails were sent this week?
+[S] Show all emails from a specific user.
+[S] How many emails are in each thread?
+
+[M] Which user has sent the most emails?
+[M] Show email activity by user per week for last month.
+
+[C] Email thread analysis: show threads with most messages, participants involved, and related company or deal.
+
+================================================================================
+  TABLE 13: activitylogs (36 rows, 12 cols) — MEDIUM
+  Columns: action, module, recordId, recordName, userId, details,
+           ipAddress, createdAt
+================================================================================
+
+[S] How many activity logs are there?
+[S] How many actions were logged today?
+[S] Show all activity logs for a specific user.
+[S] What modules have the most activity?
+[S] How many "add" vs "update" vs "delete" actions are logged?
+
+[M] Which user performed the most actions this week?
+[M] Show activity log timeline for the last 7 days grouped by user.
+
+[C] Audit trail: show all actions on a specific company or deal — what changed, who changed it, and when.
+
+================================================================================
+  TABLE 14: notifications (76 rows, 10 cols) — MEDIUM
+  Columns: receivers, taskId, type, readBy, isDeleted, createdAt, outreachId
+================================================================================
+
+[S] How many unread notifications are there?
+[S] How many notifications were created today?
+[S] How many notifications are linked to tasks vs outreach?
+
+[M] Which user has the most unread notifications?
+[M] Show notification volume by type per week.
+
+[C] Notification engagement report: sent vs read rate by user and notification type.
+
+================================================================================
+  TABLE 15: notes (49 rows, 10 cols) — MEDIUM
+  Columns: outreachId, contactMethod, message, reminderDate, createdBy,
+           attachment, createdAt
+================================================================================
+
+[S] How many outreach notes are there?
+[S] How many notes have reminders set?
+[S] How many notes have attachments?
+[S] Show all notes due for reminder today.
+
+[M] Which outreach prospect has the most notes?
+[M] Show notes by contact method used (call, email, LinkedIn, etc.).
+
+================================================================================
+  TABLE 16: vendors (10 rows, 23 cols) — SMALL
+  Columns: companyName, email, phone, GSTIN, PAN, website, address,
+           city, state, country, currency, stage, bankDetails,
+           contactPersons, createdAt
+================================================================================
+
+[S] How many vendors are there?
+[S] List all vendors with their company name and country.
+[S] Which vendors are in India (have GSTIN)?
+[S] Show all vendors with their stage.
+
+[M] Which vendors have bills raised against them? Show vendor name and bill count.
+[M] Show total amount payable to each vendor from bills.
+
+[C] Vendor spend analysis: for each vendor show total bills count, total amount, paid vs pending bills, and average bill value.
+
+================================================================================
+  TABLE 17: bills (6 rows, 25 cols) — SMALL
+  Columns: vendor, systemBillNo, billDate, dueDate, billType, subtotal,
+           discount, taxableAmount, netPayableAmount, status, lineItems,
+           gstPercent, tdsPercent, tdsAmount, createdBy, createdAt
+================================================================================
+
+[S] What is the total net payable amount of all bills?
+[S] List all bills with their amount and status.
+[S] How many bills are in "Payment Scheduled" status?
+[S] Which bill has the highest amount?
+
+[M] Show each bill with vendor name, amount, status, and due date.
+[M] What is the total amount of overdue bills (past due date and unpaid)?
+
+[C] Bills payable summary: vendor name, bill number, amount, tax, TDS, net payable, status — sorted by due date ascending.
+
+================================================================================
+  TABLE 18: dealstagesettings (7 rows, 10 cols) — SMALL
+  Columns: dealStageName, isZeroAcceptable, deleted, createdBy, createdAt
+================================================================================
+
+[S] What are all the deal stages in the CRM?
+[S] How many deal stages are active (not deleted)?
+[S] Which deal stages allow zero value deals?
+
+[M] Show each deal stage with count of current deals in that stage and total pipeline value.
+
+[C] Deal stage funnel: for each stage show deal count, total value, average age of deals, and win rate from that stage.
+
+================================================================================
+  TABLE 19: technologies (31 rows, 4 cols) — MEDIUM
+  Columns: name, category, __v
+================================================================================
+
+[S] How many technologies are tracked?
+[S] List all technologies by category.
+[S] How many technologies are in each category?
+
+[M] Which technologies are most common across companies (from company webTechnologies)?
+[M] Show companies grouped by their primary technology stack.
+
+================================================================================
+  TABLE 20: sources (30 rows, 5 cols) — MEDIUM
+  Columns: sourceName, createdAt
+================================================================================
+
+[S] What are all the lead sources?
+[S] How many lead sources are configured?
+[S] Which lead source brings the most companies?
+
+[M] Compare conversion rates by lead source — companies that became customers vs total by source.
+[M] Show revenue generated by companies from each lead source.
+
+================================================================================
+  TABLE 21: taxes (13 rows, 5 cols) — SMALL
+  Columns: name, amount, createdBy
+================================================================================
+
+[S] What are all tax rates configured?
+[S] What is the highest tax rate?
+[S] How many tax types are there?
+
+[M] Which tax rate is most used in invoices?
+
+================================================================================
+  TABLE 22: categories (6 rows, 6 cols) — SMALL
+  Columns: categoryName, name, createdAt
+================================================================================
+
+[S] List all campaign categories.
+[S] How many categories are there?
+
+[M] Which category has the most campaigns?
+[M] Show deals or notes grouped by category.
+
+================================================================================
+  TABLE 23: campaigns (4 rows, 7 cols) — SMALL
+  Columns: campaignName, categoryId, createdBy, createdAt
+================================================================================
+
+[S] What are all the campaigns?
+[S] How many campaigns are there?
+
+[M] Which campaign has the most outreach prospects?
+[M] Show conversion rate by campaign — prospects added vs converted.
+
+[C] Campaign performance: for each campaign show prospect count, conversion count, conversion rate, and revenue from converted prospects.
+
+================================================================================
+  TABLE 24: departments (4 rows, 6 cols) — SMALL
+  Columns: name, regionRequired, createdAt
+================================================================================
+
+[S] List all departments.
+[S] How many departments require region assignment?
+
+[M] How many users are in each department?
+[M] Which department has the highest total sales?
+
+================================================================================
+  TABLE 25: regions (4 rows, 5 cols) — SMALL
+  Columns: regionName, createdAt
+================================================================================
+
+[S] List all regions.
+[S] How many regions are configured?
+
+[M] How many companies are in each region?
+[M] Which region generates the most revenue?
+
+[C] Regional performance: for each region show companies, deals (open/won), revenue, and top rep.
+
+================================================================================
+  TABLE 26: projecttypes (4 rows, 5 cols) — SMALL
+  Columns: name, createdAt
+================================================================================
+
+[S] What project types are configured?
+[S] How many project types exist?
+
+[M] How many deals are in each project type?
+[M] Which project type has the highest average deal value?
+
+================================================================================
+  TABLE 27: lifecycle_stages (5 rows, 3 cols) — SMALL
+  Columns: name, createdAt
+================================================================================
+
+[S] What are all lifecycle stages?
+[S] How many companies are in each lifecycle stage?
+
+[M] Show the lifecycle stage distribution for companies and contacts.
+[M] How many companies moved from Lead to Customer this year?
+
+================================================================================
+  TABLE 28: lead_statuses (11 rows, 2 cols) — SMALL
+  Columns: name
+================================================================================
+
+[S] What are all lead status values?
+[S] How many companies have each lead status?
+
+[M] Which lead status converts to customer most often?
+
+================================================================================
+  TABLE 29: payments (17 rows, 8 cols) — MEDIUM
+  Columns: payment_name, payment_fee, description, createdAt
+================================================================================
+
+[S] List all payment modes available.
+[S] Which payment mode has the highest fee?
+[S] How many payment modes are configured?
+
+[M] Which payment mode is most used in invoices?
+[M] Show total revenue by payment mode.
+
+================================================================================
+  TABLE 30: activityevents (8 rows, 6 cols) — SMALL
+  Columns: ActivityEvent, createdBy, createdAt
+================================================================================
+
+[S] What activity event types are configured?
+[S] How many activity events are there?
+[S] Who created each activity event type?
+
+================================================================================
+  TABLE 31: meetings (1 row, 12 cols) — SMALL
+  Columns: title, description, start, end, location, attendees,
+           reminders, EventId, createdBy, createdAt
+================================================================================
+
+[S] How many meetings are scheduled?
+[S] Show all upcoming meetings.
+[S] Who has meetings this week?
+
+[M] Show meetings with their attendees and linked company or deal.
+
+================================================================================
+  TABLE 32: publicleads (2 rows, 13 cols) — SMALL
+  Columns: firstName, lastName, email, phoneNumber, source, leadStatus,
+           lifecycleStage, userType, description, createdAt
+================================================================================
+
+[S] How many public/inbound leads are there?
+[S] Show all public leads with their status.
+[S] Which source generated inbound leads?
+
+[M] Show public leads that were converted to contacts.
+
+================================================================================
+  TABLE 33: deletedcompanies (8 rows, 6 cols) — SMALL
+  Columns: companyName, deletedBy, companyDetails, deletionTime
+================================================================================
+
+[S] How many companies have been deleted?
+[S] List all deleted companies with deletion date.
+[S] Who deleted the most companies?
+
+================================================================================
+  TABLE 34: ai_notes (3 rows, 8 cols) — SMALL
+  Columns: type, content, createdBy, linkedId, linkedType, createdAt
+================================================================================
+
+[S] How many AI-generated notes are there?
+[S] Show all AI notes and their linked records.
+
+================================================================================
+  TABLE 35: outreachactivities (3 rows, 8 cols) — SMALL
+================================================================================
+
+[S] How many outreach activities are logged?
+[S] Show all outreach activities with their type and date.
+
+================================================================================
+  CROSS-TABLE / MULTI-TABLE COMPLEX QUERIES
+  (These span 3+ tables and represent high-value business questions)
+================================================================================
+
+--- REVENUE & FINANCE ---
+
+[C] Full P&L view: total confirmed sales, total invoiced, total collected (paid), total outstanding, and collection efficiency % for this year.
+[C] Top 10 clients by lifetime value: total deals won + total revenue paid, ranked.
+[C] Which clients have open deals AND overdue invoices simultaneously?
+[C] Monthly cash flow: paid invoice revenue vs confirmed sales orders vs targets for each month of this year.
+[C] Revenue by rep: for each sales rep — total confirmed sales, invoices raised, revenue collected, and collection rate.
+
+--- SALES PERFORMANCE ---
+
+[C] Sales rep 360 scorecard: deals (open/won/lost/win-rate), revenue (target/actual/gap), tasks (open/overdue), contacts managed — for every active rep.
+[C] Which reps are consistently hitting targets? Show last 6 months target vs actual for each rep.
+[C] Pipeline velocity: for each stage, average number of days deals spend before moving or closing.
+[C] Deal win/loss analysis: what are the most common stages where deals are lost? By rep and by company industry.
+[C] Forecast this quarter: total open deal value weighted by stage (e.g., Proposal=30%, Negotiation=70%, Contract=90%).
+
+--- CUSTOMER HEALTH ---
+
+[C] Customer health report: for each customer company — last deal date, last invoice date, last payment date, open deals, overdue invoices, last activity, and health status.
+[C] Which customers have reduced their spend this year vs last year?
+[C] Identify upsell candidates: customers with high deal history but no new deal in 6 months.
+[C] Churn risk dashboard: customers with no activity in 60+ days, no open deals, and no recent invoice.
+[C] New vs returning customers: how many companies invoiced this year were also invoiced last year?
+
+--- OPERATIONS ---
+
+[C] Task overload report: which reps have 5+ overdue high-priority tasks along with their open deal count?
+[C] Activity coverage: which companies have no notes, tasks, or emails in the last 30 days?
+[C] Response time analysis: average time from lead created to first outreach note added, by rep.
+[C] Deal aging report: deals open by age bucket (0-30, 31-60, 61-90, 90+ days) with owner and stage.
+[C] End-of-month pipeline review: all open deals this month — value, stage, owner, last activity, and probability score by stage.
+
+--- LEADS & OUTREACH ---
+
+[C] Lead conversion funnel: outreach prospects → leads → contacts → companies → customers, with count and drop-off rate at each stage.
+[C] Best lead sources: which source generates most leads AND has highest conversion to customer AND highest revenue?
+[C] Campaign ROI: for each campaign — prospects generated, converted, deals from those companies, and revenue.
+[C] Outreach rep performance: how many prospects assigned, contacted, converted, with revenue from converted per rep.
+[C] Geographic analysis: companies, revenue, and deal win rate by country and region.
+
+================================================================================
+  QUICK REFERENCE: NATURAL LANGUAGE VARIATIONS
+  (Same intent, different phrasing — all should return same SQL)
+================================================================================
+
+Revenue synonyms (all → invoices.grandtotal_in_usd WHERE payment_status='paid'):
+  "total revenue" / "how much money did we make" / "earnings" / "income" /
+  "collections" / "how much was collected" / "paid invoices total"
+
+Pipeline synonyms (all → deals WHERE dealWonAt IS NULL AND dealLostAt IS NULL):
+  "open deals" / "active pipeline" / "deals in progress" / "pending deals" /
+  "current deals" / "deals not closed"
+
+Target achievement (all → targets + sales + users):
+  "who hit their target" / "who achieved quota" / "who made their number" /
+  "target attainment" / "who is on track"
+
+Sales rep synonyms (all → users, owner, salesOwner, contactOwner, invoiceOwner):
+  "sales rep" / "sales person" / "account manager" / "team member" /
+  "employee" / "user" / "owner" / "rep"
+
+Company synonyms (all → companies):
+  "client" / "customer" / "account" / "business" / "organization" / "firm"
+
+================================================================================
+  SECTION A: OUT-OF-RANGE / FUTURE DATE QUERIES (NO-DATA TEST)
+  Purpose: Agent must return "no data found" — NEVER hallucinate numbers.
+  Expected behavior: 0 results or polite "no data available for this period"
+  These test that agents do NOT invent revenue, deals, contacts for non-existent periods.
+================================================================================
+
+--- FUTURE DATES (data does not exist yet) ---
+
+give me revenue of September 2027
+what is total revenue in December 2028
+how many deals were won in March 2030
+show me invoices raised in January 2027
+what was the sales performance in June 2029
+give me last month revenue for October 2026  [future relative]
+how many contacts were added in August 2027
+what are the targets for year 2030
+show me activity logs from February 2028
+how many outreach prospects were added in 2029
+give me total confirmed sales of July 2027
+which companies were created in November 2028
+show deals closed in Q3 2027
+
+--- PAST DATES WITH NO DATA (data exists in system but not for this period) ---
+
+give me revenue of January 2020
+how many deals were won in 2019
+show me invoices from 2015
+give me contacts added in March 2018
+what was the sales performance in 2017
+show me all activity logs from 2021
+give me total revenue for year 2022
+how many companies were created in 2016
+show deals from Q1 2020
+
+--- SPECIFIC EMPTY FILTERS ---
+
+show me deals won in February 2026  [may have 0 won deals that month]
+give me revenue of a month where no invoices were paid
+show contacts added on 2026-01-01  [specific single day that may have no entries]
+how many meetings happened in 2025  [meetings table has only 1 row]
+give me all bills raised in 2025    [bills may have no 2025 entries]
+show confirmed sales for January 2020
+
+EXPECTED AGENT BEHAVIOR FOR ALL ABOVE:
+  ✓ "No records found for this period."
+  ✓ "There is no data available for September 2027."
+  ✓ Returns count = 0 or empty table — never invents a number.
+  ✗ NEVER say "Revenue was $X" when SQL returns 0 rows or 0 value.
+  ✗ NEVER say "approximately" or "estimated" for future/missing data.
+
+================================================================================
+  SECTION B: CROSS-VERIFICATION QUERY PAIRS
+  Purpose: Ask related queries whose answers MUST be mathematically consistent.
+  If Query A says total = 10, then Query B (subset) must return ≤ 10.
+  These catch hallucination where the agent gives different numbers for same data.
+================================================================================
+
+--- DEALS VERIFICATION PAIRS ---
+
+PAIR 1: Total vs Open vs Closed must add up
+  Query A: How many total deals are there?
+  Query B: How many open deals are there?
+  Query C: How many won deals are there?
+  Query D: How many lost deals are there?
+  Rule: B + C + D = A  (open + won + lost = total)
+
+PAIR 2: Period deals consistency
+  Query A: give me last 6 months all deals
+  Query B: give me last 6 months closed deals
+  Query C: give me last 6 months won deals
+  Query D: give me last 6 months lost deals
+  Rule: C + D ≤ A,  C + D = B,  B ≤ A
+
+PAIR 3: Rep total vs breakdown
+  Query A: how many deals does each sales rep own?
+  Query B: how many total deals are there?
+  Rule: SUM of all reps in A = B
+
+PAIR 4: Stage counts must match total
+  Query A: how many deals are in each stage?
+  Query B: how many total deals are there?
+  Rule: SUM of all stages in A = B
+
+--- REVENUE VERIFICATION PAIRS ---
+
+PAIR 5: Total revenue = sum of monthly revenue
+  Query A: what is total revenue this year?
+  Query B: show me monthly revenue breakdown for this year
+  Rule: SUM of all months in B = A
+
+PAIR 6: Total revenue = sum by company
+  Query A: what is total revenue this year?
+  Query B: show revenue by company this year
+  Rule: SUM of all companies in B = A
+
+PAIR 7: Paid + Unpaid = Total invoiced
+  Query A: what is total value of all invoices this year?
+  Query B: what is total value of paid invoices this year?
+  Query C: what is total value of unpaid invoices this year?
+  Rule: B + C ≈ A  (may differ slightly if partial payments exist)
+
+PAIR 8: Revenue period consistency
+  Query A: give me revenue this year (2026)
+  Query B: give me revenue Q1 2026
+  Query C: give me revenue Q2 2026 (partial — only Apr+May so far)
+  Rule: B + C ≤ A  (remaining quarters yet to close)
+
+--- CONTACTS / COMPANIES VERIFICATION PAIRS ---
+
+PAIR 9: Total contacts = sum by lifecycle stage
+  Query A: how many total contacts are there?
+  Query B: how many contacts are in each lifecycle stage?
+  Rule: SUM of all stages in B = A
+
+PAIR 10: Company total vs owner breakdown
+  Query A: how many total companies are there?
+  Query B: how many companies does each sales rep own?
+  Rule: SUM of all reps in B = A
+
+PAIR 11: Contacts per company vs total
+  Query A: how many total contacts are there?
+  Query B: how many contacts does each company have?
+  Rule: SUM of all companies in B = A  (contacts with no company may differ)
+
+--- TARGET ACHIEVEMENT VERIFICATION PAIRS ---
+
+PAIR 12: Achieved + Not achieved = Total reps with targets
+  Query A: who achieved their target last month?
+  Query B: who did not achieve their target last month?
+  Query C: how many reps have targets set for this month?
+  Rule: COUNT(A) + COUNT(B) = C
+
+PAIR 13: Target achievement is mutually exclusive
+  Query A: which reps achieved target in April 2026?  [e.g., returns: Ketul]
+  Query B: which reps did NOT achieve target in April 2026?  [should NOT include Ketul]
+  Rule: Names in A and B must NOT overlap.
+
+--- OUTREACH / LEAD VERIFICATION PAIRS ---
+
+PAIR 14: Total vs converted vs not converted
+  Query A: how many total outreach prospects are there?
+  Query B: how many prospects were converted?
+  Query C: how many prospects are not converted?
+  Rule: B + C = A
+
+PAIR 15: Prospects by campaign must match total
+  Query A: how many total prospects are there?
+  Query B: how many prospects per campaign?
+  Rule: SUM of B = A  (unassigned campaigns may differ)
+
+--- TASKS VERIFICATION PAIRS ---
+
+PAIR 16: Open + Closed = Total
+  Query A: how many total tasks are there?
+  Query B: how many open tasks are there?
+  Query C: how many completed/closed tasks are there?
+  Rule: B + C = A
+
+PAIR 17: Overdue tasks must be subset of open tasks
+  Query A: how many open tasks are there?
+  Query B: how many overdue tasks are there?
+  Rule: B ≤ A  (overdue tasks are always a subset of open tasks)
+
+--- BILLS / VENDORS VERIFICATION PAIRS ---
+
+PAIR 18: Total vendors vs vendors with bills
+  Query A: how many total vendors are there?
+  Query B: how many vendors have at least one bill?
+  Rule: B ≤ A
+
+PAIR 19: Sum of individual bills = total
+  Query A: what is total net payable amount of all bills?
+  Query B: list all bills with their individual net payable amounts
+  Rule: SUM of all amounts in B = A
+
+--- ACTIVITY LOGS VERIFICATION PAIRS ---
+
+PAIR 20: Total logs = sum by user
+  Query A: how many total activity logs are there?
+  Query B: how many activity logs per user?
+  Rule: SUM of B = A
+
+================================================================================
+  SECTION C: EDGE CASE & BOUNDARY QUERIES
+  Purpose: Test behavior at data boundaries — 0 results, 1 result, large sets.
+================================================================================
+
+--- ZERO RESULT EXPECTED ---
+
+how many deals were won today?              [likely 0]
+how many invoices are due tomorrow?        [may be 0]
+how many meetings are scheduled today?     [likely 0 — only 1 meeting in DB]
+which reps have 0 open tasks?              [possible]
+which companies have 0 contacts?           [possible]
+which companies have 0 deals?              [possible — new companies]
+how many bills are paid?                   [check if any bills have paid status]
+which users logged in today?               [may be 0]
+
+--- SINGLE RESULT EXPECTED ---
+
+which company has the highest revenue this year?   [should return 1 company]
+which sales rep won the most deals this month?     [top 1]
+what is the latest invoice raised?                 [ORDER BY createdAt DESC LIMIT 1]
+which is the oldest deal in the pipeline?          [oldest open deal]
+which user was created first in the system?        [earliest createdAt in users]
+what was the biggest single invoice?               [highest grand_total]
+
+--- SAME QUERY DIFFERENT PHRASING (must give identical results) ---
+
+"how many open deals" vs "how many deals are active" vs "deals in pipeline"
+"total revenue this year" vs "2026 revenue" vs "revenue year to date"
+"who has most deals" vs "top sales rep by deal count" vs "deal leader"
+"give me last month revenue" vs "revenue of April 2026" vs "April 2026 collections"
+"companies with no activity" vs "inactive companies" vs "dormant companies"
+
+================================================================================
+  END OF FILE
+  Total queries: ~400+ across all sections
+  Sections: Core table queries | Cross-table complex | Out-of-range tests |
+            Verification pairs | Edge cases
+================================================================================
