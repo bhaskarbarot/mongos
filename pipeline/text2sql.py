@@ -767,32 +767,41 @@ def _build_fallback_prompt(query: str, prev_sql: str = "", error: str = "") -> T
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _extract_sql(raw: str) -> Optional[str]:
-    """Extract a clean SELECT statement from model output."""
+    """Extract a clean SELECT or WITH (CTE) statement from model output."""
     if not raw:
         return None
 
     cleaned = raw.strip()
+    # Strip ALL markdown fences anywhere in the string
+    cleaned = re.sub(r"```(?:sql|SQL|postgresql)?\s*", "", cleaned)
+    cleaned = re.sub(r"```", "", cleaned)
+    # Convert backtick-quoted identifiers to double-quoted (LLM MySQL habit)
+    cleaned = re.sub(r"`([^`]+)`", r'"\1"', cleaned)
+    # Strip common LLM preamble
     cleaned = re.sub(r"^(?:Here is|The SQL|SQL query|Answer|Result)\s*:?\s*", "", cleaned, flags=re.I)
 
-    # ```sql ... ``` code block
-    code_blocks = re.findall(r"```(?:sql|SQL|postgresql)?\s*(SELECT.+?)```", cleaned, re.DOTALL)
-    if code_blocks:
-        return _clean_sql(code_blocks[-1])
-
-    # <execute>...</execute>
-    exec_m = re.search(r"<execute>\s*(SELECT.+?)(?:</execute>|```|$)", cleaned, re.DOTALL | re.I)
+    # <execute>...</execute> tag (WITH or SELECT)
+    exec_m = re.search(r"<execute>\s*((?:WITH|SELECT).+?)(?:</execute>|$)", cleaned, re.DOTALL | re.I)
     if exec_m:
         return _clean_sql(exec_m.group(1))
 
-    # Bare SELECT statement
-    m = re.search(
-        r"(SELECT\b.+?)(?:;|\n\n\n|Explanation:|Note:|Question:|$)",
-        cleaned, re.DOTALL | re.I,
-    )
-    if m:
-        return _clean_sql(m.group(1))
-
-    return None
+    # Find first SELECT or WITH — extract from that point forward
+    m = re.search(r"\b((?:WITH|SELECT)\b.+)", cleaned, re.DOTALL | re.IGNORECASE)
+    if not m:
+        return None
+    sql = m.group(1).strip().rstrip(";")
+    # Trim trailing natural-language noise
+    sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
+    if len(sql) < 10:
+        return None
+    upper = sql.upper().lstrip()
+    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
+        return None
+    # Safety: reject only if the FIRST keyword is destructive
+    first_keyword = sql.strip().split()[0].upper() if sql.strip() else ""
+    if first_keyword in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
+        return None
+    return _clean_sql(sql)
 
 
 def _clean_sql(sql: str) -> str:

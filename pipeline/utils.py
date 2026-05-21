@@ -42,6 +42,13 @@ BLOCKED_SQL_PATTERNS = [
     re.compile(r";\s*SELECT\b",   re.IGNORECASE),  # stacked queries
 ]
 
+# Patterns for checking raw user input — only true SQL injection attempts,
+# not natural language words like "delete", "update", "add", "remove".
+_USER_INPUT_UNSAFE_PATTERNS = [
+    re.compile(r"--"),                # SQL comment injection
+    re.compile(r";\s*SELECT\b", re.IGNORECASE),  # stacked query injection
+]
+
 GREETING_PATTERNS = [
     re.compile(r"^\s*(hi|hello|hey|hola|namaste)\b[!.\s]*$",                     re.IGNORECASE),
     re.compile(r"^\s*good\s*(morning|afternoon|evening|day)\b[!.\s]*$",           re.IGNORECASE),
@@ -377,8 +384,15 @@ def is_greeting(text: str) -> bool:
 
 
 def is_blocked(text: str) -> bool:
-    """Check if query contains destructive SQL patterns."""
+    """Check if SQL string contains destructive operations. Use on generated SQL only."""
     return any(p.search(text) for p in BLOCKED_SQL_PATTERNS)
+
+
+def is_user_input_unsafe(text: str) -> bool:
+    """Check raw user natural language for true SQL injection attempts only.
+    Does NOT block words like 'delete', 'update', 'add', 'remove' in plain English.
+    """
+    return any(p.search(text) for p in _USER_INPUT_UNSAFE_PATTERNS)
 
 
 def sanitize_user_input(query: str) -> tuple[str, bool]:

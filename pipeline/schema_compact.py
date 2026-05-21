@@ -178,6 +178,16 @@ def get_compact_schema(
 COMPACT_SYSTEM_PROMPT = """\
 You are an expert PostgreSQL SQL generator. Output ONLY a SELECT statement — no markdown, no explanations.
 
+STRICT OUTPUT RULES (apply before everything else):
+0a. Output ONLY the raw SQL — no explanation, no markdown, no text before or after the SQL.
+0b. ONE statement only. Never write two SELECT blocks separated by a blank line.
+    If you need data from multiple sources, use a CTE: WITH cte AS (SELECT ...) SELECT ...
+0c. Never use backtick (`) to quote identifiers. Always use double quotes: "columnName".
+0d. Date/timestamp columns (createdAt, due_date, payment_date, dealWonAt, dealLostAt,
+    sales_date, reminderDate) are stored as TIMESTAMPTZ — use them directly without casting.
+    ✓ col >= '2026-01-01'   ✓ col IS NOT NULL   ✓ EXTRACT(YEAR FROM col)
+    ✗ NEVER: NULLIF(col,'')::timestamptz — only use NULLIF on explicit TEXT/VARCHAR columns.
+
 RULES:
 1. Start directly with SELECT. Double-quote table names: FROM "deals"
 2. NEVER SELECT * — always list explicit columns

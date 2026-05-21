@@ -80,7 +80,14 @@ class ComplexState(TypedDict):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def plan_report_node(state: ComplexState) -> Dict:
-    """Node 0: LLM plans report sections with date awareness and domain knowledge."""
+    """Node 0: LLM plans report sections with date awareness and domain knowledge.
+    Bypassed when DECOMPOSER_ENABLED=false.
+    """
+    from config import settings
+    if not settings.decomposer_enabled:
+        LOGGER.info("Complex agent: plan_report DISABLED — skipping to decompose")
+        return {}   # decompose_node will also bypass, so just pass through
+
     from pipeline.llm_router import call as llm_call
 
     all_tables = state["schema"].get("all_tables", [])
@@ -147,7 +154,14 @@ def _parse_report_sections(raw: Optional[str]) -> List[Dict[str, str]]:
 
 
 def complex_decompose_node(state: ComplexState) -> Dict:
-    """Decompose using planned report sections — intent-preserving, date-aware (max 6)."""
+    """Decompose using planned report sections — intent-preserving, date-aware (max 4).
+    Bypassed when DECOMPOSER_ENABLED=false — passes raw query as single sub-query.
+    """
+    from config import settings
+    if not settings.decomposer_enabled:
+        LOGGER.info("Complex agent: decomposer DISABLED — passing raw query directly")
+        return {"sub_queries": [{"sub_query": state["query"], "intent": "general"}]}
+
     from pipeline.llm_router import call as llm_call
 
     sections    = state.get("report_sections", [])
@@ -170,7 +184,7 @@ def complex_decompose_node(state: ComplexState) -> Dict:
 
         "OUTPUT: JSON array ONLY.\n"
         '[{"sub_query": "...", "intent": "count|list|sum|compare|rank|lookup|trend"}]\n'
-        "Max 6 sub-queries. Each answerable by ONE SQL independently.\n\n"
+        "Max 4 sub-queries. Combine related metrics into one SQL where possible. Each answerable by ONE SQL independently.\n\n"
 
         "INTENT PRESERVATION (never break these):\n"
         "- Date references → use the CURRENT DATE CONTEXT in the schema\n"

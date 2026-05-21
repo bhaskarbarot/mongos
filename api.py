@@ -132,6 +132,17 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
+@app.on_event("startup")
+def _create_db_indexes() -> None:
+    """Create performance indexes on startup. Safe to re-run (CONCURRENTLY IF NOT EXISTS)."""
+    try:
+        from pipeline.db_indexes import create_indexes
+        create_indexes()
+    except Exception as exc:
+        LOGGER.warning("Index creation skipped: %s", exc)
+
+
 # E3: Hardened CORS — restrict origins, methods, and headers
 app.add_middleware(
     CORSMiddleware,

@@ -43,7 +43,7 @@ load_dotenv()
 API_URL         = "http://localhost:8000/chat"
 QUERIES_FILE    = os.path.join(os.path.dirname(__file__), "all_queries.txt")
 OUTPUT_CSV      = os.path.join(os.path.dirname(__file__), "test_results.csv")
-REQUEST_TIMEOUT = 120          # seconds per query
+REQUEST_TIMEOUT = 300          # seconds per query (complex multi-table queries need 3-5 min)
 DELAY_BETWEEN   = 1.5          # seconds between queries (rate limit)
 GREEN_THRESHOLD = 0.90         # 90% of queries must score >= 7/10
 

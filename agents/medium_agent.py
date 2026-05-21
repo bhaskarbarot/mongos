@@ -357,7 +357,14 @@ def fetch_schema_node(state: MediumState) -> Dict:
 
 
 def decompose_node(state: MediumState) -> Dict:
-    """Node 2: Intent-preserving decomposition into 2-4 atomic sub-queries."""
+    """Node 2: Intent-preserving decomposition into 2-4 atomic sub-queries.
+    Bypassed when DECOMPOSER_ENABLED=false — passes raw query as single sub-query.
+    """
+    from config import settings
+    if not settings.decomposer_enabled:
+        LOGGER.info("Medium agent: decomposer DISABLED — passing raw query directly")
+        return {"sub_queries": [{"sub_query": state["query"], "intent": "general"}]}
+
     from pipeline.llm_router import call as llm_call
 
     all_tables  = state["schema"].get("all_tables", [])
@@ -498,7 +505,7 @@ def execute_parallel_node(state: MediumState) -> Dict:
             for sq in sub_queries
         }
 
-        done, not_done = futures_wait(future_map, timeout=40)
+        done, not_done = futures_wait(future_map, timeout=80)
 
         for future in done:
             sq = future_map[future]

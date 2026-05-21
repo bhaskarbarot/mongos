@@ -43,6 +43,7 @@ from pipeline.utils import (
     is_greeting,
     is_identity_question,
     is_system_config_query,
+    is_user_input_unsafe,
     is_vague_query,
     sanitize_user_input,
 )
@@ -183,7 +184,7 @@ def run(
             memory.update(original_query, result)
         return result
 
-    if is_blocked(user_query):
+    if is_user_input_unsafe(user_query):
         LOGGER.warning("[RID:%s] Guard: blocked: %.60s", request_id, user_query)
         result = _guard_response(
             "This query contains operations that are not permitted. "

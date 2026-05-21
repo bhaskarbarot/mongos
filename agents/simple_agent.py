@@ -34,22 +34,32 @@ LOGGER = logging.getLogger("sql_chatbot")
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _extract_sql(raw: str) -> Optional[str]:
-    """Extract the first valid SELECT statement from LLM output."""
+    """Extract the first valid SELECT or WITH (CTE) statement from LLM output."""
     if not raw:
         return None
     cleaned = raw.strip()
-    # Strip markdown fences
-    cleaned = re.sub(r"^```(?:sql)?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-
-    m = re.search(r"(SELECT\b.+?)(?:;|\n{3,}|$)", cleaned, re.DOTALL | re.IGNORECASE)
-    if m:
-        sql = m.group(1).strip().rstrip(";")
-        if len(sql) > 10 and sql.upper().startswith("SELECT"):
-            # Basic safety: reject destructive statements
-            if not re.search(r"\b(DROP|DELETE|TRUNCATE|ALTER|INSERT|UPDATE)\b", sql, re.IGNORECASE):
-                return sql
-    return None
+    # 1. Strip ALL markdown fences anywhere in the string
+    cleaned = re.sub(r"```(?:sql|SQL|postgresql)?\s*", "", cleaned)
+    cleaned = re.sub(r"```", "", cleaned)
+    # 2. Convert backtick-quoted identifiers to double-quoted (LLM MySQL habit)
+    cleaned = re.sub(r"`([^`]+)`", r'"\1"', cleaned)
+    # 3. Find first SELECT or WITH (CTE) — extract from that point forward
+    m = re.search(r"\b((?:WITH|SELECT)\b.+)", cleaned, re.DOTALL | re.IGNORECASE)
+    if not m:
+        return None
+    sql = m.group(1).strip().rstrip(";")
+    # 4. Trim trailing natural-language noise after the SQL ends
+    sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
+    if len(sql) < 10:
+        return None
+    upper = sql.upper().lstrip()
+    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
+        return None
+    # 5. Safety: reject only if the FIRST keyword is destructive
+    first_keyword = sql.strip().split()[0].upper() if sql.strip() else ""
+    if first_keyword in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
+        return None
+    return sql
 
 
 _SQL_PSEUDO_TABLES = {

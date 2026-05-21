@@ -331,11 +331,13 @@ _TABLE_NOTES = {
         "-- For product+deal-type analysis: SELECT d.type, COUNT(*), SUM(d.grand_total) FROM \"deals\" d GROUP BY d.type",
     ],
     "invoices": [
-        "-- Revenue: SUM(grand_total) WHERE payment_status='paid' AND NOT deleted",
-        "-- Overdue: NULLIF(due_date,'')::timestamptz < NOW() AND payment_status NOT IN ('paid','cancelled')",
-        "-- Year: EXTRACT(YEAR FROM NULLIF(payment_date,'')::timestamptz) = EXTRACT(YEAR FROM CURRENT_DATE)",
+        "-- Revenue: SUM(grandtotal_in_usd) WHERE payment_status='paid' AND NOT deleted",
+        "-- Overdue: due_date < NOW() AND payment_status NOT IN ('paid','cancelled') AND NOT deleted",
+        "-- Year: EXTRACT(YEAR FROM payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)",
+        "-- Date cols are TIMESTAMPTZ — use directly, NO cast: i.due_date < NOW(), i.payment_date >= '2026-01-01'",
         "-- ⚠ FK join companies: LEFT JOIN \"companies\" c ON c._id = i.company  (column='company' NOT 'companyId'!)",
-        "-- Date cols are TIMESTAMPTZ — use directly: i.invoice_date, i.due_date, i.payment_date >= NOW()",
+        "-- FK to sales order: i.so_number → sales._id  (LEFT JOIN \"sales\" s ON s._id = i.so_number)",
+        "-- ✗ NO direct deal FK on invoices — deal↔invoice link is via company: d.company = i.company",
         "-- ⚠ companies table has NO 'currency' column — currency is on invoices (i.currency)",
         "-- ⚠ NO productId column on invoices — products are not directly joinable via invoices",
     ],
@@ -357,6 +359,11 @@ _TABLE_NOTES = {
         "-- ⚠ NO 'leadId' column — outreaches link to contacts via email or assignedTo field",
         "-- Leads not contacted: contacts WHERE lifecycleStage='Lead' AND _id NOT IN (outreach assignedTo subquery)",
     ],
+    "contacts": [
+        "-- Mixed-case columns MUST use double quotes: WHERE c.\"lifecycleStage\" = 'Lead'",
+        "-- WHERE c.\"leadStatus\" = 'Qualified'  (not leadstatus — double-quote required)",
+        "-- FK join companies: LEFT JOIN \"companies\" co ON co._id = c.company",
+    ],
     "companies": [
         "-- ⚠ FK source: c.source (NOT c.sourceId, NOT c.source_id) → LEFT JOIN \"sources\" s ON s._id = c.source",
         "-- ⚠ NO 'currency' column on companies — currency lives on invoices/deals/sales tables",
@@ -368,7 +375,8 @@ _TABLE_NOTES = {
     "createtasks": [
         "-- ⚠ table name is 'createtasks' NOT 'tasks'",
         "-- Title column is \"Task\" (capital T)",
-        "-- Overdue: NULLIF(due_date,'')::timestamptz < NOW() AND status!='Completed' AND NOT deleted",
+        "-- due_date is TIMESTAMPTZ — use directly: due_date < NOW() AND status != 'Completed' AND NOT deleted",
+        "-- ✗ NEVER: NULLIF(due_date,'')::timestamptz — due_date is already timestamptz, cast will error",
         "-- FK companyId IS correct on createtasks (unlike invoices which uses 'company')",
     ],
     "products": [
@@ -379,10 +387,9 @@ _TABLE_NOTES = {
         "-- Direct product list: SELECT name, unit_cost, currency FROM \"products\" WHERE \"isActive\"=true ORDER BY unit_cost DESC",
     ],
     "activitylogs": [
-        "-- ⚠ createdAt is TEXT — ALWAYS cast: NULLIF(al.\"createdAt\",'')::timestamptz",
-        "-- ✗ WRONG: al.\"createdAt\" > (CURRENT_DATE - INTERVAL '7 day')  — TEXT vs timestamp fails!",
-        "-- ✓ CORRECT: NULLIF(al.\"createdAt\",'')::timestamptz > NOW() - INTERVAL '7 days'",
-        "-- Filter recent activity: WHERE NULLIF(al.\"createdAt\",'')::timestamptz >= NOW() - INTERVAL '7 days'",
+        "-- createdAt is TIMESTAMPTZ — use directly: al.\"createdAt\" >= NOW() - INTERVAL '7 days'",
+        "-- ✗ NEVER: NULLIF(al.\"createdAt\",'')::timestamptz — column is already timestamptz, cast will error",
+        "-- Filter recent activity: WHERE al.\"createdAt\" >= NOW() - INTERVAL '7 days'",
         "-- Deals that changed stage: JOIN activitylogs al ON al.\"recordId\" = d._id AND al.module='deals'",
         "-- NO deleted column on activitylogs — omit soft-delete filter",
     ],

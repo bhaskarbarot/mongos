@@ -59,6 +59,11 @@ class Settings:
     openrouter_synthesis_model:str = os.getenv("OR_SYNTHESIS_MODEL", "deepseek/deepseek-chat-v3-0324:free")
     openrouter_sql_model:      str = os.getenv("OR_SQL_MODEL",       "deepseek/deepseek-chat-v3-0324:free")
 
+    # ── Decomposer toggle ─────────────────────────────────────────────────────
+    # DECOMPOSER_ENABLED=true  → medium/complex agents decompose query into sub-queries (default)
+    # DECOMPOSER_ENABLED=false → skip decomposer, pass raw query as single sub-query directly to SQL
+    decomposer_enabled: bool = os.getenv("DECOMPOSER_ENABLED", "true").strip().lower() == "true"
+
     # ── Misc ──────────────────────────────────────────────────────────────────
     strict_grounded_mode: bool = os.getenv("STRICT_GROUNDED_MODE", "false").lower() == "true"
     log_file:             str  = os.getenv("QUERY_LOG_FILE", "logs/query.log")

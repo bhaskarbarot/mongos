@@ -248,7 +248,7 @@ def _call_groq(
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
             text = data["choices"][0]["message"]["content"].strip()
             if text:
@@ -294,7 +294,7 @@ def _call_gemini(
             headers={"Content-Type": "application/json", "User-Agent": "crm-ai/1.0"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
             return data["candidates"][0]["content"]["parts"][0]["text"].strip() or None
     except urllib.error.HTTPError as e:
@@ -335,7 +335,7 @@ def _call_openrouter(
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read())
             return data["choices"][0]["message"]["content"].strip() or None
     except urllib.error.HTTPError as e:
