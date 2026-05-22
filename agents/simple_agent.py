@@ -43,23 +43,36 @@ def _extract_sql(raw: str) -> Optional[str]:
     cleaned = re.sub(r"```", "", cleaned)
     # 2. Convert backtick-quoted identifiers to double-quoted (LLM MySQL habit)
     cleaned = re.sub(r"`([^`]+)`", r'"\1"', cleaned)
-    # 3. Find first SELECT or WITH (CTE) — extract from that point forward
-    m = re.search(r"\b((?:WITH|SELECT)\b.+)", cleaned, re.DOTALL | re.IGNORECASE)
-    if not m:
-        return None
-    sql = m.group(1).strip().rstrip(";")
-    # 4. Trim trailing natural-language noise after the SQL ends
-    sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
-    if len(sql) < 10:
-        return None
-    upper = sql.upper().lstrip()
-    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
-        return None
-    # 5. Safety: reject only if the FIRST keyword is destructive
-    first_keyword = sql.strip().split()[0].upper() if sql.strip() else ""
-    if first_keyword in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
-        return None
-    return sql
+    # 3. Try to extract from XML-style tags the model uses: <sql>, <execute>, <query>
+    for tag in ("sql", "execute", "query"):
+        tag_m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", cleaned, re.DOTALL | re.IGNORECASE)
+        if tag_m:
+            candidate = tag_m.group(1).strip().rstrip(";")
+            candidate = re.split(r"\n{3,}|Explanation:|Note:|Question:", candidate, flags=re.IGNORECASE)[0].strip()
+            upper = candidate.upper().lstrip()
+            if (upper.startswith("SELECT") or upper.startswith("WITH")) and len(candidate) >= 10:
+                first_keyword = candidate.strip().split()[0].upper()
+                if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
+                    return candidate
+    # 4. Find first SELECT — strict: must be followed by something useful (not natural-language prose)
+    m = re.search(r"\bSELECT\b.+", cleaned, re.DOTALL | re.IGNORECASE)
+    if m:
+        sql = m.group(0).strip().rstrip(";")
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
+        if len(sql) >= 10:
+            first_keyword = sql.strip().split()[0].upper()
+            if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
+                return sql
+    # 5. WITH CTE — only match if followed by identifier+AS+( pattern (not English prose)
+    m = re.search(r"\bWITH\s+\w+\s+AS\s*\(.+", cleaned, re.DOTALL | re.IGNORECASE)
+    if m:
+        sql = m.group(0).strip().rstrip(";")
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
+        if len(sql) >= 10:
+            first_keyword = sql.strip().split()[0].upper()
+            if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
+                return sql
+    return None
 
 
 _SQL_PSEUDO_TABLES = {

@@ -8745,5 +8745,437 @@
       "createtasks"
     ],
     "saved_at": "2026-05-21T13:51:39.867845"
+  },
+  {
+    "natural_query": "Show all deals that have not had any activity in the last 30 days.",
+    "sql": "SELECT d.* \nFROM \"deals\" d \nWHERE NOT d.deleted \n  AND d._id NOT IN (\n    SELECT al.\"recordId\" \n    FROM \"activitylogs\" al \n    WHERE al.module = 'deals' \n      AND al.\"createdAt\" >= NOW() - INTERVAL '30 days'\n  ) \n  OR d._id NOT IN (SELECT \"recordId\" FROM \"activitylogs\" WHERE module = 'deals') \n  AND d.\"dealWonAt\" IS NULL \n  AND d.\"dealLostAt\" IS NULL \nORDER BY d.\"createdAt\" DESC",
+    "tables": [
+      "activitylogs",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T03:55:33.599321"
+  },
+  {
+    "natural_query": "Which companies have not had any activity in the last 30 days?",
+    "sql": "SELECT c.\"companyName\"\nFROM \"companies\" c\nWHERE NOT c.deleted\n  AND c._id NOT IN (\n    SELECT al.\"recordId\"\n    FROM \"activitylogs\" al\n    WHERE al.\"createdAt\" >= '2026-04-22'\n  )\nORDER BY c.\"companyName\"",
+    "tables": [
+      "activitylogs",
+      "companies"
+    ],
+    "saved_at": "2026-05-22T03:55:55.074566"
+  },
+  {
+    "natural_query": "Show all companies that were won as leads this year.",
+    "sql": "SELECT c.\"companyName\", c.\"lifecycleStage\", c.\"leadStatus\", c.\"createdAt\", c.\"leadWonAt\"\nFROM \"companies\" c \nWHERE c.\"lifecycleStage\" != 'Lead' \n  AND c.\"leadStatus\" IN ('Qualified', 'Pre-Qualified', 'Attempted to Contact', 'Contacted', 'New') \n  AND c.\"leadWonAt\" IS NOT NULL \n  AND EXTRACT(YEAR FROM c.\"leadWonAt\") = 2026 \n  AND NOT c.deleted \nORDER BY c.\"leadWonAt\" DESC",
+    "tables": [
+      "c",
+      "companies"
+    ],
+    "saved_at": "2026-05-22T03:55:59.206810"
+  },
+  {
+    "natural_query": "How many prospects have been converted to leads?",
+    "sql": "SELECT COUNT(*) AS prospect_count \nFROM \"contacts\" \nWHERE \"lifecycleStage\" = 'Lead' \n  AND _id NOT IN (\n    SELECT ct._id \n    FROM \"contacts\" ct \n    JOIN \"outreaches\" o ON o.email = ct.\"email\" \n    WHERE o.status != 'Unassigned' \n      AND NOT o.\"isDeleted\" \n      AND o.status IN ('Contacted', 'Converted to Deal')\n  )",
+    "tables": [
+      "contacts",
+      "outreaches"
+    ],
+    "saved_at": "2026-05-22T03:56:01.936671"
+  },
+  {
+    "natural_query": "How many tasks are overdue (past due date and not closed)?",
+    "sql": "SELECT COUNT(*) AS overdue_task_count \nFROM \"createtasks\" \nWHERE due_date < NOW() \n  AND status != 'Completed' \n  AND NOT deleted",
+    "tables": [
+      "createtasks"
+    ],
+    "saved_at": "2026-05-22T03:56:05.002419"
+  },
+  {
+    "natural_query": "Show all tasks with no due date set.",
+    "sql": "SELECT _id, \"Task\", status, priority, \"createdBy\", due_date, \"companyId\", \"dealsId\", \"invoiceId\", \"salesId\", \"createdAt\" \nFROM \"createtasks\" \nWHERE due_date IS NULL AND NOT deleted",
+    "tables": [
+      "createtasks"
+    ],
+    "saved_at": "2026-05-22T03:56:07.832067"
+  },
+  {
+    "natural_query": "What are the targets for this year?",
+    "sql": "SELECT t.\"targetInUSD\", t.month, u.name AS user_name, t.\"teamName\" \nFROM \"targets\" t \nJOIN \"users\" u ON u._id = t.\"userId\" \nWHERE t.year = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:56:10.884211"
+  },
+  {
+    "natural_query": "Which user has the highest target this month?",
+    "sql": "SELECT u.name, t.\"targetInUSD\"\nFROM \"users\" u\nJOIN \"targets\" t ON t.\"userId\" = u._id\nWHERE t.month = EXTRACT(MONTH FROM CURRENT_DATE)\n  AND t.year = EXTRACT(YEAR FROM CURRENT_DATE)\nORDER BY t.\"targetInUSD\" DESC\nLIMIT 1",
+    "tables": [
+      "targets",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:56:14.834819"
+  },
+  {
+    "natural_query": "How many admin users are there?",
+    "sql": "SELECT COUNT(*) AS admin_user_count FROM \"users\" WHERE \"isAdmin\" = true AND \"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:56:20.536568"
+  },
+  {
+    "natural_query": "List all active sales reps (non-admin users).",
+    "sql": "SELECT u._id, u.name, u.email, u.department \nFROM \"users\" u \nWHERE u.\"isActive\" = true AND u.\"isAdmin\" = false",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:56:23.689045"
+  },
+  {
+    "natural_query": "How many emails were sent this week?",
+    "sql": "SELECT COUNT(*) AS email_count \nFROM \"emails\" \nWHERE EXTRACT(YEAR FROM \"createdAt\") = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND EXTRACT(WEEK FROM \"createdAt\") = EXTRACT(WEEK FROM CURRENT_DATE)",
+    "tables": [
+      "createdAt",
+      "emails"
+    ],
+    "saved_at": "2026-05-22T03:56:29.705890"
+  },
+  {
+    "natural_query": "Show all activity logs for a specific user.",
+    "sql": "SELECT al.\"createdAt\", al.action, al.module, al.\"recordId\", al.\"recordName\", u.name AS user_name \nFROM \"activitylogs\" al \nJOIN \"users\" u ON u._id = al.\"userId\" \nWHERE u._id = 'specific_user_id' \nORDER BY al.\"createdAt\" DESC",
+    "tables": [
+      "activitylogs",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:56:37.593639"
+  },
+  {
+    "natural_query": "What modules have the most activity?",
+    "sql": "SELECT module, COUNT(*) AS activity_count \nFROM \"activitylogs\" \nGROUP BY module \nORDER BY activity_count DESC",
+    "tables": [
+      "activitylogs"
+    ],
+    "saved_at": "2026-05-22T03:56:40.758713"
+  },
+  {
+    "natural_query": "How many \"add\" vs \"update\" vs \"delete\" actions are logged?",
+    "sql": "SELECT \n  al.action, \n  COUNT(*) AS action_count\nFROM \n  \"activitylogs\" al\nGROUP BY \n  al.action\nORDER BY \n  action_count DESC",
+    "tables": [
+      "activitylogs"
+    ],
+    "saved_at": "2026-05-22T03:56:43.704406"
+  },
+  {
+    "natural_query": "How many notifications are linked to tasks vs outreach?",
+    "sql": "SELECT \n  COALESCE(SUM(CASE WHEN n.type = 'Task Assigned' THEN 1 ELSE 0 END), 0) AS task_notifications,\n  COALESCE(SUM(CASE WHEN n.type = 'Verified' THEN 1 ELSE 0 END), 0) AS outreach_notifications\nFROM \"notifications\" n \nWHERE NOT n.\"isDeleted\"",
+    "tables": [
+      "notifications"
+    ],
+    "saved_at": "2026-05-22T03:56:52.226377"
+  },
+  {
+    "natural_query": "Show all notes due for reminder today.",
+    "sql": "SELECT n.message, n.\"reminderDate\", u.name AS created_by \nFROM \"notes\" n \nLEFT JOIN \"users\" u ON u._id = n.\"createdBy\" \nWHERE n.\"reminderDate\" >= NOW() - INTERVAL '1 day' \n  AND n.\"reminderDate\" < NOW() + INTERVAL '1 day'",
+    "tables": [
+      "notes",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:56:58.116734"
+  },
+  {
+    "natural_query": "Which vendors are in India (have GSTIN)?",
+    "sql": "SELECT v.\"companyName\", v.email \nFROM \"vendors\" v \nWHERE v.country = 'India'",
+    "tables": [
+      "vendors"
+    ],
+    "saved_at": "2026-05-22T03:57:08.837895"
+  },
+  {
+    "natural_query": "Show all vendors with their stage.",
+    "sql": "SELECT _id, \"companyName\", stage, email, phone FROM \"vendors\"",
+    "tables": [
+      "vendors"
+    ],
+    "saved_at": "2026-05-22T03:57:12.382492"
+  },
+  {
+    "natural_query": "List all bills with their amount and status.",
+    "sql": "SELECT b.\"systemBillNo\", b.\"netPayableAmount\", b.status \nFROM \"bills\" b",
+    "tables": [
+      "bills"
+    ],
+    "saved_at": "2026-05-22T03:57:15.872007"
+  },
+  {
+    "natural_query": "What are all the deal stages in the CRM?",
+    "sql": "SELECT DISTINCT dss.\"dealStageName\" \nFROM \"dealstagesettings\" dss \nWHERE NOT dss.deleted \nORDER BY dss.\"dealStageName\"",
+    "tables": [
+      "dealstagesettings"
+    ],
+    "saved_at": "2026-05-22T03:57:18.899760"
+  },
+  {
+    "natural_query": "How many technologies are in each category?",
+    "sql": "SELECT \n  c.\"categoryName\", \n  COUNT(t._id) AS technology_count\nFROM \n  \"technologies\" t\n  LEFT JOIN \"categories\" c ON c._id = t.category\nGROUP BY \n  c._id, \n  c.\"categoryName\"\nORDER BY \n  technology_count DESC",
+    "tables": [
+      "categories",
+      "technologies"
+    ],
+    "saved_at": "2026-05-22T03:57:58.521055"
+  },
+  {
+    "natural_query": "What are all the lead sources?",
+    "sql": "SELECT DISTINCT \"sourceName\" FROM \"sources\" ORDER BY \"sourceName\"",
+    "tables": [
+      "sources"
+    ],
+    "saved_at": "2026-05-22T03:58:01.349482"
+  },
+  {
+    "natural_query": "What are all tax rates configured?",
+    "sql": "SELECT t.name, t.amount \nFROM \"taxes\" t \nORDER BY t.name",
+    "tables": [
+      "taxes"
+    ],
+    "saved_at": "2026-05-22T03:58:05.100322"
+  },
+  {
+    "natural_query": "What is the highest tax rate?",
+    "sql": "SELECT MAX(amount) AS highest_tax_rate FROM \"taxes\"",
+    "tables": [
+      "taxes"
+    ],
+    "saved_at": "2026-05-22T03:58:08.119118"
+  },
+  {
+    "natural_query": "How many tax types are there?",
+    "sql": "SELECT COUNT(*) AS tax_type_count FROM \"taxes\"",
+    "tables": [
+      "taxes"
+    ],
+    "saved_at": "2026-05-22T03:58:11.064942"
+  },
+  {
+    "natural_query": "List all campaign categories.",
+    "sql": "SELECT c.\"categoryName\" \nFROM \"categories\" c \nORDER BY c.\"categoryName\" ASC",
+    "tables": [
+      "categories"
+    ],
+    "saved_at": "2026-05-22T03:58:13.937819"
+  },
+  {
+    "natural_query": "How many categories are there?",
+    "sql": "SELECT COUNT(*) AS category_count FROM \"categories\"",
+    "tables": [
+      "categories"
+    ],
+    "saved_at": "2026-05-22T03:58:17.143005"
+  },
+  {
+    "natural_query": "What are all the campaigns?",
+    "sql": "SELECT _id, \"campaignName\", \"categoryId\", \"createdBy\", \"createdAt\" FROM \"campaigns\"",
+    "tables": [
+      "campaigns"
+    ],
+    "saved_at": "2026-05-22T03:58:20.151431"
+  },
+  {
+    "natural_query": "How many campaigns are there?",
+    "sql": "SELECT COUNT(*) AS campaign_count FROM \"campaigns\"",
+    "tables": [
+      "campaigns"
+    ],
+    "saved_at": "2026-05-22T03:58:22.908797"
+  },
+  {
+    "natural_query": "List all departments.",
+    "sql": "SELECT name FROM \"departments\"",
+    "tables": [
+      "departments"
+    ],
+    "saved_at": "2026-05-22T03:58:26.127806"
+  },
+  {
+    "natural_query": "What project types are configured?",
+    "sql": "SELECT name FROM \"projecttypes\" ORDER BY name",
+    "tables": [
+      "projecttypes"
+    ],
+    "saved_at": "2026-05-22T03:58:32.264242"
+  },
+  {
+    "natural_query": "List all payment modes available.",
+    "sql": "SELECT DISTINCT payment_name FROM \"payments\"",
+    "tables": [
+      "payments"
+    ],
+    "saved_at": "2026-05-22T03:58:41.349812"
+  },
+  {
+    "natural_query": "Which payment mode has the highest fee?",
+    "sql": "SELECT payment_name, payment_fee \nFROM payments \nORDER BY payment_fee DESC \nLIMIT 1",
+    "tables": [
+      "payments"
+    ],
+    "saved_at": "2026-05-22T03:58:44.210703"
+  },
+  {
+    "natural_query": "What activity event types are configured?",
+    "sql": "SELECT DISTINCT \"ActivityEvent\" AS event_type FROM \"activityevents\" ORDER BY event_type",
+    "tables": [
+      "activityevents"
+    ],
+    "saved_at": "2026-05-22T03:58:47.722051"
+  },
+  {
+    "natural_query": "Who created each activity event type?",
+    "sql": "SELECT a.\"ActivityEvent\", u.name AS creator \nFROM \"activityevents\" a \nLEFT JOIN \"users\" u ON u._id = a.\"createdBy\" \nORDER BY a.\"ActivityEvent\"",
+    "tables": [
+      "activityevents",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:58:50.708503"
+  },
+  {
+    "natural_query": "How many meetings are scheduled?",
+    "sql": "SELECT COUNT(*) AS meeting_count FROM \"meetings\"",
+    "tables": [
+      "meetings"
+    ],
+    "saved_at": "2026-05-22T03:58:54.130230"
+  },
+  {
+    "natural_query": "Show all upcoming meetings.",
+    "sql": "SELECT \n  m._id, \n  m.title, \n  m.description, \n  m.start, \n  m.end, \n  m.location, \n  m.\"EventId\", \n  u.name AS created_by\nFROM \n  \"meetings\" m\n  LEFT JOIN \"users\" u ON u._id = m.\"createdBy\"\nWHERE \n  m.start >= CURRENT_DATE\nORDER BY \n  m.start ASC",
+    "tables": [
+      "meetings",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:59:01.653783"
+  },
+  {
+    "natural_query": "Who has meetings this week?",
+    "sql": "SELECT u.name \nFROM \"users\" u \nJOIN \"meetings\" m ON m.\"createdBy\" = u._id \nWHERE EXTRACT(YEAR FROM m.\"createdAt\") = EXTRACT(YEAR FROM CURRENT_DATE)\n  AND EXTRACT(WEEK FROM m.\"createdAt\") = EXTRACT(WEEK FROM CURRENT_DATE) \nGROUP BY u._id, u.name",
+    "tables": [
+      "m",
+      "meetings",
+      "users"
+    ],
+    "saved_at": "2026-05-22T03:59:05.226426"
+  },
+  {
+    "natural_query": "Show all public leads with their status.",
+    "sql": "SELECT pl.\"firstName\", pl.\"lastName\", pl.email, pl.\"phoneNumber\", s.name AS lead_status \nFROM \"publicleads\" pl \nLEFT JOIN \"status\" s ON s._id = pl.\"leadStatus\"",
+    "tables": [
+      "publicleads",
+      "status"
+    ],
+    "saved_at": "2026-05-22T03:59:08.132710"
+  },
+  {
+    "natural_query": "Which source generated inbound leads?",
+    "sql": "SELECT s.\"sourceName\", COUNT(pl._id) AS lead_count\nFROM \"publicleads\" pl\nLEFT JOIN \"sources\" s ON s._id = pl.source\nGROUP BY s._id, s.\"sourceName\"\nORDER BY lead_count DESC",
+    "tables": [
+      "publicleads",
+      "sources"
+    ],
+    "saved_at": "2026-05-22T03:59:11.236455"
+  },
+  {
+    "natural_query": "List all deleted companies with deletion date.",
+    "sql": "SELECT \"companyName\", deleted, \"createdAt\" \nFROM \"companies\" \nWHERE deleted \nORDER BY \"createdAt\" DESC",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-22T03:59:50.191821"
+  },
+  {
+    "natural_query": "what are the targets for year 2030",
+    "sql": "SELECT t.\"targetInUSD\", t.month, t.\"teamName\" \nFROM \"targets\" t \nWHERE t.year = 2030",
+    "tables": [
+      "targets"
+    ],
+    "saved_at": "2026-05-22T03:59:59.839754"
+  },
+  {
+    "natural_query": "give me revenue of a month where no invoices were paid",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue\nFROM \"invoices\" i\nWHERE NOT i.deleted\n  AND i.payment_status = 'paid'\n  AND EXTRACT(MONTH FROM i.payment_date) = 5\n  AND EXTRACT(YEAR FROM i.payment_date) = 2026\n  AND i._id NOT IN (\n    SELECT i2._id\n    FROM \"invoices\" i2\n    WHERE NOT i2.deleted\n      AND i2.payment_status = 'paid'\n      AND EXTRACT(MONTH FROM i2.payment_date) = 5\n      AND EXTRACT(YEAR FROM i2.payment_date) = 2026\n  )",
+    "tables": [
+      "i",
+      "i2",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T04:00:10.002142"
+  },
+  {
+    "natural_query": "how many deals were won today?",
+    "sql": "SELECT COUNT(*) AS deals_won_today \nFROM \"deals\" \nWHERE \"dealWonAt\" IS NOT NULL \n  AND EXTRACT(YEAR FROM \"dealWonAt\") = EXTRACT(YEAR FROM CURRENT_DATE) \n  AND EXTRACT(MONTH FROM \"dealWonAt\") = EXTRACT(MONTH FROM CURRENT_DATE) \n  AND EXTRACT(DAY FROM \"dealWonAt\") = EXTRACT(DAY FROM CURRENT_DATE) \n  AND NOT deleted",
+    "tables": [
+      "dealWonAt",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T04:00:12.759608"
+  },
+  {
+    "natural_query": "how many invoices are due tomorrow?",
+    "sql": "SELECT COUNT(*) AS invoice_count \nFROM \"invoices\" i \nWHERE NOT i.deleted \n  AND i.due_date >= NOW() + INTERVAL '1 day' \n  AND i.due_date < (NOW() + INTERVAL '1 day' + INTERVAL '1 day') \n  AND i.payment_status NOT IN ('paid', 'cancelled')",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T04:00:15.699470"
+  },
+  {
+    "natural_query": "which reps have 0 open tasks?",
+    "sql": "SELECT u.name \nFROM \"users\" u \nWHERE u._id NOT IN (\n  SELECT c.\"createdBy\" \n  FROM \"createtasks\" c \n  WHERE c.status != 'Completed' AND NOT c.deleted\n) AND u.\"isActive\" = true",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-22T04:00:18.781646"
+  },
+  {
+    "natural_query": "which companies have 0 deals?",
+    "sql": "SELECT c.\"companyName\"\nFROM \"companies\" c\nWHERE NOT c.deleted\n  AND c._id NOT IN (\n    SELECT d.company\n    FROM \"deals\" d\n    WHERE NOT d.deleted\n  )\nORDER BY c.\"companyName\"",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T04:00:21.633392"
+  },
+  {
+    "natural_query": "which users logged in today?",
+    "sql": "SELECT u.name, u.email \nFROM \"users\" u \nJOIN \"activitylogs\" al ON al.\"userId\" = u._id \nWHERE al.\"createdAt\" >= '2026-05-22' \nGROUP BY u._id, u.name, u.email \nHAVING COUNT(DISTINCT al.\"ipAddress\") > 0",
+    "tables": [
+      "activitylogs",
+      "users"
+    ],
+    "saved_at": "2026-05-22T04:00:25.153360"
+  },
+  {
+    "natural_query": "which sales rep won the most deals this month?",
+    "sql": "SELECT \n  u.name AS rep_name, \n  COUNT(DISTINCT d._id) AS deals_won\nFROM \n  \"users\" u\n  LEFT JOIN \"deals\" d ON d.owner = u._id AND d.\"dealWonAt\" IS NOT NULL AND NOT d.deleted\nWHERE \n  EXTRACT(MONTH FROM d.\"dealWonAt\") = 5 \n  AND EXTRACT(YEAR FROM d.\"dealWonAt\") = 2026 \n  AND u.\"isActive\" = true\nGROUP BY \n  u._id, u.name\nORDER BY \n  deals_won DESC \nLIMIT 1",
+    "tables": [
+      "d",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-22T04:00:29.384662"
+  },
+  {
+    "natural_query": "which is the oldest deal in the pipeline?",
+    "sql": "SELECT d.name, d.stage, d.\"createdAt\" \nFROM \"deals\" d \nWHERE d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted \nORDER BY d.\"createdAt\" ASC \nLIMIT 1",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T04:00:31.966781"
+  },
+  {
+    "natural_query": "which user was created first in the system?",
+    "sql": "SELECT name, email, \"createdAt\" FROM \"users\" ORDER BY \"createdAt\" ASC LIMIT 1",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T04:00:34.869804"
   }
 ]

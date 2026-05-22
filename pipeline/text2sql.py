@@ -422,8 +422,10 @@ CREATE TABLE "commonnotes" (
     "salesId" TEXT,         -- → sales._id
     "isPinned" BOOLEAN,
     "isLog" BOOLEAN,
-    "createdAt" TEXT,
+    "createdAt" TIMESTAMPTZ  -- use directly, NO cast
 );
+-- ⚠ "notes" table is for OUTREACH notes only — it has NO "type" column
+-- ⚠ commonnotes is for CRM entity notes — it HAS "type" TEXT column
 -- ✓ Notes for company: WHERE cn."companyId" = 'company_id_here'
 -- ✓ Notes for deal: WHERE cn."dealId" = 'deal_id_here'
 
@@ -780,28 +782,46 @@ def _extract_sql(raw: str) -> Optional[str]:
     # Strip common LLM preamble
     cleaned = re.sub(r"^(?:Here is|The SQL|SQL query|Answer|Result)\s*:?\s*", "", cleaned, flags=re.I)
 
-    # <execute>...</execute> tag (WITH or SELECT)
-    exec_m = re.search(r"<execute>\s*((?:WITH|SELECT).+?)(?:</execute>|$)", cleaned, re.DOTALL | re.I)
-    if exec_m:
-        return _clean_sql(exec_m.group(1))
+    def _safe(candidate: str) -> Optional[str]:
+        """Return cleaned SQL if safe, else None."""
+        candidate = _clean_sql(candidate)
+        upper = candidate.upper().lstrip()
+        if not (upper.startswith("SELECT") or upper.startswith("WITH")):
+            return None
+        if len(candidate) < 10:
+            return None
+        first_kw = candidate.strip().split()[0].upper()
+        if first_kw in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
+            return None
+        return candidate
 
-    # Find first SELECT or WITH — extract from that point forward
-    m = re.search(r"\b((?:WITH|SELECT)\b.+)", cleaned, re.DOTALL | re.IGNORECASE)
-    if not m:
-        return None
-    sql = m.group(1).strip().rstrip(";")
-    # Trim trailing natural-language noise
-    sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
-    if len(sql) < 10:
-        return None
-    upper = sql.upper().lstrip()
-    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
-        return None
-    # Safety: reject only if the FIRST keyword is destructive
-    first_keyword = sql.strip().split()[0].upper() if sql.strip() else ""
-    if first_keyword in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
-        return None
-    return _clean_sql(sql)
+    # Priority 1: XML-style tags the model uses: <sql>, <execute>, <query>
+    for tag in ("sql", "execute", "query"):
+        tag_m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", cleaned, re.DOTALL | re.IGNORECASE)
+        if tag_m:
+            candidate = tag_m.group(1).strip()
+            candidate = re.split(r"\n{3,}|Explanation:|Note:|Question:", candidate, flags=re.IGNORECASE)[0].strip()
+            result = _safe(candidate)
+            if result:
+                return result
+
+    # Priority 2: find first SELECT (strict — no WITH-as-prose false positives)
+    m = re.search(r"\bSELECT\b.+", cleaned, re.DOTALL | re.IGNORECASE)
+    if m:
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", m.group(0), flags=re.IGNORECASE)[0]
+        result = _safe(sql)
+        if result:
+            return result
+
+    # Priority 3: WITH CTE — only if followed by identifier+AS+( (not English prose)
+    m = re.search(r"\bWITH\s+\w+\s+AS\s*\(.+", cleaned, re.DOTALL | re.IGNORECASE)
+    if m:
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", m.group(0), flags=re.IGNORECASE)[0]
+        result = _safe(sql)
+        if result:
+            return result
+
+    return None
 
 
 def _clean_sql(sql: str) -> str:

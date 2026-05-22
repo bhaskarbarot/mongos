@@ -231,12 +231,22 @@ RULES:
       ✗ NEVER omit HAVING — LEFT JOIN without it returns ALL vendors including those with 0 bills
 15. COLUMN EXISTENCE RULES (these columns do NOT exist — never generate them):
     ✗ companies.currency  — currency is on invoices/deals/sales, NOT on companies
-    ✗ sales.closeDate     — sales uses sales_date (TEXT). closeDate is on deals only.
+    ✗ sales.closeDate     — sales uses sales_date. closeDate is on deals only.
     ✗ invoices.productId  — invoices have no direct product FK column
+    ✗ invoices.deal_id    — invoices have NO deal FK; link via company: d.company = i.company
     ✗ outreaches.leadId   — outreaches use assignedTo or email to link contacts
-    ✗ vendors.name        — vendors use "companyName" not name: SELECT v."companyName" FROM "vendors" v
-    ✗ bills.deleted       — bills table has NO deleted column, never add WHERE NOT b.deleted
-    ✗ activitylogs.deleted — activitylogs has NO deleted column, never add WHERE NOT al.deleted
+    ✗ vendors.name        — vendors use "companyName": SELECT v."companyName" FROM "vendors" v
+    ✗ bills.deleted       — bills table has NO deleted column
+    ✗ activitylogs.deleted — activitylogs has NO deleted column
+    ✗ tax_types           — table does NOT exist; use "taxes" table: SELECT name, amount FROM "taxes"
+    ✗ notes.type          — "notes" (outreach notes) has NO type column
+                            only "commonnotes" has type TEXT ('Company'|'Deal'|'Contact'|'Invoice'|'Sales')
+    ✗ projecttypes.categoryName — projecttypes only has: _id, name. Use p.name not p."categoryName"
+    ✗ createtasks.contactId  — actual column is "contectId" (typo in DB): ct."contectId"
+    ✗ deals.lastActivity as timestamp — lastActivity is JSONB, NOT a date column, never compare with >=
+    ✗ companies.lastActivity as timestamp — same: lastActivity is JSONB on companies too
+    ✓ To find inactive deals: use d."createdAt" or d."dealWonAt" for date filters, NOT lastActivity
+    ✓ "lifecycleStage" MUST use double quotes — it is case-sensitive: WHERE c."lifecycleStage" = 'Lead'
 16. REVENUE / AMOUNT QUERIES — MANDATORY RULES (always apply):
 
     REVENUE = paid invoices only, dated by when payment was received.

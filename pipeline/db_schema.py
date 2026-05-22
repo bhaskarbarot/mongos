@@ -326,6 +326,7 @@ _TABLE_NOTES = {
         "-- Won: \"dealWonAt\" IS NOT NULL AND NOT deleted | Lost: \"dealLostAt\" IS NOT NULL",
         "-- Date cols are TIMESTAMPTZ — use directly: d.\"createdAt\" >= NOW() - INTERVAL '6 months'",
         "-- FK join companies: LEFT JOIN \"companies\" c ON c._id = d.company  (column='company' NOT 'companyId')",
+        "-- ⚠ lastActivity is JSONB — NOT a date column, NEVER use d.\"lastActivity\" >= NOW() — use d.\"createdAt\" instead",
         "-- ⚠ deals has NO 'items' or 'product' JSONB column — only sales and invoices have items JSONB",
         "-- d.type is a deal category TEXT label (e.g. 'Cross-sell','Upsell','New Business') — NOT a product FK",
         "-- For product+deal-type analysis: SELECT d.type, COUNT(*), SUM(d.grand_total) FROM \"deals\" d GROUP BY d.type",
@@ -377,6 +378,7 @@ _TABLE_NOTES = {
         "-- Title column is \"Task\" (capital T)",
         "-- due_date is TIMESTAMPTZ — use directly: due_date < NOW() AND status != 'Completed' AND NOT deleted",
         "-- ✗ NEVER: NULLIF(due_date,'')::timestamptz — due_date is already timestamptz, cast will error",
+        "-- FK column name is 'contectId' (typo in DB — NOT contactId): ct.\"contectId\" → contacts._id",
         "-- FK companyId IS correct on createtasks (unlike invoices which uses 'company')",
     ],
     "products": [
