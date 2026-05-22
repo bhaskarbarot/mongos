@@ -59,6 +59,21 @@ class Settings:
     openrouter_synthesis_model:str = os.getenv("OR_SYNTHESIS_MODEL", "deepseek/deepseek-chat-v3-0324:free")
     openrouter_sql_model:      str = os.getenv("OR_SQL_MODEL",       "deepseek/deepseek-chat-v3-0324:free")
 
+    # ── Ollama SQL toggle ─────────────────────────────────────────────────────
+    ollama_sql_enabled: bool = os.getenv("OLLAMA_SQL_ENABLED", "true").lower() == "true"
+
+    # ── Cerebras — fallback 3 (free, 800 tok/s, llama-3.3-70b) ──────────────
+    cerebras_api_key:          str = os.getenv("CEREBRAS_API_KEY",          "")
+    cerebras_sql_model:        str = os.getenv("CEREBRAS_SQL_MODEL",        "llama-3.3-70b")
+    cerebras_synthesis_model:  str = os.getenv("CEREBRAS_SYNTHESIS_MODEL",  "llama-3.3-70b")
+    cerebras_classify_model:   str = os.getenv("CEREBRAS_CLASSIFY_MODEL",   "llama3.1-8b")
+
+    # ── SambaNova — fallback 4 (free, llama-3.3-70b) ─────────────────────────
+    sambanova_api_key:          str = os.getenv("SAMBANOVA_API_KEY",          "")
+    sambanova_sql_model:        str = os.getenv("SAMBANOVA_SQL_MODEL",        "Meta-Llama-3.3-70B-Instruct")
+    sambanova_synthesis_model:  str = os.getenv("SAMBANOVA_SYNTHESIS_MODEL",  "Meta-Llama-3.3-70B-Instruct")
+    sambanova_classify_model:   str = os.getenv("SAMBANOVA_CLASSIFY_MODEL",   "Meta-Llama-3.1-8B-Instruct")
+
     # ── Decomposer toggle ─────────────────────────────────────────────────────
     # DECOMPOSER_ENABLED=true  → medium/complex agents decompose query into sub-queries (default)
     # DECOMPOSER_ENABLED=false → skip decomposer, pass raw query as single sub-query directly to SQL

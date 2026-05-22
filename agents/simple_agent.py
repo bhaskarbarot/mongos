@@ -57,8 +57,11 @@ def _extract_sql(raw: str) -> Optional[str]:
     # 4. Find first SELECT — strict: must be followed by something useful (not natural-language prose)
     m = re.search(r"\bSELECT\b.+", cleaned, re.DOTALL | re.IGNORECASE)
     if m:
-        sql = m.group(0).strip().rstrip(";")
-        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
+        sql = m.group(0).strip()
+        # Truncate at first ; followed by newline (Ollama fine-tuned models add explanation after ;)
+        sql = re.split(r";[\r\n]", sql)[0]
+        sql = sql.rstrip(";")
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:|This query|The query|The SQL", sql, flags=re.IGNORECASE)[0].strip()
         if len(sql) >= 10:
             first_keyword = sql.strip().split()[0].upper()
             if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
@@ -66,8 +69,10 @@ def _extract_sql(raw: str) -> Optional[str]:
     # 5. WITH CTE — only match if followed by identifier+AS+( pattern (not English prose)
     m = re.search(r"\bWITH\s+\w+\s+AS\s*\(.+", cleaned, re.DOTALL | re.IGNORECASE)
     if m:
-        sql = m.group(0).strip().rstrip(";")
-        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", sql, flags=re.IGNORECASE)[0].strip()
+        sql = m.group(0).strip()
+        sql = re.split(r";[\r\n]", sql)[0]
+        sql = sql.rstrip(";")
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:|This query|The query|The SQL", sql, flags=re.IGNORECASE)[0].strip()
         if len(sql) >= 10:
             first_keyword = sql.strip().split()[0].upper()
             if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):

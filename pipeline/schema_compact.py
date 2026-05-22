@@ -247,6 +247,15 @@ RULES:
     ✗ companies.lastActivity as timestamp — same: lastActivity is JSONB on companies too
     ✓ To find inactive deals: use d."createdAt" or d."dealWonAt" for date filters, NOT lastActivity
     ✓ "lifecycleStage" MUST use double quotes — it is case-sensitive: WHERE c."lifecycleStage" = 'Lead'
+    ✓ contacts."contactOwner" MUST use double quotes — it is case-sensitive: c."contactOwner"
+    ✗ prospects           — table does NOT exist; outreach prospects are in "outreachprospects" table
+    ✗ participants        — table does NOT exist; emails store recipients as JSONB columns:
+                            e."to" (JSONB), e."cc" (JSONB), e."bcc" (JSONB) — use jsonb_array_elements()
+    ✗ notes.companyId     — notes has NO companyId column; notes links via outreachId → outreachprospects
+                            To find notes for a company: JOIN outreachprospects op ON op._id = n."outreachId"
+                            then JOIN companies c ON c._id = op.company
+    ✗ payments.invoice    — "payments" is the payment MODES table (payment_name, payment_fee) NOT invoice payments
+                            There is NO separate invoice-payment join table; invoice payment status is on invoices directly
 16. REVENUE / AMOUNT QUERIES — MANDATORY RULES (always apply):
 
     REVENUE = paid invoices only, dated by when payment was received.

@@ -49,85 +49,59 @@ def _build_chains() -> Dict:
     groq_dec_model   = getattr(settings, "groq_decompose_model",  "meta-llama/llama-4-scout-17b-16e-instruct")
     groq_syn_model   = getattr(settings, "groq_synthesis_model",  "llama-3.3-70b-versatile")
     gem_model        = getattr(settings, "gemini_classify_model",  "gemini-2.0-flash-lite")
-    cbr_sql          = getattr(settings, "cerebras_sql_model",     "llama-3.3-70b")
-    cbr_syn          = getattr(settings, "cerebras_synthesis_model","llama-3.3-70b")
-    cbr_cls          = getattr(settings, "cerebras_classify_model", "llama3.1-8b")
-    snv_sql          = getattr(settings, "sambanova_sql_model",    "Meta-Llama-3.3-70B-Instruct")
-    snv_syn          = getattr(settings, "sambanova_synthesis_model","Meta-Llama-3.3-70B-Instruct")
-    snv_cls          = getattr(settings, "sambanova_classify_model","Meta-Llama-3.1-8B-Instruct")
     or_sql_model     = getattr(settings, "openrouter_sql_model",   "deepseek/deepseek-chat-v3-0324:free")
     or_syn_model     = getattr(settings, "openrouter_synthesis_model", "deepseek/deepseek-chat-v3-0324:free")
     oll_cls          = getattr(settings, "ollama_classify_model",  "qwen2.5:3b")
     oll_rsn          = getattr(settings, "ollama_reasoning_model", "llama3.1:8b")
     oll_sql          = getattr(settings, "ollama_fallback_model",  "a-kore/Arctic-Text2SQL-R1-7B:latest")
-    oll_pri          = getattr(settings, "ollama_primary_model",   "debopam/Text-to-SQL__Qwen2.5-Coder-3B-FineTuned:latest")
 
     return {
         "sql": {
-            "temperature": 0.1,
-            "top_p": 0.9,
-            "max_tokens":  1200,
-            "chain": (
-                [
-                    ("ollama_pri", oll_pri),      # debopam Qwen2.5-Coder 3B — SQL expert, first
-                    ("ollama",     oll_sql),      # Arctic-Text2SQL-R1 7B   — SQL expert, second
-                ] if getattr(settings, "ollama_sql_enabled", True) else []
-            ) + [
-                ("groq",       groq_sql_model),   # Cloud — fast when Groq quota available
+            "temperature": 0,
+            "max_tokens":  600,   # complex multi-table JOINs need 400-550 tokens; 600 is safe
+            "chain": [
+                ("groq",       groq_sql_model),
                 ("gemini",     gem_model),
-                ("cerebras",   cbr_sql),
-                ("sambanova",  snv_sql),
                 ("openrouter", or_sql_model),
+                ("ollama",     oll_sql),
             ],
         },
         "classify": {
             "temperature": 0,
-            "top_p": 0.9,
-            "max_tokens":  80,
+            "max_tokens":  60,
             "chain": [
-                ("groq",      groq_cls_model),
-                ("gemini",    gem_model),
-                ("cerebras",  cbr_cls),
-                ("sambanova", snv_cls),
-                ("ollama",    oll_cls),
+                ("groq",   groq_cls_model),
+                ("gemini", gem_model),
+                ("ollama", oll_cls),
             ],
         },
         "decompose": {
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "max_tokens":  1200,
+            "temperature": 0.1,
+            "max_tokens":  700,
             "chain": [
-                ("groq",      groq_dec_model),
-                ("gemini",    gem_model),
-                ("cerebras",  cbr_sql),
-                ("sambanova", snv_sql),
-                ("openrouter",or_syn_model),
-                ("ollama",    oll_rsn),
+                ("groq",       groq_dec_model),
+                ("gemini",     gem_model),
+                ("openrouter", or_syn_model),
+                ("ollama",     oll_rsn),
             ],
         },
         "synthesize": {
-            "temperature": 0.2,
-            "top_p": 0.95,
-            "max_tokens":  3000,
+            "temperature": 0.1,
+            "max_tokens":  2500,
             "chain": [
-                ("groq",      groq_syn_model),
-                ("gemini",    gem_model),
-                ("cerebras",  cbr_syn),
-                ("sambanova", snv_syn),
-                ("openrouter",or_syn_model),
-                ("ollama",    oll_rsn),
+                ("groq",       groq_syn_model),
+                ("gemini",     gem_model),
+                ("openrouter", or_syn_model),
+                ("ollama",     oll_rsn),
             ],
         },
         "narrate": {
-            "temperature": 0.2,
-            "top_p": 0.95,
-            "max_tokens":  200,
+            "temperature": 0.1,
+            "max_tokens":  160,
             "chain": [
-                ("groq",      groq_cls_model),
-                ("gemini",    gem_model),
-                ("cerebras",  cbr_cls),
-                ("sambanova", snv_cls),
-                ("ollama",    oll_cls),
+                ("groq",   groq_cls_model),
+                ("gemini", gem_model),
+                ("ollama", oll_cls),
             ],
         },
     }
@@ -240,11 +214,9 @@ def estimate_tokens(text: str) -> int:
 # PROVIDER CALLERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-_GROQ_BASE      = "https://api.groq.com/openai/v1/chat/completions"
-_GEMINI_BASE    = "https://generativelanguage.googleapis.com/v1beta/models"
-_OR_BASE        = "https://openrouter.ai/api/v1/chat/completions"
-_CEREBRAS_BASE  = "https://api.cerebras.ai/v1/chat/completions"
-_SAMBANOVA_BASE = "https://api.sambanova.ai/v1/chat/completions"
+_GROQ_BASE  = "https://api.groq.com/openai/v1/chat/completions"
+_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+_OR_BASE    = "https://openrouter.ai/api/v1/chat/completions"
 
 
 def _call_groq(
@@ -410,49 +382,6 @@ def _call_ollama(
         return None
 
 
-def _call_openai_compat(
-    base_url:    str,
-    api_key:     str,
-    provider:    str,
-    model:       str,
-    system:      str,
-    user:        str,
-    max_tokens:  int,
-    temperature: float,
-) -> Optional[str]:
-    """Generic caller for any OpenAI-compatible endpoint (Cerebras, SambaNova, etc.)."""
-    if not api_key:
-        return None
-    payload = {
-        "model":       model,
-        "messages":    [
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user},
-        ],
-        "temperature": temperature,
-        "max_tokens":  max_tokens,
-    }
-    try:
-        req = urllib.request.Request(
-            base_url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Content-Type":  "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read())
-            return data["choices"][0]["message"]["content"].strip() or None
-    except urllib.error.HTTPError as e:
-        LOGGER.warning("%s HTTP %d model %s", provider, e.code, model)
-        return None
-    except Exception as exc:
-        LOGGER.debug("%s error: %s", provider, exc)
-        return None
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN ROUTER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -503,35 +432,17 @@ def call(
                 LOGGER.info("Router [%s/gemini] %.0fms", task, (time.monotonic()-t0)*1000)
                 return result
 
-        elif provider == "cerebras":
-            result = _call_openai_compat(
-                _CEREBRAS_BASE, settings.cerebras_api_key, "Cerebras",
-                model, system, user, tok, temperature,
-            )
-            if result:
-                LOGGER.info("Router [%s/cerebras/%s] %.0fms", task, model, (time.monotonic()-t0)*1000)
-                return result
-
-        elif provider == "sambanova":
-            result = _call_openai_compat(
-                _SAMBANOVA_BASE, settings.sambanova_api_key, "SambaNova",
-                model, system, user, tok, temperature,
-            )
-            if result:
-                LOGGER.info("Router [%s/sambanova/%s] %.0fms", task, model, (time.monotonic()-t0)*1000)
-                return result
-
         elif provider == "openrouter":
             result = _call_openrouter(model, system, user, tok, temperature)
             if result:
                 LOGGER.info("Router [%s/openrouter] %.0fms", task, (time.monotonic()-t0)*1000)
                 return result
 
-        elif provider in ("ollama", "ollama_pri"):
+        elif provider == "ollama":
             timeout = 180 if task in ("synthesize", "decompose") else 45
             result  = _call_ollama(model, system, user, tok, temperature, timeout)
             if result:
-                LOGGER.info("Router [%s/%s/%s] %.0fms", task, provider, model[:30], (time.monotonic()-t0)*1000)
+                LOGGER.info("Router [%s/ollama] %.0fms", task, (time.monotonic()-t0)*1000)
                 return result
 
     LOGGER.error(

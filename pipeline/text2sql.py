@@ -808,7 +808,9 @@ def _extract_sql(raw: str) -> Optional[str]:
     # Priority 2: find first SELECT (strict — no WITH-as-prose false positives)
     m = re.search(r"\bSELECT\b.+", cleaned, re.DOTALL | re.IGNORECASE)
     if m:
-        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", m.group(0), flags=re.IGNORECASE)[0]
+        sql = m.group(0)
+        sql = re.split(r";[\r\n]", sql)[0]   # Ollama fine-tuned: SQL ends at ; then explanation
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:|This query|The query|The SQL", sql, flags=re.IGNORECASE)[0]
         result = _safe(sql)
         if result:
             return result
@@ -816,7 +818,9 @@ def _extract_sql(raw: str) -> Optional[str]:
     # Priority 3: WITH CTE — only if followed by identifier+AS+( (not English prose)
     m = re.search(r"\bWITH\s+\w+\s+AS\s*\(.+", cleaned, re.DOTALL | re.IGNORECASE)
     if m:
-        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:", m.group(0), flags=re.IGNORECASE)[0]
+        sql = m.group(0)
+        sql = re.split(r";[\r\n]", sql)[0]
+        sql = re.split(r"\n{3,}|Explanation:|Note:|Question:|This query|The query|The SQL", sql, flags=re.IGNORECASE)[0]
         result = _safe(sql)
         if result:
             return result
