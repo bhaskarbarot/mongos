@@ -10241,5 +10241,187 @@
       "invoices"
     ],
     "saved_at": "2026-05-22T07:32:34.260936"
+  },
+  {
+    "natural_query": "give me total sales of last month (referring to deals)",
+    "sql": "SELECT COALESCE(SUM(d.grand_total_in_usd), 0) AS total_sales FROM \"deals\" d WHERE NOT d.deleted AND EXTRACT(MONTH FROM d.\"createdAt\") = 4 AND EXTRACT(YEAR FROM d.\"createdAt\") = 2026",
+    "tables": [
+      "d",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:27:20.189838"
+  },
+  {
+    "natural_query": "who is not achive task last 6 months (referring to deals)",
+    "sql": "SELECT u.name \nFROM \"users\" u \nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted \nWHERE u.\"isActive\" = true \nAND d.\"createdAt\" >= NOW() - INTERVAL '6 months' \nGROUP BY u.name \nHAVING COALESCE(SUM(CASE WHEN d.\"dealWonAt\" IS NOT NULL THEN 1 ELSE 0 END), 0) < 1 \nORDER BY u.name",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:27:51.820414"
+  },
+  {
+    "natural_query": "give me task list of last 6 months (referring to deals)",
+    "sql": "SELECT d.name, ct.\"Task\", ct.status, ct.priority, ct.due_date \nFROM \"deals\" d \nLEFT JOIN \"createtasks\" ct ON ct.\"dealsId\" = d._id AND NOT ct.deleted \nWHERE d.\"createdAt\" >= NOW() - INTERVAL '6 months' AND NOT d.deleted \nORDER BY ct.due_date ASC NULLS LAST",
+    "tables": [
+      "createtasks",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:28:13.128655"
+  },
+  {
+    "natural_query": "give me last 6 month task by users (referring to deals)",
+    "sql": "SELECT u.name AS user_name, COUNT(ct._id) AS task_count \nFROM \"users\" u \nLEFT JOIN \"createtasks\" ct ON ct.\"createdBy\" = u._id AND NOT ct.deleted \nLEFT JOIN \"deals\" d ON d._id = ct.\"dealsId\" \nWHERE ct.\"createdAt\" >= NOW() - INTERVAL '6 months' \nGROUP BY u._id, u.name \nORDER BY task_count DESC",
+    "tables": [
+      "createtasks",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:28:35.259300"
+  },
+  {
+    "natural_query": "Which sales rep has the highest conversion rate from lead to deal?",
+    "sql": "SELECT u.name AS rep_name, \n       COUNT(DISTINCT d._id) AS deals_count, \n       COUNT(DISTINCT o._id) AS leads_count, \n       ROUND(100.0 * COUNT(DISTINCT d._id) / NULLIF(COUNT(DISTINCT o._id), 0), 2) AS conversion_rate\nFROM \"users\" u\nLEFT JOIN \"outreaches\" o ON o.\"assignedTo\" = u._id AND NOT o.\"isDeleted\"\nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted AND d.\"createdAt\" > o.\"createdAt\"\nWHERE u.\"isActive\" = true\nGROUP BY u._id, u.name\nORDER BY conversion_rate DESC\nLIMIT 1",
+    "tables": [
+      "deals",
+      "outreaches",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:29:17.807598"
+  },
+  {
+    "natural_query": "how many sales rep",
+    "sql": "SELECT COUNT(*) AS sales_rep_count FROM \"users\" WHERE \"isActive\" = true AND \"isAdmin\" = false",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:30:02.043261"
+  },
+  {
+    "natural_query": "give me names of sales representative",
+    "sql": "SELECT u.name FROM \"users\" u WHERE u.\"isActive\" = true AND u.department = 'Sales'",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:30:42.582984"
+  },
+  {
+    "natural_query": "give me names of sales representatives.",
+    "sql": "SELECT u.name FROM \"users\" u WHERE u.\"isActive\" = true AND u.department = 'Sales'",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:31:01.774870"
+  },
+  {
+    "natural_query": "Which sales representative has the highest conversion rate from lead to deal?",
+    "sql": "SELECT u.name AS rep_name, \n       COUNT(DISTINCT d._id) AS deals_count, \n       COUNT(DISTINCT o._id) AS leads_count, \n       ROUND(100.0 * COUNT(DISTINCT d._id) / NULLIF(COUNT(DISTINCT o._id), 0), 2) AS conversion_rate\nFROM \"users\" u\nLEFT JOIN \"outreaches\" o ON o.\"assignedTo\" = u._id AND NOT o.\"isDeleted\"\nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted AND d.\"createdAt\" >= o.\"createdAt\"\nWHERE u.\"isActive\" = true\nGROUP BY u._id, u.name\nORDER BY conversion_rate DESC\nLIMIT 1",
+    "tables": [
+      "deals",
+      "outreaches",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:31:40.169969"
+  },
+  {
+    "natural_query": "what are sales rep?",
+    "sql": "SELECT u.name AS rep_name FROM \"users\" u WHERE u.department = 'Sales' AND u.\"isActive\" = true",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:31:53.505992"
+  },
+  {
+    "natural_query": "Show me all leads",
+    "sql": "SELECT * FROM \"outreaches\" WHERE NOT \"isDeleted\"",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-22T09:34:31.562694"
+  },
+  {
+    "natural_query": "How many accounts do I have?",
+    "sql": "SELECT COUNT(*) AS account_count FROM \"companies\" WHERE NOT deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-22T09:34:54.372552"
+  },
+  {
+    "natural_query": "List all contacts",
+    "sql": "SELECT c.\"_id\", c.\"firstName\", c.\"lastName\", c.email, c.\"jobTitle\", c.\"phoneNumber\", c.\"lifecycleStage\", c.\"leadStatus\", c.\"contactOwner\", c.company, c.\"createdAt\" \nFROM \"contacts\" c \nWHERE NOT c.deleted \nORDER BY c.\"createdAt\" DESC NULLS LAST",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T09:34:56.836107"
+  },
+  {
+    "natural_query": "Show me today's tasks",
+    "sql": "SELECT ct.\"Task\", ct.status, ct.priority, c.\"companyName\" \nFROM \"createtasks\" ct \nLEFT JOIN \"companies\" c ON c._id = ct.\"companyId\" \nWHERE NOT ct.deleted AND ct.\"createdAt\" = '2026-05-22' \nORDER BY ct.priority DESC, ct.\"createdAt\" DESC",
+    "tables": [
+      "companies",
+      "createtasks"
+    ],
+    "saved_at": "2026-05-22T09:34:59.214421"
+  },
+  {
+    "natural_query": "Who owns account ABC company?",
+    "sql": "SELECT u.name AS owner_name\nFROM \"companies\" c\nJOIN \"users\" u ON u._id = c.\"companyOwner\"\nWHERE c.\"companyName\" ILIKE '%ABC company%'\n  AND NOT c.deleted",
+    "tables": [
+      "companies",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:35:41.945991"
+  },
+  {
+    "natural_query": "What is the phone number of John Doe?",
+    "sql": "SELECT c.\"phoneNumber\" FROM \"contacts\" c WHERE c.\"firstName\" ILIKE '%John%' AND c.\"lastName\" ILIKE '%Doe%' AND NOT c.deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T09:35:43.760125"
+  },
+  {
+    "natural_query": "Show all deals in pipeline",
+    "sql": "SELECT d.name, d.stage, d.grand_total_in_usd, c.\"companyName\" AS company_name, u.name AS owner_name \nFROM \"deals\" d \nLEFT JOIN \"companies\" c ON c._id = d.company \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE d.\"dealWonAt\" IS NULL AND d.\"dealLostAt\" IS NULL AND NOT d.deleted \nORDER BY d.stage, d.grand_total_in_usd DESC NULLS LAST",
+    "tables": [
+      "companies",
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:35:45.260185"
+  },
+  {
+    "natural_query": "List accounts from Mumbai",
+    "sql": "SELECT c._id, c.\"companyName\" \nFROM \"companies\" c \nWHERE c.country ILIKE '%India%' AND c.\"companyName\" ILIKE '%Mumbai%' AND NOT c.deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-22T09:35:48.025564"
+  },
+  {
+    "natural_query": "Which accounts have no contact added?",
+    "sql": "SELECT c._id, c.\"companyName\" \nFROM \"companies\" c \nLEFT JOIN \"contacts\" ct ON ct.company = c._id AND NOT ct.deleted \nWHERE NOT c.deleted AND ct._id IS NULL",
+    "tables": [
+      "companies",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T09:36:43.388297"
+  },
+  {
+    "natural_query": "List all deals closing this week",
+    "sql": "SELECT d.name, d.stage, d.grand_total_in_usd, d.\"closeDate\" \nFROM \"deals\" d \nWHERE NOT d.deleted \nAND d.\"closeDate\" >= '2026-05-18' \nAND d.\"closeDate\" < '2026-05-25' \nORDER BY d.\"closeDate\" ASC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:36:46.237321"
+  },
+  {
+    "natural_query": "Show contacts where email is missing",
+    "sql": "SELECT c.\"firstName\", c.\"lastName\", c.\"jobTitle\", c.\"phoneNumber\", c.\"lifecycleStage\", c.\"leadStatus\" \nFROM \"contacts\" c \nWHERE NOT c.deleted AND c.email IS NULL",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T09:36:48.188001"
   }
 ]
