@@ -33,6 +33,19 @@ LOGGER = logging.getLogger("sql_chatbot")
 # SQL HELPERS  (shared with self-heal loop)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _fix_sql_syntax(sql: str) -> str:
+    """Fix common LLM SQL mistakes before execution."""
+    # Trailing comma after last CTE block:  "...)\n, SELECT" or "),\nSELECT"
+    sql = re.sub(r"\)\s*,\s*(\n\s*SELECT\b)", r")\n\1", sql, flags=re.IGNORECASE)
+    # Trailing comma right before final SELECT with no intervening CTE:  "),\nSELECT"
+    sql = re.sub(r",\s*\n(\s*SELECT\b)", r"\n\1", sql, flags=re.IGNORECASE)
+    # Double semicolons
+    sql = re.sub(r";;+", ";", sql)
+    # Stray markdown closing fence that slipped through
+    sql = re.sub(r"```\s*$", "", sql).strip()
+    return sql
+
+
 def _extract_sql(raw: str) -> Optional[str]:
     """Extract the first valid SELECT or WITH (CTE) statement from LLM output."""
     if not raw:
@@ -53,19 +66,18 @@ def _extract_sql(raw: str) -> Optional[str]:
             if (upper.startswith("SELECT") or upper.startswith("WITH")) and len(candidate) >= 10:
                 first_keyword = candidate.strip().split()[0].upper()
                 if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
-                    return candidate
+                    return _fix_sql_syntax(candidate)
     # 4. Find first SELECT — strict: must be followed by something useful (not natural-language prose)
     m = re.search(r"\bSELECT\b.+", cleaned, re.DOTALL | re.IGNORECASE)
     if m:
         sql = m.group(0).strip()
-        # Truncate at first ; followed by newline (Ollama fine-tuned models add explanation after ;)
         sql = re.split(r";[\r\n]", sql)[0]
         sql = sql.rstrip(";")
         sql = re.split(r"\n{3,}|Explanation:|Note:|Question:|This query|The query|The SQL", sql, flags=re.IGNORECASE)[0].strip()
         if len(sql) >= 10:
             first_keyword = sql.strip().split()[0].upper()
             if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
-                return sql
+                return _fix_sql_syntax(sql)
     # 5. WITH CTE — only match if followed by identifier+AS+( pattern (not English prose)
     m = re.search(r"\bWITH\s+\w+\s+AS\s*\(.+", cleaned, re.DOTALL | re.IGNORECASE)
     if m:
@@ -76,7 +88,7 @@ def _extract_sql(raw: str) -> Optional[str]:
         if len(sql) >= 10:
             first_keyword = sql.strip().split()[0].upper()
             if first_keyword not in ("DROP", "DELETE", "TRUNCATE", "ALTER", "INSERT", "UPDATE"):
-                return sql
+                return _fix_sql_syntax(sql)
     return None
 
 

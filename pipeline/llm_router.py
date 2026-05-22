@@ -55,8 +55,13 @@ def _build_chains() -> Dict:
     snv_sql          = getattr(settings, "sambanova_sql_model",    "Meta-Llama-3.3-70B-Instruct")
     snv_syn          = getattr(settings, "sambanova_synthesis_model","Meta-Llama-3.3-70B-Instruct")
     snv_cls          = getattr(settings, "sambanova_classify_model","Meta-Llama-3.1-8B-Instruct")
-    or_sql_model     = getattr(settings, "openrouter_sql_model",   "deepseek/deepseek-chat-v3-0324:free")
-    or_syn_model     = getattr(settings, "openrouter_synthesis_model", "deepseek/deepseek-chat-v3-0324:free")
+    oai_sql          = getattr(settings, "openai_sql_model",        "gpt-4o-mini")
+    oai_cls          = getattr(settings, "openai_classify_model",   "gpt-4o-mini")
+    oai_dec          = getattr(settings, "openai_decompose_model",  "gpt-4o-mini")
+    oai_syn          = getattr(settings, "openai_synthesis_model",  "gpt-4o")
+    oai_nar          = getattr(settings, "openai_narrate_model",    "gpt-4o-mini")
+    or_sql_model     = getattr(settings, "openrouter_sql_model",    "nvidia/nemotron-3-super-120b-a12b:free")
+    or_syn_model     = getattr(settings, "openrouter_synthesis_model", "nvidia/nemotron-3-super-120b-a12b:free")
     oll_cls          = getattr(settings, "ollama_classify_model",  "qwen2.5:3b")
     oll_rsn          = getattr(settings, "ollama_reasoning_model", "llama3.1:8b")
     oll_sql          = getattr(settings, "ollama_fallback_model",  "a-kore/Arctic-Text2SQL-R1-7B:latest")
@@ -73,7 +78,8 @@ def _build_chains() -> Dict:
                     ("ollama",     oll_sql),      # Arctic-Text2SQL-R1 7B   — SQL expert, second
                 ] if getattr(settings, "ollama_sql_enabled", True) else []
             ) + [
-                ("groq",       groq_sql_model),   # Cloud — fast when Groq quota available
+                ("openai",     oai_sql),
+                ("groq",       groq_sql_model),
                 ("gemini",     gem_model),
                 ("cerebras",   cbr_sql),
                 ("sambanova",  snv_sql),
@@ -85,6 +91,7 @@ def _build_chains() -> Dict:
             "top_p": 0.9,
             "max_tokens":  80,
             "chain": [
+                ("openai",    oai_cls),
                 ("groq",      groq_cls_model),
                 ("gemini",    gem_model),
                 ("cerebras",  cbr_cls),
@@ -97,6 +104,7 @@ def _build_chains() -> Dict:
             "top_p": 0.9,
             "max_tokens":  1200,
             "chain": [
+                ("openai",    oai_dec),
                 ("groq",      groq_dec_model),
                 ("gemini",    gem_model),
                 ("cerebras",  cbr_sql),
@@ -110,6 +118,7 @@ def _build_chains() -> Dict:
             "top_p": 0.95,
             "max_tokens":  3000,
             "chain": [
+                ("openai",    oai_syn),
                 ("groq",      groq_syn_model),
                 ("gemini",    gem_model),
                 ("cerebras",  cbr_syn),
@@ -123,6 +132,7 @@ def _build_chains() -> Dict:
             "top_p": 0.95,
             "max_tokens":  200,
             "chain": [
+                ("openai",    oai_nar),
                 ("groq",      groq_cls_model),
                 ("gemini",    gem_model),
                 ("cerebras",  cbr_cls),
@@ -501,6 +511,16 @@ def call(
             result = _call_gemini(model, system, user, tok, temperature)
             if result:
                 LOGGER.info("Router [%s/gemini] %.0fms", task, (time.monotonic()-t0)*1000)
+                return result
+
+        elif provider == "openai":
+            result = _call_openai_compat(
+                "https://api.openai.com/v1/chat/completions",
+                settings.openai_api_key, "OpenAI",
+                model, system, user, tok, temperature,
+            )
+            if result:
+                LOGGER.info("Router [%s/openai/%s] %.0fms", task, model, (time.monotonic()-t0)*1000)
                 return result
 
         elif provider == "cerebras":

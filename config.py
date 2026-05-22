@@ -62,6 +62,14 @@ class Settings:
     # ── Ollama SQL toggle ─────────────────────────────────────────────────────
     ollama_sql_enabled: bool = os.getenv("OLLAMA_SQL_ENABLED", "true").lower() == "true"
 
+    # ── OpenAI — fallback 1 (paid, most reliable) ────────────────────────────
+    openai_api_key:           str = os.getenv("OPENAI_API_KEY",          "")
+    openai_sql_model:         str = os.getenv("OPENAI_SQL_MODEL",        "gpt-4o-mini")
+    openai_classify_model:    str = os.getenv("OPENAI_CLASSIFY_MODEL",   "gpt-4o-mini")
+    openai_decompose_model:   str = os.getenv("OPENAI_DECOMPOSE_MODEL",  "gpt-4o-mini")
+    openai_synthesis_model:   str = os.getenv("OPENAI_SYNTHESIS_MODEL",  "gpt-4o")
+    openai_narrate_model:     str = os.getenv("OPENAI_NARRATE_MODEL",    "gpt-4o-mini")
+
     # ── Cerebras — fallback 3 (free, 800 tok/s, llama-3.3-70b) ──────────────
     cerebras_api_key:          str = os.getenv("CEREBRAS_API_KEY",          "")
     cerebras_sql_model:        str = os.getenv("CEREBRAS_SQL_MODEL",        "llama-3.3-70b")

@@ -829,9 +829,13 @@ def _extract_sql(raw: str) -> Optional[str]:
 
 
 def _clean_sql(sql: str) -> str:
-    """Normalise extracted SQL: strip semicolons, trailing comments, whitespace."""
+    """Normalise extracted SQL: strip semicolons, trailing comments, fix common LLM mistakes."""
     sql = sql.strip().rstrip(";").strip()
     sql = re.sub(r"\s*--[^\n]*$", "", sql, flags=re.MULTILINE)
+    # Fix trailing comma after last CTE:  "),\nSELECT"  →  ")\nSELECT"
+    sql = re.sub(r"\)\s*,\s*(\n\s*SELECT\b)", r")\n\1", sql, flags=re.IGNORECASE)
+    sql = re.sub(r",\s*\n(\s*SELECT\b)", r"\n\1", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"```\s*$", "", sql).strip()
     sql = re.sub(r"\s+", " ", sql).strip()
     return sql
 

@@ -10423,5 +10423,46 @@
       "contacts"
     ],
     "saved_at": "2026-05-22T09:36:48.188001"
+  },
+  {
+    "natural_query": "How many contacts do we have?",
+    "sql": "SELECT COUNT(*) AS contact_count FROM \"contacts\" WHERE NOT deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:02:51.906057"
+  },
+  {
+    "natural_query": "SELECT company_id, SUM(grandtotal_in_usd) AS company_revenue FROM invoices WHERE payment_status='paid' GROUP BY company_id ORDER BY company_revenue DESC LIMIT 10",
+    "sql": "SELECT i.company AS company_id, COALESCE(SUM(i.grandtotal_in_usd), 0) AS company_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' AND NOT i.deleted \nGROUP BY i.company \nORDER BY company_revenue DESC \nLIMIT 10",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:06:40.610557"
+  },
+  {
+    "natural_query": "SELECT SUM(grandtotal_in_usd) AS total_revenue FROM invoices WHERE payment_status='paid'",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue FROM \"invoices\" i WHERE i.payment_status = 'paid' AND NOT i.deleted AND EXTRACT(YEAR FROM i.payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:06:40.628467"
+  },
+  {
+    "natural_query": "SELECT company_id, SUM(grandtotal_in_usd) AS company_revenue FROM invoices WHERE payment_status='paid' GROUP BY company_id ORDER BY company_revenue DESC LIMIT 5",
+    "sql": "SELECT i.company, COALESCE(SUM(i.grandtotal_in_usd), 0) AS company_revenue FROM \"invoices\" i WHERE i.payment_status = 'paid' AND NOT i.deleted GROUP BY i.company ORDER BY company_revenue DESC LIMIT 5",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:06:40.642209"
+  },
+  {
+    "natural_query": "SELECT company_id, SUM(grandtotal_in_usd) AS company_revenue FROM invoices WHERE payment_status='paid' GROUP BY company_id ORDER BY company_revenue DESC LIMIT 20",
+    "sql": "SELECT i.\"company\" AS company_id, COALESCE(SUM(i.grandtotal_in_usd), 0) AS company_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' AND NOT i.deleted \nGROUP BY i.\"company\" \nORDER BY company_revenue DESC \nLIMIT 20",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:06:40.658192"
   }
 ]
