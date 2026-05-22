@@ -5166,5 +5166,143 @@
       "bills"
     ],
     "saved_at": "2026-05-20T12:13:50.085682"
+  },
+  {
+    "natural_query": "give me names of sales representatives.",
+    "sql": "SELECT u.name FROM \"users\" u WHERE u.\"isActive\" = true AND u.department = 'Sales'",
+    "tables": [
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:53:05.809803"
+  },
+  {
+    "natural_query": "how many deals are?",
+    "sql": "SELECT COUNT(d._id) AS deal_count FROM \"deals\" d WHERE NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:53:25.162658"
+  },
+  {
+    "natural_query": "give me revenue of last month (referring to deals)",
+    "sql": "SELECT COALESCE(SUM(d.grand_total_in_usd), 0) AS revenue \nFROM \"deals\" d \nWHERE NOT d.deleted \nAND EXTRACT(MONTH FROM d.\"closeDate\") = 4 \nAND EXTRACT(YEAR FROM d.\"closeDate\") = 2026",
+    "tables": [
+      "d",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:53:39.342912"
+  },
+  {
+    "natural_query": "give me revenue of april 2025",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue \nFROM \"invoices\" i \nWHERE i.payment_status = 'paid' \n  AND NOT i.deleted \n  AND EXTRACT(MONTH FROM i.payment_date) = 4 \n  AND EXTRACT(YEAR FROM i.payment_date) = 2025",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T09:53:52.131957"
+  },
+  {
+    "natural_query": "who have pending task from last 6 months ? (referring to invoices)",
+    "sql": "SELECT u.name, ct.\"Task\" \nFROM \"users\" u \nLEFT JOIN \"createtasks\" ct ON ct.\"createdBy\" = u._id \nWHERE ct.status = 'Pending' AND ct.\"createdAt\" >= NOW() - INTERVAL '6 months' AND NOT ct.deleted \nAND ct.\"invoiceId\" IS NOT NULL \nORDER BY ct.due_date ASC NULLS LAST LIMIT 50",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:54:35.650471"
+  },
+  {
+    "natural_query": "give me pending task from last 3 months (referring to invoices)",
+    "sql": "SELECT i.invoice_number, ct.\"Task\" \nFROM \"invoices\" i \nLEFT JOIN \"createtasks\" ct ON ct.\"invoiceId\" = i._id AND NOT ct.deleted \nWHERE i.invoice_date >= '2026-02-21' AND ct.status = 'Pending' AND NOT i.deleted",
+    "tables": [
+      "createtasks",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T09:54:55.267351"
+  },
+  {
+    "natural_query": "Which sales rep has the highest conversion rate from lead to deal?",
+    "sql": "SELECT u.name AS rep_name, \n       COUNT(DISTINCT d._id) AS deals_count, \n       COUNT(DISTINCT o._id) AS outreaches_count, \n       ROUND(100.0 * COUNT(DISTINCT d._id) / NULLIF(COUNT(DISTINCT o._id), 0), 2) AS conversion_rate\nFROM \"users\" u\nLEFT JOIN \"outreaches\" o ON o.\"assignedTo\" = u._id AND NOT o.\"isDeleted\"\nLEFT JOIN \"deals\" d ON d.owner = u._id AND NOT d.deleted AND d.stage = 'Closed Won'\nWHERE u.\"isActive\" = true\nGROUP BY u._id, u.name\nORDER BY conversion_rate DESC\nLIMIT 1",
+    "tables": [
+      "deals",
+      "outreaches",
+      "users"
+    ],
+    "saved_at": "2026-05-22T09:55:51.259143"
+  },
+  {
+    "natural_query": "SELECT dealId, stage, dealUpdatedAt FROM deals",
+    "sql": "SELECT d._id AS dealId, d.stage, d.\"createdAt\" AS dealUpdatedAt \nFROM \"deals\" d \nWHERE NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:56:55.458014"
+  },
+  {
+    "natural_query": "SELECT dealId, DATEDIFF('2026-05-22', dealUpdatedAt) AS days_stuck FROM deals WHERE dealUpdatedAt < '2026-05-07'",
+    "sql": "SELECT d._id AS dealId, d.\"createdAt\" - d.\"dealWonAt\" AS days_stuck \nFROM \"deals\" d \nWHERE d.\"dealWonAt\" IS NOT NULL AND d.\"dealWonAt\" < '2026-05-07' AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:56:55.467255"
+  },
+  {
+    "natural_query": "show deals by reason",
+    "sql": "SELECT d.type, COUNT(d._id) AS deal_count FROM \"deals\" d WHERE NOT d.deleted GROUP BY d.type ORDER BY deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:57:53.984900"
+  },
+  {
+    "natural_query": "give me leads of last month (referring to deals)",
+    "sql": "SELECT d._id, d.name, d.stage, d.owner, d.company, d.grand_total_in_usd \nFROM \"deals\" d \nWHERE NOT d.deleted \nAND EXTRACT(MONTH FROM d.\"createdAt\") = 4 \nAND EXTRACT(YEAR FROM d.\"createdAt\") = 2026 \nAND d.\"dealWonAt\" IS NULL \nAND d.\"dealLostAt\" IS NULL \nORDER BY d.grand_total_in_usd DESC NULLS LAST LIMIT 50",
+    "tables": [
+      "d",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T09:58:52.254293"
+  },
+  {
+    "natural_query": "give me leads list",
+    "sql": "SELECT d._id, d.name, d.email, d.phone FROM \"outreaches\" d WHERE NOT d.\"isDeleted\"",
+    "tables": [
+      "outreaches"
+    ],
+    "saved_at": "2026-05-22T09:59:12.893090"
+  },
+  {
+    "natural_query": "give me highest paid invoice details",
+    "sql": "SELECT i.invoice_number, i.grandtotal_in_usd, i.currency, i.payment_date, c.\"companyName\" \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE i.payment_status = 'paid' AND NOT i.deleted \nORDER BY i.grandtotal_in_usd DESC NULLS LAST \nLIMIT 1",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T10:03:36.805681"
+  },
+  {
+    "natural_query": "give me company name with highest invoice amount",
+    "sql": "SELECT c.\"companyName\" AS company_name, COALESCE(SUM(i.grand_total), 0) AS total_invoice_amount\nFROM \"companies\" c\nLEFT JOIN \"invoices\" i ON i.company = c._id AND NOT i.deleted\nWHERE NOT c.deleted\nGROUP BY c._id, c.\"companyName\"\nORDER BY total_invoice_amount DESC\nLIMIT 1",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T10:04:23.592745"
+  },
+  {
+    "natural_query": "give me list of invoices \"Automation Systemsaaa\"",
+    "sql": "SELECT i.invoice_number, i.grandtotal_in_usd, i.payment_status, i.payment_date \nFROM \"invoices\" i \nWHERE NOT i.deleted AND i.\"companyName\" ILIKE '%Automation Systemsaaa%' \nORDER BY i.payment_date DESC NULLS LAST LIMIT 50",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T10:05:54.753753"
+  },
+  {
+    "natural_query": "give me list of invoices \"Automation Systemsaaa\" company",
+    "sql": "SELECT i.invoice_number, i.grand_total, i.currency, i.payment_status \nFROM \"invoices\" i \nLEFT JOIN \"companies\" c ON c._id = i.company \nWHERE c.\"companyName\" ILIKE '%Automation Systemsaaa%' AND NOT i.deleted",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T10:06:10.919651"
   }
 ]
