@@ -10464,5 +10464,23 @@
       "invoices"
     ],
     "saved_at": "2026-05-22T13:06:40.658192"
+  },
+  {
+    "natural_query": "Which city generates the most leads for us?",
+    "sql": "SELECT c.\"country\", COUNT(ct._id) AS lead_count\nFROM \"companies\" c\nLEFT JOIN \"contacts\" ct ON ct.company = c._id AND NOT ct.deleted\nWHERE ct.\"lifecycleStage\" = 'Lead'\nGROUP BY c.\"country\"\nORDER BY lead_count DESC\nLIMIT 1",
+    "tables": [
+      "companies",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:14:05.240734"
+  },
+  {
+    "natural_query": "Which city generates the most leads?",
+    "sql": "SELECT c.\"country\" AS city, COUNT(ct._id) AS lead_count\nFROM \"companies\" c\nLEFT JOIN \"contacts\" ct ON ct.company = c._id AND NOT ct.deleted\nWHERE NOT c.deleted\nGROUP BY c.\"country\"\nORDER BY lead_count DESC\nLIMIT 1",
+    "tables": [
+      "companies",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:17:01.437849"
   }
 ]

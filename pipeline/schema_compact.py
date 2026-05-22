@@ -229,33 +229,65 @@ RULES:
         HAVING COUNT(b._id) > 0
         ORDER BY bill_count DESC
       ✗ NEVER omit HAVING — LEFT JOIN without it returns ALL vendors including those with 0 bills
-15. COLUMN EXISTENCE RULES (these columns do NOT exist — never generate them):
-    ✗ companies.currency  — currency is on invoices/deals/sales, NOT on companies
-    ✗ sales.closeDate     — sales uses sales_date. closeDate is on deals only.
-    ✗ invoices.productId  — invoices have no direct product FK column
+15. COLUMN / TABLE EXISTENCE RULES — never generate these, they do not exist:
+    ✗ outreachprospects   — NO such table; use "outreaches" for outreach/prospect data
+    ✗ prospects           — NO such table; use "outreaches"
+    ✗ leads (table)       — NO such table; leads = contacts WHERE "lifecycleStage"='Lead'
+    ✗ opportunities       — NO such table; use "deals"
+    ✗ accounts (table)    — NO such table; use "companies"
+    ✗ tax_types           — NO such table; use "taxes": SELECT name, rate FROM "taxes"
+    ✗ participants        — NO such table; emails.to / emails.cc / emails.bcc are JSONB arrays
+    ✗ companies.city      — NO city column on companies; use companies.country (text) or companies.region (FK)
+    ✗ contacts.city       — NO city column on contacts; join to companies for location data
+    ✗ emails.isRead       — NO isRead column on emails; emails table has: from, to, cc, bcc, subject, date, body
+    ✗ companies.currency  — companies has "Currency" (capital C) for display only; use invoices.currency for money
+    ✗ sales.closeDate     — sales uses sales_date, NOT closeDate. closeDate is on deals only
     ✗ invoices.deal_id    — invoices have NO deal FK; link via company: d.company = i.company
-    ✗ outreaches.leadId   — outreaches use assignedTo or email to link contacts
+    ✗ invoices.productId  — invoices have no product FK; products are in invoices.items (JSONB)
+    ✗ outreaches.leadId   — outreaches link via assignedTo (user FK) or email
     ✗ vendors.name        — vendors use "companyName": SELECT v."companyName" FROM "vendors" v
-    ✗ bills.deleted       — bills table has NO deleted column
-    ✗ activitylogs.deleted — activitylogs has NO deleted column
-    ✗ tax_types           — table does NOT exist; use "taxes" table: SELECT name, amount FROM "taxes"
-    ✗ notes.type          — "notes" (outreach notes) has NO type column
-                            only "commonnotes" has type TEXT ('Company'|'Deal'|'Contact'|'Invoice'|'Sales')
-    ✗ projecttypes.categoryName — projecttypes only has: _id, name. Use p.name not p."categoryName"
-    ✗ createtasks.contactId  — actual column is "contectId" (typo in DB): ct."contectId"
-    ✗ deals.lastActivity as timestamp — lastActivity is JSONB, NOT a date column, never compare with >=
-    ✗ companies.lastActivity as timestamp — same: lastActivity is JSONB on companies too
-    ✓ To find inactive deals: use d."createdAt" or d."dealWonAt" for date filters, NOT lastActivity
-    ✓ "lifecycleStage" MUST use double quotes — it is case-sensitive: WHERE c."lifecycleStage" = 'Lead'
-    ✓ contacts."contactOwner" MUST use double quotes — it is case-sensitive: c."contactOwner"
-    ✗ prospects           — table does NOT exist; outreach prospects are in "outreachprospects" table
-    ✗ participants        — table does NOT exist; emails store recipients as JSONB columns:
-                            e."to" (JSONB), e."cc" (JSONB), e."bcc" (JSONB) — use jsonb_array_elements()
-    ✗ notes.companyId     — notes has NO companyId column; notes links via outreachId → outreachprospects
-                            To find notes for a company: JOIN outreachprospects op ON op._id = n."outreachId"
-                            then JOIN companies c ON c._id = op.company
-    ✗ payments.invoice    — "payments" is the payment MODES table (payment_name, payment_fee) NOT invoice payments
-                            There is NO separate invoice-payment join table; invoice payment status is on invoices directly
+    ✗ bills.deleted       — bills has NO deleted column — omit soft-delete filter on bills
+    ✗ activitylogs.deleted — activitylogs has NO deleted column — omit soft-delete filter
+    ✗ notes.type          — "notes" table has NO type column (it stores outreach notes only)
+                            Only "commonnotes" has type: 'Company'|'Deal'|'Contact'|'Invoice'|'Sales'
+    ✗ projecttypes.categoryName — only has: _id, name. Use p.name
+    ✗ createtasks.contactId — actual column name is "contectId" (DB typo): ct."contectId"
+    ✗ deals.lastActivity as timestamp — lastActivity is JSONB on deals AND companies, never filter with >=
+    ✗ companies.lastActivity as timestamp — same, JSONB not a timestamp
+    ✓ "lifecycleStage" needs double quotes (case-sensitive): WHERE c."lifecycleStage" = 'Lead'
+    ✓ "contactOwner" needs double quotes: ct."contactOwner"
+    ✓ "companyName" needs double quotes: c."companyName"
+    ✓ city data that DOES exist: outreaches.city, vendors.city, vendors.state, vendors.country
+
+15b. ENTITY → CORRECT TABLE (always use these mappings, never guess):
+    "leads"         → contacts WHERE "lifecycleStage"='Lead'  (or companies WHERE "lifecycleStage"='Lead')
+    "accounts"      → companies
+    "opportunities" → deals
+    "tasks"         → createtasks  (table is named "createtasks", NOT "tasks")
+    "outreach"/"prospects" → outreaches  (has: name, email, city, country, status, assignedTo)
+    "city of leads" → contacts has no city; use companies.country or join to outreaches.city
+    "city of outreach" → outreaches.city  (outreaches DOES have a city column)
+    "lost deals"    → deals WHERE stage='Lost' AND NOT deleted
+    "won deals"     → deals WHERE stage='Won' AND NOT deleted
+    "open/active deals" → deals WHERE stage NOT IN ('Won','Lost') AND NOT deleted
+    "overdue tasks" → createtasks WHERE due_date < NOW() AND status != 'Completed' AND NOT deleted
+    "activity logs" → activitylogs (columns: action, module, recordId, userId, createdAt)
+    "deal stage"    → deals.stage (text: 'Won','Lost','Proposal','Negotiation', etc.)
+    "lead status"   → contacts.leadStatus or companies.leadStatus (text column)
+    "lead source"   → contacts.source → JOIN "sources" s ON s._id = ct.source
+    "phone"         → contacts."phoneNumber" or companies."phoneNumber" or outreaches.phone
+    "email opened"  → no isRead column; emails table tracks sent/received but not open status
+
+15c. COMPLETE TABLE LIST — ONLY use tables from this list, NEVER invent table names:
+    activities, activityevents, activitylogs, ai_notes, billapproverconfigs, bills,
+    campaigns, categories, commonnotes, companies, companynotes, contacts, contactsnotes,
+    conversations, countryregions, createtasks, deals, dealsnotes, dealstagesettings,
+    departments, emails, invoices, lead_statuses, lifecycle_stages, mails, meetings,
+    notes, notifications, outreachactivities, outreaches, payments, products, projecttypes,
+    publicleads, regions, relations, remotejobnotes, remotejobs, sales, salesnotes,
+    sources, status, targets, tasks, taxes, technologies, technologycategories,
+    users, vendormagiclinks, vendors
+
 16. REVENUE / AMOUNT QUERIES — MANDATORY RULES (always apply):
 
     REVENUE = paid invoices only, dated by when payment was received.
