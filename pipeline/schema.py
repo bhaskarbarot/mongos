@@ -35,6 +35,30 @@ from typing import Any, Dict, List, Optional, Tuple
 
 LOGGER = logging.getLogger("sql_chatbot")
 
+# ── Connection pool (shared, thread-safe) ────────────────────────────────────
+_PG_POOL = None
+_POOL_LOCK = threading.Lock()
+
+def _get_pool():
+    global _PG_POOL
+    if _PG_POOL is not None:
+        return _PG_POOL
+    with _POOL_LOCK:
+        if _PG_POOL is None:
+            from config import settings
+            import psycopg2.pool
+            _PG_POOL = psycopg2.pool.ThreadedConnectionPool(
+                minconn=2,
+                maxconn=20,
+                host=settings.postgres_host,
+                port=settings.postgres_port,
+                user=settings.postgres_user,
+                password=settings.postgres_password,
+                dbname=settings.postgres_db,
+                connect_timeout=8,
+            )
+    return _PG_POOL
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MODULE-LEVEL CACHES (thread-safe via _CACHE_LOCK)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -279,7 +303,7 @@ class SqlResult:
 # SQL EXECUTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_sql_direct(sql: str) -> Optional["SqlResult"]:
+def _run_sql_direct(sql) -> Optional["SqlResult"]:  # sql: str | psycopg2.sql.Composed
     """Execute SQL directly via psycopg2, bypassing LangChain entirely.
 
     This is the RELIABLE fallback path. LangChain's sql_db_query tool
@@ -293,25 +317,19 @@ def _run_sql_direct(sql: str) -> Optional["SqlResult"]:
     so no string serialisation / truncation / ast.literal_eval() happens.
     """
     try:
-        from config import settings
         import psycopg2
         import psycopg2.extras  # enables dict/JSON cursor
 
-        conn = psycopg2.connect(
-            host=settings.postgres_host,
-            port=settings.postgres_port,
-            user=settings.postgres_user,
-            password=settings.postgres_password,
-            dbname=settings.postgres_db,
-            connect_timeout=8,
-        )
+        pool = _get_pool()
+        conn = pool.getconn()
         conn.set_session(readonly=True, autocommit=True)
 
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            rows = cur.fetchall()
-
-        conn.close()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+        finally:
+            pool.putconn(conn)
 
         # Normalise: convert each value to JSON-safe Python primitives.
         # psycopg2 returns JSONB as Python dicts — convert to string for
@@ -530,11 +548,12 @@ def get_document_fields(agent, table: str) -> List[str]:
     _SYSTEM_COLS = frozenset({"_synced_at"})
     fields: List[str] = []
     try:
-        _col_sql = (
+        import psycopg2.sql as _sql
+        _col_sql = _sql.SQL(
             "SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{table}' AND table_schema = 'public' "
+            "WHERE table_name = {} AND table_schema = 'public' "
             "ORDER BY ordinal_position"
-        )
+        ).format(_sql.Literal(table))
         _c_res = run_sql(agent, _col_sql)
         fields = [
             r[0] for r in _c_res.rows
@@ -614,12 +633,12 @@ def discover_schema_links(agent) -> Dict[str, Dict[str, str]]:
                     if not re.match(r"^[0-9a-f]{24}$", val_str):
                         continue
 
-                    # Verify the ID exists in the target table
-                    _v_res = run_sql(
-                        agent,
-                        f"SELECT 1 FROM \"{target_name}\""
-                        f" WHERE _id = '{val_str}' LIMIT 1",
-                    )
+                    # Verify the ID exists in the target table (val_str already validated as hex-24)
+                    import psycopg2.sql as _sql
+                    _v_sql = _sql.SQL(
+                        "SELECT 1 FROM {} WHERE _id = {} LIMIT 1"
+                    ).format(_sql.Identifier(target_name), _sql.Literal(val_str))
+                    _v_res = run_sql(agent, _v_sql)
                     if _v_res.rows:
                         links.setdefault(table, {})[field] = target_name
                         LOGGER.info("Schema link: %s.%s → %s", table, field, target_name)

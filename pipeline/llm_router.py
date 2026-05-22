@@ -286,12 +286,16 @@ def _call_gemini(
             "maxOutputTokens": max_tokens,
         },
     }
-    url = f"{_GEMINI_BASE}/{model}:generateContent?key={settings.gemini_api_key}"
+    url = f"{_GEMINI_BASE}/{model}:generateContent"
     try:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json", "User-Agent": "crm-ai/1.0"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "crm-ai/1.0",
+                "x-goog-api-key": settings.gemini_api_key,
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=60) as resp:

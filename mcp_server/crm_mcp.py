@@ -74,7 +74,7 @@ _SEED_EXAMPLES: List[Dict] = [
         "sql": (
             "SELECT COALESCE(SUM(grandtotal_in_usd), 0) AS total_revenue "
             'FROM "invoices" WHERE payment_status = \'paid\' AND NOT deleted '
-            "AND EXTRACT(YEAR FROM NULLIF(payment_date,'')::timestamptz) "
+            "AND EXTRACT(YEAR FROM payment_date) "
             "= EXTRACT(YEAR FROM CURRENT_DATE)"
         ),
         "tables": ["invoices"],

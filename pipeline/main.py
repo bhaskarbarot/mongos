@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -54,6 +55,7 @@ LOGGER = logging.getLogger("sql_chatbot")
 ConversationMemory = ChatMemory
 
 _SCHEMA_WARMED = False
+_SCHEMA_WARM_LOCK = threading.Lock()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -61,19 +63,22 @@ _SCHEMA_WARMED = False
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _warm_schema(agent) -> None:
-    """Pre-warm schema caches on first call (once per process)."""
+    """Pre-warm schema caches on first call (once per process, thread-safe)."""
     global _SCHEMA_WARMED
     if _SCHEMA_WARMED:
         return
-    try:
-        tables = get_table_names(agent)
-        if tables:
-            discover_schema_links(agent)
-            build_text2sql_schema(agent)
-            _SCHEMA_WARMED = True
-            LOGGER.info("Schema pre-warmed: %d tables", len(tables))
-    except Exception as exc:
-        LOGGER.warning("Schema warmup non-fatal: %s", exc)
+    with _SCHEMA_WARM_LOCK:
+        if _SCHEMA_WARMED:  # double-checked locking
+            return
+        try:
+            tables = get_table_names(agent)
+            if tables:
+                discover_schema_links(agent)
+                build_text2sql_schema(agent)
+                _SCHEMA_WARMED = True
+                LOGGER.info("Schema pre-warmed: %d tables", len(tables))
+        except Exception as exc:
+            LOGGER.warning("Schema warmup non-fatal: %s", exc)
 
 
 def _guard_response(answer: str, started: float, layer: str = "guard") -> Dict[str, Any]:

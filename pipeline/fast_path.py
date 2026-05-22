@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # ── Configurable natural delay (read once at import time from env) ─────────────
 # Set FASTPATH_DELAY_ENABLED=false to turn off entirely (e.g. during dev/testing).
 # FASTPATH_DELAY_MIN / MAX control the random range in seconds.
-_DELAY_ENABLED: bool = os.getenv("FASTPATH_DELAY_ENABLED", "true").lower() == "true"
+_DELAY_ENABLED: bool = os.getenv("FASTPATH_DELAY_ENABLED", "false").lower() == "true"
 _DELAY_MIN:     int  = int(os.getenv("FASTPATH_DELAY_MIN", "5"))
 _DELAY_MAX:     int  = int(os.getenv("FASTPATH_DELAY_MAX", "10"))
 

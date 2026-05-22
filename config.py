@@ -10,7 +10,7 @@ load_dotenv()
 class Settings:
     # ── PostgreSQL ────────────────────────────────────────────────────────────
     postgres_host:     str = os.getenv("POSTGRES_HOST",     "localhost")
-    postgres_port:     int = int(os.getenv("POSTGRES_PORT", "5432"))
+    postgres_port:     int = int(os.getenv("POSTGRES_PORT", "5433"))
     postgres_user:     str = os.getenv("POSTGRES_USER",     "postgres")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "postgres")
     postgres_db:       str = os.getenv("POSTGRES_DB",       "mongos_sync")

@@ -143,9 +143,9 @@ def query_hash(query: str) -> str:
 # ── Number handling ────────────────────────────────────────────────────────────
 
 def coerce_number(v: Any) -> Any:
-    """Coerce a value to numeric type. Returns 0 for None, original for non-numeric."""
+    """Coerce a value to numeric type. Returns None for None (not 0 — callers handle missing data explicitly)."""
     if v is None:
-        return 0
+        return None
     if isinstance(v, (int, float)):
         return v
     try:

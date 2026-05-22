@@ -30,6 +30,10 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 load_dotenv()
 
+import asyncio
+import fcntl
+import functools
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -53,28 +57,32 @@ from agent import run_agent_query, ConversationMemory
 
 _agent       = None
 _agent_error = None   # stores last init error message
+_agent_lock  = threading.Lock()
 
 def _get_agent():
-    """Return the shared agent, initialising it lazily on first call."""
+    """Return the shared agent, initialising it lazily on first call (thread-safe)."""
     global _agent, _agent_error
     if _agent is not None:
         return _agent
-    try:
-        LOGGER.info("Initialising CRM pipeline (DB + schema discovery)…")
-        from db import get_database
-        from agent import get_sql_agent
-        db     = get_database()
-        _agent = get_sql_agent(db)
-        _agent_error = None
-        LOGGER.info("Pipeline ready ✓")
-        return _agent
-    except Exception as exc:
-        _agent_error = str(exc)
-        LOGGER.error("Pipeline init failed: %s", exc, exc_info=True)
-        raise HTTPException(
-            status_code=503,
-            detail="Database unavailable — start the PostgreSQL service first.",
-        )
+    with _agent_lock:
+        if _agent is not None:  # double-checked locking
+            return _agent
+        try:
+            LOGGER.info("Initialising CRM pipeline (DB + schema discovery)…")
+            from db import get_database
+            from agent import get_sql_agent
+            db     = get_database()
+            _agent = get_sql_agent(db)
+            _agent_error = None
+            LOGGER.info("Pipeline ready ✓")
+            return _agent
+        except Exception as exc:
+            _agent_error = str(exc)
+            LOGGER.error("Pipeline init failed: %s", exc, exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Database unavailable — start the PostgreSQL service first.",
+            )
 
 def _get_table_names_safe() -> list:
     try:
@@ -134,13 +142,16 @@ app = FastAPI(
 
 
 @app.on_event("startup")
-def _create_db_indexes() -> None:
-    """Create performance indexes on startup. Safe to re-run (CONCURRENTLY IF NOT EXISTS)."""
+def _startup() -> None:
+    """Run at startup: create indexes and pre-warm agent in background thread."""
+    import concurrent.futures
     try:
         from pipeline.db_indexes import create_indexes
         create_indexes()
     except Exception as exc:
         LOGGER.warning("Index creation skipped: %s", exc)
+    # Pre-warm agent so first user request doesn't pay cold-start cost
+    concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(_get_agent)
 
 
 # E3: Hardened CORS — restrict origins, methods, and headers
@@ -418,7 +429,16 @@ async def chat(req: ChatRequest, request: Request):
     t0 = time.perf_counter()
 
     try:
-        result = run_agent_query(_get_agent(), req.query, memory=mem, request_id=request_id)
+        loop = asyncio.get_event_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                functools.partial(run_agent_query, _get_agent(), req.query, memory=mem, request_id=request_id),
+            ),
+            timeout=120.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail={"error": "Query timed out — please simplify your question", "request_id": request_id, "success": False})
     except HTTPException:
         raise
     except Exception as exc:
@@ -466,21 +486,27 @@ async def feedback(req: FeedbackRequest, request: Request):
 
     try:
         feedback_file = Path("logs/feedback_log.json")
-        existing: list = []
-        if feedback_file.exists():
+        feedback_file.parent.mkdir(exist_ok=True)
+        with open(str(feedback_file), "a+") as _fh:
+            fcntl.flock(_fh, fcntl.LOCK_EX)
             try:
-                existing = json.loads(feedback_file.read_text())
+                _fh.seek(0)
+                raw = _fh.read()
+                existing: list = json.loads(raw) if raw.strip() else []
             except Exception:
                 existing = []
-        existing.append({
-            "ts":          time.time(),
-            "query":       req.query,
-            "rating":      req.rating,
-            "comment":     req.comment or "",
-            "sources":     req.sources_used or [],
-            "query_plan":  req.query_plan,
-        })
-        feedback_file.write_text(json.dumps(existing, indent=2))
+            existing.append({
+                "ts":         time.time(),
+                "query":      req.query,
+                "rating":     req.rating,
+                "comment":    req.comment or "",
+                "sources":    req.sources_used or [],
+                "query_plan": req.query_plan,
+            })
+            _fh.seek(0)
+            _fh.truncate()
+            _fh.write(json.dumps(existing, indent=2))
+            fcntl.flock(_fh, fcntl.LOCK_UN)
         LOGGER.info("[RID:%s] Feedback saved: rating=%d | query=%.60s",
                     request_id, req.rating, req.query)
     except Exception as exc:
