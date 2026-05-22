@@ -214,7 +214,8 @@ RULES:
     deals        → company      (LEFT JOIN "companies" c ON c._id = d.company)
     sales        → company      (LEFT JOIN "companies" c ON c._id = s.company)
     companies    → source       (LEFT JOIN "sources"   s ON s._id = c.source)
-    companies    → region       (LEFT JOIN "regions"   r ON r._id = c.region)
+    companies    → region       (LEFT JOIN "regions" r ON r._id = c.region WHERE r."regionName" ILIKE '%USA%')
+                               Only 4 regions exist: USA, APAC, EMEA, UAE — no city-level data
     createtasks  → companyId    (createtasks is the ONLY table with companyId column)
     bills        → vendor       (LEFT JOIN "vendors"   v ON v._id = b.vendor)
     activitylogs → userId       (LEFT JOIN "users"     u ON u._id = al."userId")
@@ -237,7 +238,11 @@ RULES:
     ✗ accounts (table)    — NO such table; use "companies"
     ✗ tax_types           — NO such table; use "taxes": SELECT name, rate FROM "taxes"
     ✗ participants        — NO such table; emails.to / emails.cc / emails.bcc are JSONB arrays
-    ✗ companies.city      — NO city column on companies; use companies.country (text) or companies.region (FK)
+    ✗ companies.city      — NO city column on companies. companies.region is an ObjectId FK to "regions" table.
+                            Available regions (ONLY 4 exist): USA, APAC, EMEA, UAE
+                            To filter by region: JOIN "regions" r ON r._id = c.region WHERE r."regionName" ILIKE '%USA%'
+                            ✗ NEVER: WHERE c.region ILIKE '%mumbai%' — region stores ObjectId, not text
+                            ✗ Mumbai, Delhi, London, etc do NOT exist as regions — only USA/APAC/EMEA/UAE
     ✗ contacts.city       — NO city column on contacts; join to companies for location data
     ✗ emails.isRead       — NO isRead column on emails; emails table has: from, to, cc, bcc, subject, date, body
     ✗ companies.currency  — companies has "Currency" (capital C) for display only; use invoices.currency for money
@@ -261,18 +266,32 @@ RULES:
 
 15b. ENTITY → CORRECT TABLE (always use these mappings, never guess):
     "leads"         → contacts WHERE "lifecycleStage"='Lead'  (or companies WHERE "lifecycleStage"='Lead')
+                      ✗ NEVER query contacts without "lifecycleStage"='Lead' when question says "leads"
+                      ✓ MANDATORY: SELECT ... FROM "contacts" ct WHERE ct."lifecycleStage"='Lead' AND NOT ct.deleted
     "accounts"      → companies
     "opportunities" → deals
     "tasks"         → createtasks  (table is named "createtasks", NOT "tasks")
     "outreach"/"prospects" → outreaches  (has: name, email, city, country, status, assignedTo)
-    "city of leads" → contacts has no city; use companies.country or join to outreaches.city
+    "city/country of leads" → contacts has no city column; join to companies.country:
+                      SELECT c."country", COUNT(ct._id) AS lead_count
+                      FROM "contacts" ct
+                      JOIN "companies" c ON c._id = ct.company AND NOT c.deleted
+                      WHERE NOT ct.deleted AND ct."lifecycleStage" = 'Lead'
+                      GROUP BY c."country" ORDER BY lead_count DESC LIMIT 1
     "city of outreach" → outreaches.city  (outreaches DOES have a city column)
-    "lost deals"    → deals WHERE stage='Lost' AND NOT deleted
-    "won deals"     → deals WHERE stage='Won' AND NOT deleted
-    "open/active deals" → deals WHERE stage NOT IN ('Won','Lost') AND NOT deleted
+    "lost deals"    → deals WHERE stage='Closed Lost' AND NOT deleted
+                      ✗ NEVER use stage='Lost' — actual value is 'Closed Lost'
+    "won deals"     → deals WHERE stage='Closed Won' AND NOT deleted
+                      ✗ NEVER use stage='Won' — actual value is 'Closed Won'
+    "open/pipeline deals" → deals WHERE stage NOT IN ('Closed Won','Closed Lost') AND NOT deleted
+                      ✗ NEVER use stage NOT IN ('Won','Lost') — actual closed values have 'Closed ' prefix
+    "deal stages (exact values in DB)":
+                      'Analysis - To be Quoted' | 'Quotation Sent' | 'Negotiation'
+                      'Contract Under Review'   | 'On Hold'
+                      'Closed Won'              | 'Closed Lost'
     "overdue tasks" → createtasks WHERE due_date < NOW() AND status != 'Completed' AND NOT deleted
     "activity logs" → activitylogs (columns: action, module, recordId, userId, createdAt)
-    "deal stage"    → deals.stage (text: 'Won','Lost','Proposal','Negotiation', etc.)
+    "deal stage"    → deals.stage — see exact values above, never guess stage names
     "lead status"   → contacts.leadStatus or companies.leadStatus (text column)
     "lead source"   → contacts.source → JOIN "sources" s ON s._id = ct.source
     "phone"         → contacts."phoneNumber" or companies."phoneNumber" or outreaches.phone

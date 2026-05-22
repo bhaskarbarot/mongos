@@ -92,20 +92,7 @@ def _extract_sql(raw: str) -> Optional[str]:
     return None
 
 
-# Real tables that exist in the DB — used for hallucination guard
-_REAL_TABLES: set = {
-    "activities", "activityevents", "activitylogs", "ai_notes", "billapproverconfigs",
-    "bills", "campaigns", "categories", "chatbot_feedback", "commonnotes", "companies",
-    "companynotes", "contacts", "contactsnotes", "conversations", "countryregions",
-    "createtasks", "deals", "dealsnotes", "dealstagesettings", "departments", "emails",
-    "invoices", "lead_statuses", "lifecycle_stages", "mails", "meetings", "notes",
-    "notifications", "outreachactivities", "outreaches", "payments", "products",
-    "projecttypes", "publicleads", "regions", "relations", "remotejobnotes", "remotejobs",
-    "sales", "salesnotes", "sources", "status", "targets", "tasks", "taxes",
-    "technologies", "technologycategories", "users", "vendormagiclinks", "vendors",
-    # system / sequence tables (read-only, safe)
-    "information_schema", "pg_tables",
-}
+from pipeline.utils import check_hallucinated_tables, check_mandatory_filters
 
 _SQL_PSEUDO_TABLES = {
     "nullif", "coalesce", "current_date", "current_timestamp", "now",
@@ -115,17 +102,6 @@ _SQL_PSEUDO_TABLES = {
 }
 
 
-def _check_hallucinated_tables(sql: str) -> Optional[str]:
-    """Return an error message if SQL references any non-existent table, else None."""
-    used = re.findall(r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?', sql, re.IGNORECASE)
-    fake = [t for t in used if t.lower() not in _REAL_TABLES and t.lower() not in _SQL_PSEUDO_TABLES]
-    if fake:
-        return (
-            f"Table(s) {fake} do NOT exist in this database. "
-            f"Only use tables from this list: {sorted(_REAL_TABLES)}. "
-            "Rewrite the SQL using only real tables."
-        )
-    return None
 
 
 def _extract_tables_from_sql(sql: str) -> List[str]:
@@ -285,11 +261,19 @@ def _generate_execute_selfheal(
         LOGGER.info("Simple agent attempt %d SQL: %.120s", attempt, sql)
 
         # ── Hallucination guard: reject SQL with non-existent tables ──────────
-        halluc_err = _check_hallucinated_tables(sql)
+        halluc_err = check_hallucinated_tables(sql)
         if halluc_err:
             last_error = halluc_err
-            heal_hint  = halluc_err   # injected into next attempt's prompt via parts[]
+            heal_hint  = halluc_err
             LOGGER.warning("Simple agent attempt %d HALLUCINATED TABLE: %s", attempt, halluc_err[:120])
+            continue
+
+        # ── Mandatory filter guard: catches missing lifecycleStage, DESC, etc ─
+        filter_err = check_mandatory_filters(sql, query)
+        if filter_err:
+            last_error = filter_err
+            heal_hint  = filter_err
+            LOGGER.warning("Simple agent attempt %d MISSING FILTER: %s", attempt, filter_err[:120])
             continue
 
         # ── Execute ───────────────────────────────────────────────────────────

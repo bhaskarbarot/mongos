@@ -64,7 +64,7 @@ _SEED_EXAMPLES: List[Dict] = [
         "natural_query": "list all open deals",
         "sql": (
             'SELECT name, stage, grand_total_in_usd FROM "deals" '
-            'WHERE "dealWonAt" IS NULL AND "dealLostAt" IS NULL AND NOT deleted '
+            "WHERE stage NOT IN ('Closed Won','Closed Lost') AND NOT deleted "
             "ORDER BY grand_total_in_usd DESC NULLS LAST LIMIT 50"
         ),
         "tables": ["deals"],
@@ -101,6 +101,109 @@ _SEED_EXAMPLES: List[Dict] = [
             "GROUP BY priority ORDER BY task_count DESC"
         ),
         "tables": ["createtasks"],
+    },
+    {
+        "natural_query": "which country generates the most leads",
+        "sql": (
+            'SELECT c."country", COUNT(ct._id) AS lead_count '
+            'FROM "contacts" ct '
+            'JOIN "companies" c ON c._id = ct.company AND NOT c.deleted '
+            "WHERE NOT ct.deleted AND ct.\"lifecycleStage\" = 'Lead' "
+            'GROUP BY c."country" ORDER BY lead_count DESC LIMIT 1'
+        ),
+        "tables": ["contacts", "companies"],
+    },
+    {
+        "natural_query": "how many leads do we have",
+        "sql": (
+            'SELECT COUNT(*) AS lead_count FROM "contacts" '
+            "WHERE NOT deleted AND \"lifecycleStage\" = 'Lead'"
+        ),
+        "tables": ["contacts"],
+    },
+    {
+        "natural_query": "list all leads this month with owner and status",
+        "sql": (
+            'SELECT ct."firstName", ct."lastName", ct."leadStatus", u.name AS owner '
+            'FROM "contacts" ct '
+            'LEFT JOIN "users" u ON u._id = ct."contactOwner" '
+            "WHERE NOT ct.deleted AND ct.\"lifecycleStage\" = 'Lead' "
+            "AND ct.\"createdAt\" >= DATE_TRUNC('month', CURRENT_DATE) "
+            "ORDER BY ct.\"createdAt\" DESC"
+        ),
+        "tables": ["contacts", "users"],
+    },
+    {
+        "natural_query": "show all overdue tasks",
+        "sql": (
+            'SELECT ct."Task", ct.priority, ct.due_date, u.name AS assigned_to '
+            'FROM "createtasks" ct '
+            'LEFT JOIN "users" u ON u._id = ct."createdBy" '
+            "WHERE NOT ct.deleted AND ct.due_date < NOW() "
+            "AND ct.status != 'Completed' "
+            "ORDER BY ct.due_date ASC"
+        ),
+        "tables": ["createtasks", "users"],
+    },
+    {
+        "natural_query": "which accounts have no contacts",
+        "sql": (
+            'SELECT c."companyName", c."createdAt" '
+            'FROM "companies" c '
+            'LEFT JOIN "contacts" ct ON ct.company = c._id AND NOT ct.deleted '
+            "WHERE NOT c.deleted AND ct._id IS NULL "
+            'ORDER BY c."createdAt" DESC'
+        ),
+        "tables": ["companies", "contacts"],
+    },
+    {
+        "natural_query": "show contacts where email is missing",
+        "sql": (
+            'SELECT ct."firstName", ct."lastName", ct."phoneNumber" '
+            'FROM "contacts" ct '
+            "WHERE NOT ct.deleted "
+            "AND (ct.email IS NULL OR ct.email = '') "
+            'ORDER BY ct."createdAt" DESC'
+        ),
+        "tables": ["contacts"],
+    },
+    {
+        "natural_query": "which sales rep has the most accounts",
+        "sql": (
+            "SELECT u.name AS rep_name, COUNT(c._id) AS account_count "
+            'FROM "users" u '
+            'LEFT JOIN "companies" c ON c."companyOwner" = u._id AND NOT c.deleted '
+            'WHERE u."isActive" = true '
+            "GROUP BY u._id, u.name "
+            "ORDER BY account_count DESC LIMIT 5"
+        ),
+        "tables": ["users", "companies"],
+    },
+    {
+        "natural_query": "list all deals closing this week",
+        "sql": (
+            'SELECT d.name, d.stage, d.grand_total_in_usd, u.name AS owner '
+            'FROM "deals" d '
+            'LEFT JOIN "users" u ON u._id = d.owner '
+            "WHERE NOT d.deleted "
+            "AND d.stage NOT IN ('Closed Won','Closed Lost') "
+            "AND d.\"closeDate\" >= DATE_TRUNC('week', CURRENT_DATE) "
+            "AND d.\"closeDate\" < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '7 days' "
+            "ORDER BY d.\"closeDate\" ASC"
+        ),
+        "tables": ["deals", "users"],
+    },
+    {
+        "natural_query": "compare lead sources how many leads from each source this month",
+        "sql": (
+            "SELECT s.name AS source, COUNT(ct._id) AS lead_count "
+            'FROM "contacts" ct '
+            'LEFT JOIN "sources" s ON s._id = ct.source '
+            "WHERE NOT ct.deleted AND ct.\"lifecycleStage\" = 'Lead' "
+            "AND ct.\"createdAt\" >= DATE_TRUNC('month', CURRENT_DATE) "
+            "GROUP BY s.name ORDER BY lead_count DESC"
+        ),
+        "tables": ["contacts", "sources"],
     },
 ]
 

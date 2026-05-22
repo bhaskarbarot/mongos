@@ -467,3 +467,107 @@ class Timer:
     @property
     def elapsed_s(self) -> float:
         return self.elapsed_ms / 1000.0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SQL ACCURACY GUARDS  (shared by all 3 agents)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_REAL_DB_TABLES: frozenset = frozenset({
+    "activities", "activityevents", "activitylogs", "ai_notes", "billapproverconfigs",
+    "bills", "campaigns", "categories", "chatbot_feedback", "commonnotes", "companies",
+    "companynotes", "contacts", "contactsnotes", "conversations", "countryregions",
+    "createtasks", "deals", "dealsnotes", "dealstagesettings", "departments", "emails",
+    "invoices", "lead_statuses", "lifecycle_stages", "mails", "meetings", "notes",
+    "notifications", "outreachactivities", "outreaches", "payments", "products",
+    "projecttypes", "publicleads", "regions", "relations", "remotejobnotes", "remotejobs",
+    "sales", "salesnotes", "sources", "status", "targets", "tasks", "taxes",
+    "technologies", "technologycategories", "users", "vendormagiclinks", "vendors",
+    "information_schema", "pg_tables",
+})
+
+_SQL_PSEUDO = frozenset({
+    "nullif", "coalesce", "current_date", "current_timestamp", "now", "extract",
+    "date_trunc", "date_part", "interval", "rank", "row_number", "dense_rank",
+    "lateral", "unnest", "generate_series", "values", "dual",
+    "json_array_elements", "jsonb_array_elements",
+})
+
+
+def check_hallucinated_tables(sql: str) -> Optional[str]:
+    """Return correction hint if SQL references a table that doesn't exist in DB."""
+    used = re.findall(r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?', sql, re.IGNORECASE)
+    fake = [t for t in used if t.lower() not in _REAL_DB_TABLES and t.lower() not in _SQL_PSEUDO]
+    if fake:
+        return (
+            f"Table(s) {fake} do NOT exist in this database. "
+            f"Only use real tables. Common mistakes: 'outreachprospects'→'outreaches', "
+            f"'leads'→contacts WHERE lifecycleStage='Lead', 'opportunities'→'deals', "
+            f"'accounts'→'companies'. "
+            f"Full table list: {sorted(_REAL_DB_TABLES - {'information_schema','pg_tables'})}. "
+            "Rewrite using only real tables."
+        )
+    return None
+
+
+def check_mandatory_filters(sql: str, query: str) -> Optional[str]:
+    """Return correction hint if SQL is missing a mandatory filter for the query type."""
+    sql_up   = sql.upper()
+    query_lo = query.lower()
+    hints    = []
+
+    if any(w in query_lo for w in ("lead", "leads")):
+        if "LIFECYCLESTAGE" not in sql_up:
+            hints.append(
+                "Query asks about LEADS but SQL is missing mandatory filter: "
+                "WHERE \"lifecycleStage\" = 'Lead'. "
+                "Contacts without this filter counts ALL contacts, not just leads. "
+                "Add: AND ct.\"lifecycleStage\" = 'Lead'"
+            )
+
+    if any(w in query_lo for w in ("most", "top", "highest", "best", "largest", "maximum")):
+        if "ORDER BY" in sql_up and "DESC" not in sql_up:
+            hints.append(
+                "Query asks for 'most/top/highest' but ORDER BY is missing DESC. "
+                "Add DESC to get the highest value first, e.g. ORDER BY count DESC."
+            )
+
+    # Wrong deal stage values — must use exact DB values
+    if any(w in query_lo for w in ("lost deal", "deal lost", "deals lost", "lost deals")):
+        if "STAGE" in sql_up and "'LOST'" in sql_up.upper() and "'CLOSED LOST'" not in sql_up.upper():
+            hints.append(
+                "Wrong deal stage value: use stage='Closed Lost' NOT stage='Lost'. "
+                "Actual DB stage values are: 'Closed Lost', 'Closed Won', 'Analysis - To be Quoted', "
+                "'Quotation Sent', 'Negotiation', 'Contract Under Review', 'On Hold'."
+            )
+
+    if any(w in query_lo for w in ("won deal", "deal won", "deals won", "won deals")):
+        if "STAGE" in sql_up and "'WON'" in sql_up.upper() and "'CLOSED WON'" not in sql_up.upper():
+            hints.append(
+                "Wrong deal stage value: use stage='Closed Won' NOT stage='Won'. "
+                "Actual DB stage values: 'Closed Won', 'Closed Lost'."
+            )
+
+    if any(w in query_lo for w in ("pipeline", "open deal", "active deal", "in progress")):
+        if "STAGE" in sql_up and "NOT IN" in sql_up and "'CLOSED WON'" not in sql_up.upper():
+            hints.append(
+                "Pipeline deals = stage NOT IN ('Closed Won','Closed Lost'). "
+                "Do not use 'Won','Lost' — use 'Closed Won','Closed Lost'."
+            )
+
+    if "overdue" in query_lo:
+        if "DUE_DATE" in sql_up and "NOW()" not in sql_up and "CURRENT_DATE" not in sql_up:
+            hints.append(
+                "Query asks about OVERDUE items but SQL is missing: due_date < NOW(). "
+                "Add: AND due_date < NOW() AND status != 'Completed'"
+            )
+
+    if any(w in query_lo for w in ("no contact", "without contact", "no deal", "without deal",
+                                    "no activity", "haven't", "not have")):
+        if "IS NULL" not in sql_up and "NOT EXISTS" not in sql_up:
+            hints.append(
+                "Query asks for records WITH NO related records. "
+                "Use LEFT JOIN ... WHERE related._id IS NULL, or NOT EXISTS subquery."
+            )
+
+    return "\n".join(hints) if hints else None

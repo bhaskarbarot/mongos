@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, TypedDict
 
 from config import settings
+from pipeline.utils import check_hallucinated_tables, check_mandatory_filters
 
 LOGGER = logging.getLogger("sql_chatbot")
 
@@ -190,6 +191,22 @@ def run_sql_with_selfheal(
         sql = extract_sql(raw)
         if not sql:
             last_error = f"Could not extract SQL from LLM output (attempt {attempt})"
+            continue
+
+        # ── Hallucination guard ───────────────────────────────────────────────
+        halluc_err = check_hallucinated_tables(sql)
+        if halluc_err:
+            last_error = halluc_err
+            heal_hint  = halluc_err
+            LOGGER.warning("Medium agent attempt %d HALLUCINATED TABLE: %s", attempt, halluc_err[:120])
+            continue
+
+        # ── Mandatory filter guard ────────────────────────────────────────────
+        filter_err = check_mandatory_filters(sql, sub_query_text)
+        if filter_err:
+            last_error = filter_err
+            heal_hint  = filter_err
+            LOGGER.warning("Medium agent attempt %d MISSING FILTER: %s", attempt, filter_err[:120])
             continue
 
         last_sql = sql

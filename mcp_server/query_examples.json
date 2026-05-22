@@ -10482,5 +10482,162 @@
       "contacts"
     ],
     "saved_at": "2026-05-22T13:17:01.437849"
+  },
+  {
+    "natural_query": "SELECT companies.id FROM companies LEFT JOIN contacts ON companies.id = contacts.company_id WHERE contacts.id IS NULL",
+    "sql": "SELECT c._id FROM \"companies\" c LEFT JOIN \"contacts\" ct ON ct.company = c._id AND NOT ct.deleted WHERE NOT c.deleted AND ct._id IS NULL",
+    "tables": [
+      "companies",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:34:30.615245"
+  },
+  {
+    "natural_query": "SELECT contacts.id, contacts.name FROM contacts LEFT JOIN activitylogs ON contacts.id = activitylogs.contactId WHERE activitylogs.lastActivity < '2026-05-15' OR activitylogs.lastActivity IS NULL",
+    "sql": "SELECT ct._id, ct.\"firstName\", ct.\"lastName\" FROM \"contacts\" ct LEFT JOIN \"activitylogs\" al ON ct._id = al.\"recordId\" WHERE al.\"createdAt\" < '2026-05-15' OR al.\"createdAt\" IS NULL AND NOT ct.deleted",
+    "tables": [
+      "activitylogs",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:35:06.960184"
+  },
+  {
+    "natural_query": "Show all accounts with lifecycle stage as Lead",
+    "sql": "SELECT c.\"companyName\", c.industry, c.country, c.\"createdAt\" FROM \"companies\" c WHERE c.\"lifecycleStage\" = 'Lead' AND NOT c.deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-22T13:35:09.285009"
+  },
+  {
+    "natural_query": "List deals worth more than 1 lakh",
+    "sql": "SELECT d.name, d.stage, d.grand_total_in_usd FROM \"deals\" d WHERE d.grand_total_in_usd > 100000 AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:35:13.036789"
+  },
+  {
+    "natural_query": "Which sales rep has the most accounts?",
+    "sql": "SELECT rep_name, account_count\nFROM (\n  SELECT u.name AS rep_name, COUNT(c._id) AS account_count,\n    RANK() OVER (ORDER BY COUNT(c._id) DESC) AS rnk\n  FROM \"users\" u\n  LEFT JOIN \"companies\" c ON c.\"companyOwner\" = u._id AND NOT c.deleted\n  WHERE u.\"isActive\" = true\n  GROUP BY u._id, u.name\n) ranked\nWHERE rnk = 1\nORDER BY rep_name",
+    "tables": [
+      "companies",
+      "users"
+    ],
+    "saved_at": "2026-05-22T13:35:17.597864"
+  },
+  {
+    "natural_query": "Show me all overdue tasks",
+    "sql": "SELECT ct._id, ct.\"Task\", ct.status, ct.priority, ct.due_date, u.name AS created_by\nFROM \"createtasks\" ct\nLEFT JOIN \"users\" u ON u._id = ct.\"createdBy\"\nWHERE ct.due_date < NOW() AND ct.status != 'Completed' AND NOT ct.deleted",
+    "tables": [
+      "createtasks",
+      "users"
+    ],
+    "saved_at": "2026-05-22T13:35:24.708729"
+  },
+  {
+    "natural_query": "List accounts created from WhatsApp source",
+    "sql": "SELECT c.\"companyName\", c.\"createdAt\" FROM \"companies\" c LEFT JOIN \"sources\" s ON s._id = c.source WHERE s.\"sourceName\" = 'WhatsApp' AND NOT c.deleted",
+    "tables": [
+      "companies",
+      "sources"
+    ],
+    "saved_at": "2026-05-22T13:35:28.510526"
+  },
+  {
+    "natural_query": "SELECT d.owner, (SUM(CASE WHEN d.stage = 'Won' THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*), 0)) AS conversion_rate FROM deals d GROUP BY d.owner ORDER BY conversion_rate DESC LIMIT 1",
+    "sql": "SELECT d.owner, (SUM(CASE WHEN d.stage = 'Closed Won' THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*), 0)) AS conversion_rate FROM \"deals\" d WHERE NOT d.deleted GROUP BY d.owner ORDER BY conversion_rate DESC LIMIT 1",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:35:49.712144"
+  },
+  {
+    "natural_query": "SELECT owner, COUNT(*) AS total_deals FROM deals WHERE stage = 'Won' GROUP BY owner",
+    "sql": "SELECT d.owner, COUNT(*) AS total_deals FROM \"deals\" d WHERE d.stage = 'Closed Won' AND NOT d.deleted GROUP BY d.owner",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:35:49.728867"
+  },
+  {
+    "natural_query": "SELECT c.id FROM companies c LEFT JOIN deals d ON c.id = d.companyId WHERE d.id IS NULL AND c.createdAt < '2026-04-22'",
+    "sql": "SELECT c._id FROM \"companies\" c LEFT JOIN \"deals\" d ON c._id = d.company AND NOT d.deleted WHERE d._id IS NULL AND NOT c.deleted AND c.\"createdAt\" < '2026-04-22'",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:36:06.051628"
+  },
+  {
+    "natural_query": "SELECT DISTINCT companies.id FROM companies LEFT JOIN invoices ON companies.id = invoices.company_id WHERE invoices.payment_date >= '2026-05-01' AND invoices.payment_date < '2026-06-01' GROUP BY companies.id HAVING COUNT(invoices.id) = 0",
+    "sql": "SELECT DISTINCT c._id FROM \"companies\" c LEFT JOIN \"invoices\" i ON i.company = c._id AND NOT i.deleted WHERE i.payment_date >= '2026-05-01' AND i.payment_date < '2026-06-01' GROUP BY c._id HAVING COUNT(i._id) = 0",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:36:32.322407"
+  },
+  {
+    "natural_query": "SELECT DISTINCT companies.id FROM companies JOIN invoices ON companies.id = invoices.company_id WHERE invoices.payment_date >= '2026-04-01' AND invoices.payment_date < '2026-05-01' GROUP BY companies.id",
+    "sql": "SELECT DISTINCT c._id FROM \"companies\" c JOIN \"invoices\" i ON c._id = i.company WHERE i.payment_date >= '2026-04-01' AND i.payment_date < '2026-05-01' AND NOT c.deleted GROUP BY c._id",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:36:32.340144"
+  },
+  {
+    "natural_query": "SELECT * FROM deals WHERE DATEDIFF(CURRENT_DATE, lastActivity) > 15 AND stage IS NOT NULL",
+    "sql": "SELECT d._id, d.name, d.stage, d.owner, d.company, d.grand_total_in_usd, d.currency, d.type, d.\"closeDate\", d.\"dealWonAt\", d.\"dealLostAt\", d.\"createdAt\" FROM \"deals\" d WHERE d.stage IS NOT NULL AND NOT d.deleted AND d.\"createdAt\" < NOW() - INTERVAL '15 days'",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:36:55.359525"
+  },
+  {
+    "natural_query": "SELECT DISTINCT contacts.id FROM contacts JOIN activitylogs ON contacts.id = activitylogs.contact_id WHERE activitylogs.action = 'opened_email'",
+    "sql": "SELECT DISTINCT ct._id FROM \"contacts\" ct JOIN \"activitylogs\" al ON ct._id = al.\"recordId\" WHERE al.action = 'opened_email' AND NOT ct.deleted",
+    "tables": [
+      "activitylogs",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:37:04.446037"
+  },
+  {
+    "natural_query": "SELECT DISTINCT contacts.id FROM contacts JOIN activitylogs ON contacts.id = activitylogs.contact_id WHERE activitylogs.action = 'replied_email'",
+    "sql": "SELECT DISTINCT ct._id FROM \"contacts\" ct JOIN \"activitylogs\" al ON ct._id = al.\"recordId\" WHERE al.action = 'replied_email' AND NOT ct.deleted",
+    "tables": [
+      "activitylogs",
+      "contacts"
+    ],
+    "saved_at": "2026-05-22T13:37:04.464019"
+  },
+  {
+    "natural_query": "Show accounts where deal was lost and the reason",
+    "sql": "SELECT c.\"companyName\", d.stage AS deal_stage\nFROM \"companies\" c\nLEFT JOIN \"deals\" d ON d.company = c._id AND NOT d.deleted\nWHERE d.\"dealLostAt\" IS NOT NULL AND NOT c.deleted",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:37:06.787730"
+  },
+  {
+    "natural_query": "List all leads that came in this week their owner status and last activity",
+    "sql": "SELECT ct.\"firstName\", ct.\"lastName\", u.name AS owner_name, u.\"isActive\" AS owner_status, al.\"createdAt\" AS last_activity\nFROM \"contacts\" ct\nJOIN \"users\" u ON u._id = ct.\"contactOwner\"\nLEFT JOIN \"activitylogs\" al ON al.\"recordId\" = ct._id AND al.module = 'contacts'\nWHERE ct.\"lifecycleStage\" = 'Lead' AND NOT ct.deleted\n  AND ct.\"createdAt\" >= '2026-05-18'\nORDER BY ct.\"createdAt\" DESC",
+    "tables": [
+      "activitylogs",
+      "contacts",
+      "users"
+    ],
+    "saved_at": "2026-05-22T13:37:10.601520"
+  },
+  {
+    "natural_query": "SELECT owner, dealLostAt, stage FROM deals WHERE stage='Lost'",
+    "sql": "SELECT d.owner, d.\"dealLostAt\", d.stage FROM \"deals\" d WHERE d.stage = 'Closed Lost' AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:43:05.376955"
   }
 ]
