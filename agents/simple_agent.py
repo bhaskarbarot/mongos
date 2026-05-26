@@ -237,9 +237,20 @@ def _generate_execute_selfheal(
             sql = cached_sql
             LOGGER.info("Simple agent: using cached SQL for attempt 1")
         else:
-            parts = [f"-- Few-shot examples:\n{examples_str}",
-                     f"\n-- Schema (includes current date):\n{schema_str}",
-                     f"\nQuestion: {query}"]
+            # Inject user-approved golden examples + corrections from feedback store
+            try:
+                from pipeline.feedback_manager import feedback_manager
+                feedback_injection = feedback_manager.get_injection_prompt(query)
+            except Exception:
+                feedback_injection = ""
+
+            parts = [f"-- Few-shot examples:\n{examples_str}"]
+            if feedback_injection:
+                parts.append(f"\n-- User feedback learnings:\n{feedback_injection}")
+            parts += [
+                f"\n-- Schema (includes current date):\n{schema_str}",
+                f"\nQuestion: {query}",
+            ]
             if heal_hint:
                 parts.append(f"\n-- Self-heal hint: {heal_hint}")
             parts.append("\nSQL:")

@@ -173,9 +173,18 @@ def run_sql_with_selfheal(
     last_sql:   Optional[str] = None
     heal_hint:  str           = ""
 
+    # Get feedback injection once (outside loop — same query each attempt)
+    try:
+        from pipeline.feedback_manager import feedback_manager as _fb_mgr
+        _feedback_injection = _fb_mgr.get_injection_prompt(sub_query_text)
+    except Exception:
+        _feedback_injection = ""
+
     for attempt in range(1, max_attempts + 1):
-        parts = [
-            f"-- Few-shot examples:\n{examples_str}",
+        parts = [f"-- Few-shot examples:\n{examples_str}"]
+        if _feedback_injection:
+            parts.append(f"\n-- User feedback learnings:\n{_feedback_injection}")
+        parts += [
             f"\n-- Schema:\n{schema_str}",
             f"\nQuestion: {sub_query_text}",
         ]

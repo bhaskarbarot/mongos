@@ -10750,5 +10750,217 @@
       "companies"
     ],
     "saved_at": "2026-05-26T04:32:08.476324"
+  },
+  {
+    "natural_query": "how many deals are there?",
+    "sql": "SELECT COUNT(*) AS deal_count FROM \"deals\" WHERE NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:47:26.548360"
+  },
+  {
+    "natural_query": "show deals by stage",
+    "sql": "SELECT d.stage, COUNT(d._id) AS deal_count\nFROM \"deals\" d\nWHERE NOT d.deleted\nGROUP BY d.stage\nORDER BY deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:47:43.530533"
+  },
+  {
+    "natural_query": "show deals by stages",
+    "sql": "SELECT d.stage, COUNT(d._id) AS deal_count\nFROM \"deals\" d\nWHERE NOT d.deleted\nGROUP BY d.stage\nORDER BY deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:48:02.724601"
+  },
+  {
+    "natural_query": "Can you filter the deals by stage to only show the Closed Won ones?",
+    "sql": "SELECT d._id, d.name, d.stage, d.grand_total_in_usd, d.currency, d.type, d.\"dealWonAt\", d.\"createdAt\" FROM \"deals\" d WHERE d.stage = 'Closed Won' AND NOT d.deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:48:20.017800"
+  },
+  {
+    "natural_query": "how many deals do we have in total?",
+    "sql": "SELECT COUNT(*) AS total_deals FROM \"deals\" WHERE NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:50:32.286460"
+  },
+  {
+    "natural_query": "show deals by 175 deals",
+    "sql": "SELECT d.name, d.stage, d.grand_total_in_usd FROM \"deals\" d WHERE NOT d.deleted ORDER BY d.\"createdAt\" DESC LIMIT 175",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:50:52.134967"
+  },
+  {
+    "natural_query": "Can you show me the deals by owner?",
+    "sql": "SELECT u.name AS owner_name, d.name AS deal_name, d.stage, d.grand_total_in_usd, d.currency, d.type, d.\"createdAt\" \nFROM \"deals\" d \nLEFT JOIN \"users\" u ON u._id = d.owner \nWHERE NOT d.deleted \nORDER BY u.name, d.\"createdAt\" DESC",
+    "tables": [
+      "deals",
+      "users"
+    ],
+    "saved_at": "2026-05-26T04:54:11.979185"
+  },
+  {
+    "natural_query": "how many invoices are overdue?",
+    "sql": "SELECT COUNT(*) AS overdue_invoice_count FROM \"invoices\" WHERE due_date < NOW() AND payment_status NOT IN ('paid', 'cancelled') AND NOT deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-26T04:54:31.711550"
+  },
+  {
+    "natural_query": "count of won deals",
+    "sql": "SELECT COUNT(*) FROM \"deals\" WHERE stage='Closed Won' AND NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:55:40.485192"
+  },
+  {
+    "natural_query": "give me all contacts who are leads",
+    "sql": "SELECT ct._id, ct.\"firstName\", ct.\"lastName\", ct.email, ct.\"jobTitle\", ct.\"phoneNumber\", ct.\"createdAt\" FROM \"contacts\" ct WHERE ct.\"lifecycleStage\" = 'Lead' AND NOT ct.deleted",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-26T04:55:57.058297"
+  },
+  {
+    "natural_query": "show contacts by new ones",
+    "sql": "SELECT ct.\"firstName\", ct.\"lastName\", ct.email, ct.\"createdAt\" FROM \"contacts\" ct WHERE NOT ct.deleted ORDER BY ct.\"createdAt\" DESC",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-26T04:56:30.259011"
+  },
+  {
+    "natural_query": "Can you show the deals by stage?",
+    "sql": "SELECT d.stage, COUNT(d._id) AS deal_count\nFROM \"deals\" d\nWHERE NOT d.deleted\nGROUP BY d.stage\nORDER BY deal_count DESC",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T05:02:17.691992"
+  },
+  {
+    "natural_query": "how many companies were added last year?",
+    "sql": "SELECT COUNT(c._id) AS company_count FROM \"companies\" c WHERE EXTRACT(YEAR FROM c.\"createdAt\") = 2025 AND NOT c.deleted",
+    "tables": [
+      "c",
+      "companies"
+    ],
+    "saved_at": "2026-05-26T05:02:25.699077"
+  },
+  {
+    "natural_query": "show me top 5 companies by deal count",
+    "sql": "SELECT company_name, deal_count\nFROM (\n  SELECT c.\"companyName\" AS company_name, COUNT(d._id) AS deal_count\n  FROM \"companies\" c\n  LEFT JOIN \"deals\" d ON d.company = c._id AND NOT d.deleted\n  WHERE NOT c.deleted\n  GROUP BY c._id, c.\"companyName\"\n  ORDER BY deal_count DESC\n  LIMIT 5\n) ranked",
+    "tables": [
+      "companies",
+      "deals"
+    ],
+    "saved_at": "2026-05-26T05:02:30.043263"
+  },
+  {
+    "natural_query": "Can you show me the top 5 companies by invoice count?",
+    "sql": "SELECT company_name, invoice_count\nFROM (\n  SELECT c.\"companyName\" AS company_name, COUNT(i._id) AS invoice_count\n  FROM \"companies\" c\n  LEFT JOIN \"invoices\" i ON i.company = c._id AND NOT i.deleted\n  WHERE NOT c.deleted\n  GROUP BY c._id, c.\"companyName\"\n  ORDER BY invoice_count DESC\n  LIMIT 5\n) ranked",
+    "tables": [
+      "companies",
+      "invoices"
+    ],
+    "saved_at": "2026-05-26T05:02:37.701908"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM invoices WHERE due_date = CURRENT_DATE",
+    "sql": "SELECT COUNT(*) FROM \"invoices\" i WHERE i.due_date = CURRENT_DATE AND NOT i.deleted",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-26T05:03:08.008135"
+  },
+  {
+    "natural_query": "SELECT SUM(grandtotal_in_usd) FROM invoices WHERE payment_status = 'paid' AND payment_date = CURRENT_DATE",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd FROM \"invoices\" i WHERE NOT i.deleted AND i.payment_status = 'paid' AND i.payment_date = CURRENT_DATE",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-26T05:03:08.052368"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM createtasks WHERE due_date = CURRENT_DATE",
+    "sql": "SELECT COUNT(*) FROM \"createtasks\" WHERE due_date = CURRENT_DATE AND NOT deleted",
+    "tables": [
+      "createtasks"
+    ],
+    "saved_at": "2026-05-26T05:03:08.103102"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals WHERE created_at = CURRENT_DATE",
+    "sql": "SELECT COUNT(*) FROM \"deals\" WHERE \"createdAt\" = CURRENT_DATE AND NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T05:03:08.140317"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM invoices WHERE EXTRACT(MONTH FROM due_date) = 5 AND EXTRACT(YEAR FROM due_date) = 2026",
+    "sql": "SELECT COUNT(*) FROM \"invoices\" WHERE EXTRACT(MONTH FROM due_date) = 5 AND EXTRACT(YEAR FROM due_date) = 2026 AND NOT deleted",
+    "tables": [
+      "due_date",
+      "invoices"
+    ],
+    "saved_at": "2026-05-26T05:03:33.355727"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals WHERE EXTRACT(MONTH FROM created_at) = 5 AND EXTRACT(YEAR FROM created_at) = 2026",
+    "sql": "SELECT COUNT(*) FROM \"deals\" WHERE EXTRACT(MONTH FROM \"createdAt\") = 5 AND EXTRACT(YEAR FROM \"createdAt\") = 2026 AND NOT deleted",
+    "tables": [
+      "createdAt",
+      "deals"
+    ],
+    "saved_at": "2026-05-26T05:03:33.389943"
+  },
+  {
+    "natural_query": "SELECT SUM(grandtotal_in_usd) FROM invoices WHERE payment_status = 'paid' AND EXTRACT(MONTH FROM payment_date) = 5 AND EXTRACT(YEAR FROM payment_date) = 2026",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd FROM \"invoices\" i WHERE NOT i.deleted AND i.payment_status = 'paid' AND EXTRACT(MONTH FROM i.payment_date) = 5 AND EXTRACT(YEAR FROM i.payment_date) = 2026",
+    "tables": [
+      "i",
+      "invoices"
+    ],
+    "saved_at": "2026-05-26T05:03:33.427465"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM createtasks WHERE EXTRACT(MONTH FROM due_date) = 5 AND EXTRACT(YEAR FROM due_date) = 2026",
+    "sql": "SELECT COUNT(*) FROM \"createtasks\" WHERE EXTRACT(MONTH FROM due_date) = 5 AND EXTRACT(YEAR FROM due_date) = 2026 AND NOT deleted",
+    "tables": [
+      "createtasks",
+      "due_date"
+    ],
+    "saved_at": "2026-05-26T05:03:33.464681"
+  },
+  {
+    "natural_query": "give me invoices details",
+    "sql": "SELECT i._id, i.invoice_number, i.payment_status, i.grandtotal_in_usd, i.currency, i.invoice_date, i.due_date, i.payment_date, c.\"companyName\", u.name AS created_by\nFROM \"invoices\" i\nLEFT JOIN \"companies\" c ON c._id = i.company\nLEFT JOIN \"users\" u ON u._id = i.\"createdBy\"\nWHERE NOT i.deleted",
+    "tables": [
+      "companies",
+      "invoices",
+      "users"
+    ],
+    "saved_at": "2026-05-26T05:28:17.161859"
+  },
+  {
+    "natural_query": "Can you provide the details for the invoice with the number ELSN/2026/043?",
+    "sql": "SELECT i._id, i.invoice_number, i.payment_status, i.grandtotal_in_usd, i.currency, i.invoice_date, i.due_date, i.payment_date, c.\"companyName\", u.name AS created_by FROM \"invoices\" i LEFT JOIN \"companies\" c ON c._id = i.company LEFT JOIN \"users\" u ON u._id = i.\"createdBy\" WHERE NOT i.deleted AND i.invoice_number ILIKE '%ELSN/2026/043%'",
+    "tables": [
+      "companies",
+      "invoices",
+      "users"
+    ],
+    "saved_at": "2026-05-26T05:29:22.642202"
   }
 ]

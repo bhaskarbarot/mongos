@@ -881,3 +881,8 @@
 .redis-status--on  { background: rgba(22,163,74,.08);  color: #16a34a; border: 1px solid rgba(22,163,74,.18); }
 .redis-status--off { background: rgba(100,116,139,.08); color: #64748b; border: 1px solid rgba(100,116,139,.18); }
 .redis-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ─── FeedbackButtons spinner animation ───────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

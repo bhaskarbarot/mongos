@@ -54,6 +54,8 @@ LOGGER = logging.getLogger("crm_api")
 
 # ── Lazy pipeline init (initialised on first request, not at import time) ────
 from agent import run_agent_query, ConversationMemory
+from pipeline.memory_manager import memory_manager
+from pipeline.feedback_manager import feedback_manager
 
 _agent       = None
 _agent_error = None   # stores last init error message
@@ -179,6 +181,17 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = None
     query_plan: Optional[Dict[str, Any]] = None
     sources_used: Optional[List[str]] = None
+
+class PositiveFeedbackRequest(BaseModel):
+    query: str          # resolved query that produced the good answer
+    sql: str            # SQL that generated the result
+    result_summary: str # short description of what was returned
+
+class CorrectionFeedbackRequest(BaseModel):
+    query: str          # original resolved query
+    sql: str            # bad SQL that the user rejected
+    user_feedback: str  # what the user says was wrong / what they want
+    history: List[ChatMessage] = []  # conversation history for context
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -385,24 +398,27 @@ async def sources(request: Request):
 
 @app.get("/feedback/learnings")
 async def feedback_learnings(request: Request):
-    """Return any saved feedback rules. Currently a stub."""
+    """Return full list of feedback examples (golden + corrections) with counts."""
     _check_rate(request, 60, request_id=str(uuid.uuid4())[:8])
-    feedback_file = Path("logs/feedback_log.json")
-    count = 0
-    if feedback_file.exists():
-        try:
-            data  = json.loads(feedback_file.read_text())
-            count = len(data)
-        except Exception:
-            pass
+    entries = feedback_manager.list_all()
+    golden      = [e for e in entries if e.get("type") == "golden"]
+    corrections = [e for e in entries if e.get("type") == "correction"]
     return {
-        "total_feedback": count,
-        "rules": {
-            "intent_rules":        [],
-            "format_preferences":  [],
-            "never_do":            [],
-        },
+        "total":       len(entries),
+        "golden_count": len(golden),
+        "correction_count": len(corrections),
+        "entries":     entries,   # newest-first; each has type/query/sql/ts fields
     }
+
+
+@app.delete("/feedback/learnings/{index}")
+async def feedback_delete(index: int, request: Request):
+    """Delete a feedback entry by its newest-first index."""
+    _check_rate(request, 30, request_id=str(uuid.uuid4())[:8])
+    deleted = feedback_manager.delete_entry(index)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "ok", "deleted_index": index}
 
 
 @app.post("/chat")
@@ -419,13 +435,34 @@ async def chat(req: ChatRequest, request: Request):
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
-    # Rebuild ChatMemory from conversation history so pronoun resolution,
-    # episodic matching, and "give me that X" all work correctly.
-    # Without this, every request gets a fresh memory and context is lost.
+    # ── Step 1: LLM-powered semantic memory resolution ────────────────────────
+    # Convert history to plain dicts for memory_manager (it doesn't know Pydantic)
+    history_dicts = [{"role": m.role, "content": m.content} for m in req.history]
+
+    # Run LLM resolution: decides if query is continuation or new topic.
+    # On failure, memory_resolution.resolved_query == req.query (safe fallback).
+    try:
+        memory_resolution = memory_manager.resolve(req.query, history_dicts)
+        resolved_query    = memory_resolution.resolved_query
+    except Exception as mem_exc:
+        LOGGER.warning("[RID:%s] MemoryManager error (fallback): %s", request_id, mem_exc)
+        memory_resolution = None
+        resolved_query    = req.query
+
+    LOGGER.info(
+        "[RID:%s] POST /chat | raw: %.80s | resolved: %.80s | continuation=%s",
+        request_id,
+        req.query,
+        resolved_query,
+        getattr(memory_resolution, "is_continuation", None),
+    )
+
+    # ── Step 2: Rebuild ChatMemory (working memory — entity / table tracking) ─
+    # ChatMemory handles last_entity, last_tables, episodic hints.
+    # MemoryManager already handled the semantic continuation resolution above.
     mem = ConversationMemory()
     _rebuild_memory(mem, req.history)
 
-    LOGGER.info("[RID:%s] POST /chat | query: %.80s", request_id, req.query)
     t0 = time.perf_counter()
 
     try:
@@ -433,7 +470,16 @@ async def chat(req: ChatRequest, request: Request):
         result = await asyncio.wait_for(
             loop.run_in_executor(
                 None,
-                functools.partial(run_agent_query, _get_agent(), req.query, memory=mem, request_id=request_id),
+                # Pass the LLM-resolved query + query_preresolved=True so
+                # pipeline/main.py skips its regex resolver (already done above).
+                functools.partial(
+                    run_agent_query,
+                    _get_agent(),
+                    resolved_query,
+                    memory=mem,
+                    request_id=request_id,
+                    query_preresolved=(memory_resolution is not None),
+                ),
             ),
             timeout=120.0,
         )
@@ -475,6 +521,10 @@ async def chat(req: ChatRequest, request: Request):
         "agent_type":          agent_type,
         "request_id":          request_id,
         "metrics":             result.get("metrics"),
+        # Memory resolution metadata — used by frontend for feedback
+        "resolved_query":      resolved_query,
+        "is_continuation":     getattr(memory_resolution, "is_continuation", False),
+        "memory_reasoning":    getattr(memory_resolution, "reasoning", ""),
     }
 
 
@@ -513,6 +563,162 @@ async def feedback(req: FeedbackRequest, request: Request):
         LOGGER.warning("[RID:%s] Feedback save error: %s", request_id, exc)
 
     return {"status": "ok", "message": "Feedback received — thank you!", "request_id": request_id}
+
+
+@app.post("/feedback/positive")
+async def feedback_positive(req: PositiveFeedbackRequest, request: Request):
+    """
+    User clicked 👍 — save this as a golden example for future SQL generation.
+
+    The query, SQL, and result summary are stored in logs/feedback_store.json
+    and will be injected as few-shot examples for semantically similar future queries.
+    """
+    request_id = str(uuid.uuid4())[:8]
+    _check_rate(request, 30, request_id=request_id)
+
+    if not req.query.strip() or not req.sql.strip():
+        raise HTTPException(status_code=400, detail="query and sql are required")
+
+    try:
+        feedback_manager.save_positive(
+            query=req.query.strip(),
+            sql=req.sql.strip(),
+            result_summary=req.result_summary.strip(),
+        )
+        LOGGER.info("[RID:%s] 👍 Positive feedback saved | query=%.60s", request_id, req.query)
+    except Exception as exc:
+        LOGGER.warning("[RID:%s] Positive feedback save error: %s", request_id, exc)
+
+    return {
+        "status":     "ok",
+        "message":    "Got it! I'll remember this approach.",
+        "request_id": request_id,
+    }
+
+
+@app.post("/feedback/correction")
+async def feedback_correction(req: CorrectionFeedbackRequest, request: Request):
+    """
+    User clicked 👎 and submitted a correction note.
+
+    Steps:
+    1. Regenerate SQL using the user's correction as guidance
+    2. Execute the new SQL
+    3. Narrate the result
+    4. Save both the bad SQL and the corrected SQL to the feedback store
+    5. Return the new answer to the frontend
+
+    If regeneration fails, returns a helpful error message — never crashes.
+    """
+    request_id = str(uuid.uuid4())[:8]
+    _check_rate(request, 30, request_id=request_id)
+
+    if not req.query.strip() or not req.user_feedback.strip():
+        raise HTTPException(status_code=400, detail="query and user_feedback are required")
+
+    LOGGER.info(
+        "[RID:%s] 👎 Correction | query=%.60s | feedback=%.80s",
+        request_id, req.query, req.user_feedback,
+    )
+
+    try:
+        from mcp_server.crm_mcp import execute_sql
+        from agents.simple_agent import _format_rows_as_text, _narrate_result
+
+        query_str    = req.query.strip()
+        prev_sql     = req.sql.strip()
+        feedback_str = req.user_feedback.strip()
+
+        # ── Self-heal loop: up to 3 attempts ─────────────────────────────────
+        MAX_ATTEMPTS = 3
+        last_error   = None
+        new_sql      = None
+        exec_result  = None
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            LOGGER.info("[RID:%s] Correction attempt %d/%d", request_id, attempt, MAX_ATTEMPTS)
+
+            # Generate corrected SQL (pass last DB error so LLM can self-heal)
+            new_sql = feedback_manager.regenerate_sql(
+                original_query=query_str,
+                previous_sql=prev_sql,
+                user_feedback=feedback_str,
+                db_error=last_error,
+            )
+
+            if not new_sql:
+                last_error = "SQL extraction failed — LLM returned no valid SQL"
+                LOGGER.warning("[RID:%s] Attempt %d: no SQL extracted", request_id, attempt)
+                continue
+
+            # Execute
+            exec_result = execute_sql(new_sql)
+            db_err = exec_result.get("error")
+
+            if not db_err:
+                # Success
+                LOGGER.info("[RID:%s] Correction attempt %d succeeded", request_id, attempt)
+                last_error = None
+                break
+
+            LOGGER.warning(
+                "[RID:%s] Correction attempt %d DB error: %s",
+                request_id, attempt, db_err,
+            )
+            last_error = db_err[:300]
+            # Feed the bad SQL into next attempt as context
+            prev_sql = new_sql
+
+        # ── All attempts exhausted or success ─────────────────────────────────
+        if last_error or not new_sql or exec_result is None:
+            return {
+                "status":     "error",
+                "answer":     (
+                    "I couldn't generate a working SQL for your correction after "
+                    f"{MAX_ATTEMPTS} attempts. Please try rephrasing your correction more specifically."
+                ),
+                "sql_used":   new_sql,
+                "request_id": request_id,
+            }
+
+        rows    = exec_result.get("rows", [])
+        columns = exec_result.get("columns", [])
+
+        # Narrate the result
+        raw_data_text = _format_rows_as_text(rows, columns, new_sql)
+        narrated = _narrate_result(
+            query_str,
+            {"rows": rows, "columns": columns, "sql_used": new_sql},
+        )
+
+        # Save correction to feedback store
+        result_summary = raw_data_text[:200] if raw_data_text else "No data returned."
+        feedback_manager.save_correction(
+            query=query_str,
+            bad_sql=req.sql.strip(),
+            user_feedback=feedback_str,
+            good_sql=new_sql,
+        )
+
+        LOGGER.info("[RID:%s] Correction successful | new_sql=%.80s", request_id, new_sql)
+
+        return {
+            "status":     "ok",
+            "answer":     _clean_answer(narrated),
+            "sql_used":   new_sql,
+            "rows":       rows[:50],
+            "columns":    columns,
+            "request_id": request_id,
+        }
+
+    except Exception as exc:
+        LOGGER.error("[RID:%s] Correction error: %s", request_id, exc, exc_info=True)
+        return {
+            "status":     "error",
+            "answer":     "An error occurred while processing your correction. Please try again.",
+            "sql_used":   None,
+            "request_id": request_id,
+        }
 
 
 @app.post("/cache/clear")

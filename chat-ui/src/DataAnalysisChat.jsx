@@ -358,70 +358,198 @@ function QueryPlan({ plan }) {
   return <div className="query-plan">{items.map((it, i) => <Badge key={i} color={it.color}>{it.label}</Badge>)}</div>;
 }
 
-function FeedbackWidget({ msg, apiUrl }) {
-  const [open, setOpen] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [rating, setRating] = useState(0);
-  const [hover, setHover] = useState(0);
-  const [comment, setComment] = useState("");
-  const [loading, setLoading] = useState(false);
+// ─── FeedbackButtons ──────────────────────────────────────────────────────────
+// Shows 👍 / 👎 after every bot response.
+// 👍 → POST /feedback/positive (save golden example, show confirmation)
+// 👎 → Show inline correction form → POST /feedback/correction → replace answer
+function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
+  // "idle" | "liked" | "disliked" | "loading_like" | "loading_correct" | "corrected" | "error"
+  const [state, setState] = useState("idle");
+  const [correctionText, setCorrectionText] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
-  if (submitted) {
+  const query   = msg.resolved_query || msg._userQuery || "";
+  const sql     = msg.query_used     || "";
+  const summary = typeof msg.content === "string" ? msg.content.slice(0, 200) : "";
+
+  // 👍 handler — save golden example
+  const handleLike = async () => {
+    if (!query || !sql) { setState("liked"); return; }
+    setState("loading_like");
+    try {
+      await apiPost(apiUrl, "/feedback/positive", {
+        query,
+        sql,
+        result_summary: summary,
+      }, null);
+      setState("liked");
+      if (onLearned) onLearned();
+    } catch {
+      setState("liked"); // still show confirmation even if save fails
+    }
+  };
+
+  // 👎 handler — show correction form
+  const handleDislike = () => {
+    setState("disliked");
+    setCorrectionText("");
+    setErrorMsg("");
+  };
+
+  // Correction submit → regenerate SQL + replace answer
+  const handleCorrection = async () => {
+    if (!correctionText.trim()) return;
+    setState("loading_correct");
+    setErrorMsg("");
+    try {
+      const resp = await apiPost(apiUrl, "/feedback/correction", {
+        query,
+        sql,
+        user_feedback: correctionText.trim(),
+        history: [],
+      }, null, 120000);
+
+      if (resp && resp.status === "ok" && resp.answer) {
+        // Notify parent to update this message's content with the corrected answer
+        if (onCorrectionApplied) {
+          onCorrectionApplied(msg.id, resp.answer, resp.sql_used || sql);
+        }
+        if (onLearned) onLearned();
+        setState("corrected");
+      } else {
+        setErrorMsg(resp?.answer || "Could not generate a corrected response. Try rephrasing.");
+        setState("disliked");
+      }
+    } catch (err) {
+      setErrorMsg("Request failed — please check the backend is running.");
+      setState("disliked");
+    }
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (state === "liked") {
     return (
-      <div className="feedback-submitted">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
-        Feedback submitted — thanks!
+      <div style={STYLE.confirm}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+        Got it! I&apos;ll remember this approach.
       </div>
     );
   }
 
-  const doSubmit = async () => {
-    if (!rating) return;
-    setLoading(true);
-    try {
-      await apiPost(apiUrl, "/feedback", {
-        query: msg._userQuery || "",
-        response: msg.content || "",
-        rating, comment: comment.trim(),
-        query_plan: msg.query_plan,
-        sources_used: msg.sources_used || [],
-      }, null);
-      setSubmitted(true);
-    } catch { /* ignore */ }
-    setLoading(false);
-  };
+  if (state === "corrected") {
+    return (
+      <div style={STYLE.confirm}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+        Answer updated! Correction saved for future queries.
+      </div>
+    );
+  }
 
-  return (
-    <div className="feedback-widget">
-      <button className="feedback-toggle" onClick={() => setOpen(!open)}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
-          <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
-        </svg>
-        Rate this response
-        <span className={`feedback-toggle-arrow${open ? " feedback-toggle-arrow--open" : ""}`}>▾</span>
-      </button>
-      {open && (
-        <div className="feedback-panel">
-          <div className="feedback-stars">
-            {[1,2,3,4,5].map(s => (
-              <button key={s}
-                className={`feedback-star${s <= (hover || rating) ? " feedback-star--active" : ""}`}
-                onMouseEnter={() => setHover(s)} onMouseLeave={() => setHover(0)}
-                onClick={() => setRating(s)}>★</button>
-            ))}
-            {rating > 0 && <span className="feedback-rating-label">{["","Poor","Fair","OK","Good","Excellent"][rating]}</span>}
-          </div>
-          <textarea className="feedback-textarea" value={comment} onChange={e => setComment(e.target.value)}
-            placeholder="Optional: what to improve or what was great…" rows={2}/>
-          <button className="feedback-submit" onClick={doSubmit} disabled={!rating || loading}>
-            {loading ? "Sending…" : "Submit Feedback"}
+  if (state === "disliked" || state === "loading_correct") {
+    const isLoading = state === "loading_correct";
+    return (
+      <div style={STYLE.correctionBox}>
+        <div style={STYLE.correctionLabel}>Tell me what you actually want:</div>
+        <textarea
+          style={STYLE.correctionTextarea}
+          value={correctionText}
+          onChange={e => setCorrectionText(e.target.value)}
+          placeholder="E.g. 'Show results for 2024 instead' or 'Include company name in results'…"
+          rows={3}
+          disabled={isLoading}
+          autoFocus
+        />
+        {errorMsg && <div style={STYLE.errorMsg}>{errorMsg}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          <button
+            style={{...STYLE.proceedBtn, ...(isLoading ? STYLE.proceedBtnDisabled : {})}}
+            onClick={handleCorrection}
+            disabled={isLoading || !correctionText.trim()}
+          >
+            {isLoading
+              ? <><span style={STYLE.spinner} />Regenerating…</>
+              : "Proceed Again →"}
+          </button>
+          <button
+            style={STYLE.cancelBtn}
+            onClick={() => setState("idle")}
+            disabled={isLoading}
+          >
+            Cancel
           </button>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  if (state === "loading_like") {
+    return <div style={STYLE.thumbRow}><span style={{...STYLE.thumbBtn, color:"#9ca3af"}}>Saving…</span></div>;
+  }
+
+  // Default: show 👍 / 👎
+  return (
+    <div style={STYLE.thumbRow}>
+      <button style={STYLE.thumbBtn} onClick={handleLike} title="I like this response">
+        👍
+      </button>
+      <button style={STYLE.thumbBtn} onClick={handleDislike} title="I don't like this response">
+        👎
+      </button>
     </div>
   );
 }
+
+// Inline styles — avoids touching the CSS file
+const STYLE = {
+  thumbRow: {
+    display: "flex", gap: 4, marginTop: 6, alignItems: "center",
+  },
+  thumbBtn: {
+    background: "none", border: "1px solid transparent", borderRadius: 6,
+    cursor: "pointer", fontSize: "1em", padding: "2px 6px",
+    color: "#9ca3af", transition: "all .15s",
+    lineHeight: 1.4,
+  },
+  confirm: {
+    display: "flex", alignItems: "center", gap: 5,
+    fontSize: ".72em", color: "#6b7280", marginTop: 6,
+  },
+  correctionBox: {
+    marginTop: 8, padding: 10,
+    background: "rgba(99,102,241,.06)",
+    border: "1px solid rgba(99,102,241,.2)",
+    borderRadius: 8, display: "flex", flexDirection: "column", gap: 6,
+  },
+  correctionLabel: {
+    fontSize: ".78em", fontWeight: 600, color: "#9ca3af",
+  },
+  correctionTextarea: {
+    width: "100%", resize: "vertical", borderRadius: 6,
+    border: "1px solid rgba(99,102,241,.3)",
+    background: "rgba(255,255,255,.04)",
+    color: "inherit", padding: "7px 9px", fontSize: ".82em",
+    fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+  },
+  proceedBtn: {
+    background: "rgba(99,102,241,.85)", color: "#fff", border: "none",
+    borderRadius: 6, padding: "5px 12px", fontSize: ".78em", cursor: "pointer",
+    fontWeight: 600, display: "flex", alignItems: "center", gap: 5,
+    transition: "background .15s",
+  },
+  proceedBtnDisabled: { background: "rgba(99,102,241,.35)", cursor: "not-allowed" },
+  cancelBtn: {
+    background: "none", color: "#9ca3af", border: "1px solid rgba(156,163,175,.2)",
+    borderRadius: 6, padding: "5px 10px", fontSize: ".78em", cursor: "pointer",
+  },
+  errorMsg: {
+    fontSize: ".72em", color: "#ef4444", marginTop: 2,
+  },
+  spinner: {
+    display: "inline-block", width: 10, height: 10,
+    border: "2px solid rgba(255,255,255,.3)", borderTopColor: "#fff",
+    borderRadius: "50%", animation: "spin .7s linear infinite",
+  },
+};
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
@@ -450,7 +578,7 @@ function TimingBadge({ ms }) {
   return <Badge color={color}>⏱ {label}</Badge>;
 }
 
-function MessageBubble({ msg }) {
+function MessageBubble({ msg, apiUrl, onCorrectionApplied, onLearned }) {
   const isUser = msg.role === "user";
   const parsedContent = (() => {
     if (isUser || typeof msg.content !== "string") {
@@ -554,7 +682,7 @@ function MessageBubble({ msg }) {
                 {msg.confidence != null && <span>Confidence: {Math.round(msg.confidence * 100)}%</span>}
               </div>
             </Collapsible>
-            {/* FeedbackWidget removed as not needed */}
+            <FeedbackButtons msg={msg} apiUrl={apiUrl} onCorrectionApplied={onCorrectionApplied} onLearned={onLearned} />
           </div>
         )}
       </div>
@@ -565,7 +693,8 @@ function MessageBubble({ msg }) {
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 function Sidebar({ open, onClose, apiUrl, setApiUrl, status, redisOn, sources, learnings,
                    sessions, activeSessionId, onLoadSession, onDeleteSession,
-                   onClearChat, onClearCache, onExample }) {
+                   onClearChat, onClearCache, onExample,
+                   onDeleteLearning, onRefreshLearnings }) {
   return (
     <>
       {open && <div className="sidebar-overlay" onClick={onClose} />}
@@ -655,29 +784,76 @@ function Sidebar({ open, onClose, apiUrl, setApiUrl, status, redisOn, sources, l
 
         {/* AI Learnings */}
         <div className="sidebar-section sidebar-section--bottom">
-          <span className="sidebar-section-title">AI Learnings</span>
-          {learnings && Object.keys(learnings).length > 0 ? (
-            <>
-              <div className="sidebar-empty-text">Feedbacks processed: {learnings.total_feedback_processed ?? 0}</div>
-              {[
-                ["negative_rules",             "Never-Do Rules",       "#dc2626"],
-                ["intent_specific_rules",      "Intent Rules",         "#d97706"],
-                ["format_preference_rules",    "Format Prefs",         "#16a34a"],
-                ["collection_selection_rules", "Collection Selection", "#2563eb"],
-                ["response_style_rules",       "Response Style",       "#7c3aed"],
-              ].map(([key, label, color]) => {
-                const items = learnings[key];
-                if (!items?.length) return null;
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+            <span className="sidebar-section-title" style={{ marginBottom:0 }}>
+              AI Learnings
+              {learnings?.total > 0 && (
+                <span style={{
+                  marginLeft:7, background:"rgba(99,102,241,.15)", color:"#818cf8",
+                  borderRadius:10, padding:"1px 7px", fontSize:".68em", fontWeight:700,
+                }}>
+                  {learnings.golden_count ?? 0} ✓ · {learnings.correction_count ?? 0} ✗
+                </span>
+              )}
+            </span>
+            {status && (
+              <button onClick={onRefreshLearnings}
+                style={{ background:"none", border:"none", cursor:"pointer", fontSize:".8em",
+                         color:"#6b7280", padding:"1px 4px" }} title="Refresh">↻</button>
+            )}
+          </div>
+          {learnings?.entries?.length > 0 ? (
+            <div style={{ display:"flex", flexDirection:"column", gap:6, maxHeight:340, overflowY:"auto" }}>
+              {learnings.entries.map((entry, idx) => {
+                const isGolden = entry.type === "golden";
+                const borderColor = isGolden ? "#16a34a" : "#dc2626";
+                const bgColor     = isGolden ? "#16a34a0d" : "#dc26260d";
+                const label       = isGolden ? "✓ Approved" : "✗ Corrected";
+                const labelColor  = isGolden ? "#16a34a" : "#dc2626";
+                const ts          = entry.ts ? new Date(entry.ts * 1000).toLocaleDateString() : "";
                 return (
-                  <Collapsible key={key} title={`${label} (${items.length})`} defaultOpen={key === "negative_rules"}>
-                    {items.map((rule, i) => (
-                      <div key={i} className="learning-rule"
-                        style={{ borderLeft: `3px solid ${color}`, background: `${color}0a` }}>{rule}</div>
-                    ))}
-                  </Collapsible>
+                  <div key={idx} style={{
+                    borderLeft: `3px solid ${borderColor}`,
+                    background: bgColor,
+                    borderRadius: "0 6px 6px 0",
+                    padding: "7px 9px",
+                    fontSize: ".72em",
+                    position: "relative",
+                  }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:4 }}>
+                      <span style={{ color: labelColor, fontWeight:700, fontSize:".9em" }}>{label}</span>
+                      <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                        {ts && <span style={{ color:"#9ca3af", fontSize:".85em" }}>{ts}</span>}
+                        <button
+                          onClick={() => onDeleteLearning(idx)}
+                          style={{ background:"none", border:"none", cursor:"pointer",
+                                   color:"#9ca3af", fontSize:"1em", padding:"0 2px",
+                                   lineHeight:1, borderRadius:3 }}
+                          title="Delete this learning">✕</button>
+                      </div>
+                    </div>
+                    <div style={{ color:"#d1d5db", marginTop:3, fontStyle:"italic" }}>
+                      &ldquo;{(entry.query || "").slice(0,120)}&rdquo;
+                    </div>
+                    {!isGolden && entry.user_feedback && (
+                      <div style={{ color:"#fbbf24", marginTop:2 }}>
+                        User said: {entry.user_feedback.slice(0,100)}
+                      </div>
+                    )}
+                    {entry.sql && (
+                      <details style={{ marginTop:4 }}>
+                        <summary style={{ cursor:"pointer", color:"#818cf8" }}>SQL</summary>
+                        <pre style={{ margin:"3px 0 0", fontSize:".9em", overflowX:"auto",
+                                      whiteSpace:"pre-wrap", wordBreak:"break-all",
+                                      color:"#a5b4fc" }}>
+                          {entry.sql.slice(0,500)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
                 );
               })}
-            </>
+            </div>
           ) : (
             <div className="sidebar-empty-text">
               {status ? "No learnings yet. Rate responses to teach the AI!" : "Start backend to see learnings"}
@@ -877,12 +1053,25 @@ export default function DataAnalysisChat() {
     return () => clearInterval(t);
   }, [checkHealth]);
 
+  const refreshLearnings = useCallback(() => {
+    apiGet(apiUrl, "/feedback/learnings").then(r => r && setLearnings(r));
+  }, [apiUrl]);
+
   useEffect(() => {
     if (backendUp) {
       apiGet(apiUrl, "/sources").then(r => r && setSources(r));
-      apiGet(apiUrl, "/feedback/learnings").then(r => r && setLearnings(r));
+      refreshLearnings();
     }
-  }, [backendUp, apiUrl]);
+  }, [backendUp, apiUrl, refreshLearnings]);
+
+  const deleteLearning = useCallback(async (idx) => {
+    try {
+      await fetch(`${apiUrl}/feedback/learnings/${idx}`, { method: "DELETE" });
+      refreshLearnings();
+    } catch {
+      // silently ignore — UI will refresh on next open
+    }
+  }, [apiUrl, refreshLearnings]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -935,6 +1124,10 @@ export default function DataAnalysisChat() {
         query_plan: resp.query_plan,
         agent_type: resp.agent_type,
         _userQuery: trimmed,
+        // Memory resolution metadata — used by FeedbackButtons
+        resolved_query: resp.resolved_query || trimmed,
+        is_continuation: resp.is_continuation || false,
+        memory_reasoning: resp.memory_reasoning || "",
       };
       const finalMessages = [...nextMessages, botMsg];
       setMessages(finalMessages);
@@ -1189,6 +1382,17 @@ export default function DataAnalysisChat() {
     try { await apiPost(apiUrl, "/cache/clear", {}, null); } catch (error) { void error; }
   };
 
+  // ── Correction applied callback ──
+  // When user submits a 👎 correction, FeedbackButtons calls this to update
+  // the message in-place with the corrected answer and new SQL.
+  const handleCorrectionApplied = (msgId, newAnswer, newSql) => {
+    setMessages(prev => prev.map(m =>
+      m.id === msgId
+        ? { ...m, content: newAnswer, query_used: newSql || m.query_used }
+        : m
+    ));
+  };
+
   // ── Voice: reset 'processing' status when API call finishes ──
   useEffect(() => {
     if (!loading && voiceStatus === 'processing') setVoiceStatus('idle');
@@ -1238,6 +1442,7 @@ export default function DataAnalysisChat() {
         apiUrl={apiUrl} setApiUrl={setApiUrl}
         status={backendUp} redisOn={redisOn}
         sources={sources} learnings={learnings}
+        onDeleteLearning={deleteLearning} onRefreshLearnings={refreshLearnings}
         sessions={sessions} activeSessionId={activeSessionId}
         onLoadSession={loadSession} onDeleteSession={deleteSession}
         onClearChat={clearChat} onClearCache={clearCache}
@@ -1269,7 +1474,15 @@ export default function DataAnalysisChat() {
             ? <EmptyState onExample={sendMessage} />
             : (
               <>
-                {messages.map(m => <MessageBubble key={m.id} msg={m} apiUrl={apiUrl} />)}
+                {messages.map(m => (
+                  <MessageBubble
+                    key={m.id}
+                    msg={m}
+                    apiUrl={apiUrl}
+                    onCorrectionApplied={handleCorrectionApplied}
+                    onLearned={refreshLearnings}
+                  />
+                ))}
                 {loading && <TypingDots />}
               </>
             )

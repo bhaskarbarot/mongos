@@ -133,9 +133,10 @@ def _narrate_fast_path(query: str, fp_result: Dict) -> str:
 
 def run(
     agent,
-    user_query:  str,
-    memory:      Optional[ChatMemory] = None,
-    request_id:  str = "",
+    user_query:        str,
+    memory:            Optional[ChatMemory] = None,
+    request_id:        str = "",
+    query_preresolved: bool = False,
 ) -> Dict[str, Any]:
     """Execute the full pipeline for one user query and return a result dict.
 
@@ -144,10 +145,14 @@ def run(
     imports and to keep the module fast on startup.
 
     Args:
-        agent:      LangChain AgentExecutor (kept for fast_path and schema tools)
-        user_query: Raw user input
-        memory:     Optional ChatMemory for pronoun resolution
-        request_id: Correlation ID for log tracing
+        agent:            LangChain AgentExecutor (kept for fast_path and schema tools)
+        user_query:       Raw user input (or already-resolved query when query_preresolved=True)
+        memory:           Optional ChatMemory for working-memory tracking (entity, tables, etc.)
+        request_id:       Correlation ID for log tracing
+        query_preresolved: When True, skip ChatMemory.resolve() — the query was already
+                          resolved upstream by LLM-powered MemoryManager. Prevents the
+                          regex resolver from corrupting words like "last", "same", "this"
+                          in a fully self-contained query.
 
     Returns:
         Dict with: answer, latency_ms, confidence, tables_used, sql_queries, layer
@@ -160,8 +165,11 @@ def run(
         LOGGER.warning("[RID:%s] Input truncated to 500 chars", request_id)
 
     # ── Memory: resolve pronouns / bare-action references ─────────────────────
+    # Skip if query was already resolved by LLM-powered MemoryManager upstream.
+    # The regex resolver uses "last", "same", "this" as pronouns which would
+    # incorrectly corrupt a fully self-contained query like "companies added last year".
     original_query = user_query
-    if memory:
+    if memory and not query_preresolved:
         user_query = memory.resolve(user_query)
 
     # ══════════════════════════════════════════════════════════════════════

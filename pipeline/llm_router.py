@@ -514,6 +514,9 @@ def call(
                 return result
 
         elif provider == "openai":
+            if not getattr(settings, "openai_enabled", True):
+                LOGGER.debug("Router [%s/openai] skipped — OPENAI_ENABLED=false", task)
+                continue
             result = _call_openai_compat(
                 "https://api.openai.com/v1/chat/completions",
                 settings.openai_api_key, "OpenAI",

@@ -209,9 +209,10 @@ def get_sql_agent(db):
 
 def run_agent_query(
     agent,
-    user_query: str,
-    memory: Optional[ConversationMemory] = None,
-    request_id: str = "",
+    user_query:        str,
+    memory:            Optional[ConversationMemory] = None,
+    request_id:        str  = "",
+    query_preresolved: bool = False,
 ) -> Dict[str, Any]:
     """Execute a user query through the full pipeline.
 
@@ -219,13 +220,19 @@ def run_agent_query(
     All logic is delegated to pipeline.main.run().
 
     Args:
-        agent:      AgentExecutor from get_sql_agent()
-        user_query: Raw user input string
-        memory:     Optional ConversationMemory for session context
-        request_id: Correlation ID for log tracing (optional)
+        agent:            AgentExecutor from get_sql_agent()
+        user_query:       Raw user input string (or already LLM-resolved)
+        memory:           Optional ConversationMemory for session context
+        request_id:       Correlation ID for log tracing (optional)
+        query_preresolved: Pass True when query was already resolved by MemoryManager
+                          so pipeline.main skips the regex-based resolver.
 
     Returns:
         Dict with: answer, latency_ms, confidence, tables_used,
                    sql_queries, layer, cached (optional)
     """
-    return _pipeline.run(agent, user_query, memory, request_id=request_id)
+    return _pipeline.run(
+        agent, user_query, memory,
+        request_id=request_id,
+        query_preresolved=query_preresolved,
+    )

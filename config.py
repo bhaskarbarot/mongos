@@ -63,6 +63,7 @@ class Settings:
     ollama_sql_enabled: bool = os.getenv("OLLAMA_SQL_ENABLED", "true").lower() == "true"
 
     # ── OpenAI — fallback 1 (paid, most reliable) ────────────────────────────
+    openai_enabled:           bool = os.getenv("OPENAI_ENABLED", "true").lower() == "true"
     openai_api_key:           str = os.getenv("OPENAI_API_KEY",          "")
     openai_sql_model:         str = os.getenv("OPENAI_SQL_MODEL",        "gpt-4o-mini")
     openai_classify_model:    str = os.getenv("OPENAI_CLASSIFY_MODEL",   "gpt-4o-mini")
