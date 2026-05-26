@@ -27,6 +27,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -192,6 +196,138 @@ class CorrectionFeedbackRequest(BaseModel):
     sql: str            # bad SQL that the user rejected
     user_feedback: str  # what the user says was wrong / what they want
     history: List[ChatMessage] = []  # conversation history for context
+
+class ChartRequest(BaseModel):
+    question: str = "Chart"
+    sql: str = ""
+    data: List[Dict] = []
+
+
+# ── Chart generation (heuristic — no LLM, instant) ───────────────────────────
+
+BRAND_COLORS = ["#CC785C", "#B8624A", "#8B5E3C", "#5C554F", "#9B948D", "#D4A896"]
+
+def _apply_brand(fig: go.Figure, title: str) -> go.Figure:
+    fig.update_layout(
+        title=dict(text=title, font=dict(color="#1C1815", size=14)),
+        paper_bgcolor="#FAF9F7",
+        plot_bgcolor="#FAF9F7",
+        font=dict(color="#1C1815", family="DM Sans, Segoe UI, sans-serif"),
+        colorway=BRAND_COLORS,
+        margin=dict(l=40, r=20, t=50, b=40),
+        legend=dict(bgcolor="rgba(0,0,0,0)"),
+    )
+    return fig
+
+def _generate_chart_heuristic(df: pd.DataFrame, title: str = "Chart") -> Optional[str]:
+    """Pick chart type by column types; returns fig.to_json() string or None."""
+    if df.empty:
+        return None
+
+    numeric  = df.select_dtypes(include="number").columns.tolist()
+    categ    = df.select_dtypes(include=["object", "category"]).columns.tolist()
+    datetime = df.select_dtypes(include=["datetime64"]).columns.tolist()
+
+    # Try parsing string columns that look like dates
+    if not datetime:
+        for col in categ[:]:
+            try:
+                parsed = pd.to_datetime(df[col], infer_datetime_format=True, errors="raise")
+                df = df.copy()
+                df[col] = parsed
+                datetime.append(col)
+                categ.remove(col)
+                break
+            except Exception:
+                pass
+
+    fig = None
+
+    if len(df.columns) >= 5:
+        # Wide data → Plotly Table
+        fig = go.Figure(data=[go.Table(
+            header=dict(
+                values=list(df.columns),
+                fill_color="#CC785C", font=dict(color="white", size=12), align="left",
+            ),
+            cells=dict(
+                values=[df[c].tolist() for c in df.columns],
+                fill_color=[["#FAF9F7" if i % 2 == 0 else "#F2EFE9" for i in range(len(df))]],
+                font=dict(color="#1C1815", size=11), align="left",
+            ),
+        )])
+
+    elif datetime and numeric:
+        # Time-series → line chart
+        fig = go.Figure()
+        for col in numeric[:5]:
+            fig.add_trace(go.Scatter(x=df[datetime[0]], y=df[col], mode="lines+markers", name=col))
+        fig.update_layout(xaxis_title=datetime[0], yaxis_title="Value", hovermode="x unified")
+
+    elif len(numeric) == 1 and not categ and not datetime:
+        # Single numeric → histogram
+        fig = px.histogram(df, x=numeric[0], title=title, color_discrete_sequence=BRAND_COLORS)
+
+    elif len(numeric) == 1 and len(categ) == 1:
+        # 1 category + 1 numeric → horizontal bar (easier to read long labels)
+        agg = df.groupby(categ[0])[numeric[0]].sum().reset_index().sort_values(numeric[0], ascending=True)
+        fig = px.bar(agg, x=numeric[0], y=categ[0], orientation="h",
+                     title=title, color_discrete_sequence=BRAND_COLORS)
+
+    elif len(numeric) >= 2 and len(categ) == 1:
+        # 1 category + multiple numeric → grouped bar
+        fig = px.bar(df, x=categ[0], y=numeric[:4], barmode="group",
+                     title=title, color_discrete_sequence=BRAND_COLORS)
+
+    elif len(numeric) == 2 and not categ:
+        # 2 numeric → scatter
+        fig = px.scatter(df, x=numeric[0], y=numeric[1], title=title,
+                         color_discrete_sequence=BRAND_COLORS)
+
+    elif len(numeric) >= 3 and not categ:
+        # 3+ numeric → correlation heatmap
+        corr = df[numeric].corr()
+        fig = px.imshow(corr, title=title, zmin=-1, zmax=1,
+                        color_continuous_scale=["#023d60", "#FAF9F7", "#CC785C"])
+
+    elif len(categ) >= 2:
+        # 2+ categorical → grouped bar by count
+        grp = df.groupby(categ[:2]).size().reset_index(name="count")
+        fig = px.bar(grp, x=categ[0], y="count", color=categ[1], barmode="group",
+                     title=title, color_discrete_sequence=BRAND_COLORS)
+
+    elif len(df.columns) >= 2:
+        # Fallback → bar of first two columns
+        col_x, col_y = df.columns[0], df.columns[1]
+        try:
+            df2 = df.copy()
+            df2[col_y] = pd.to_numeric(df2[col_y], errors="coerce")
+            df2 = df2.dropna(subset=[col_y])
+            if not df2.empty:
+                fig = px.bar(df2, x=col_x, y=col_y, title=title,
+                             color_discrete_sequence=BRAND_COLORS)
+        except Exception:
+            pass
+
+    if fig is None:
+        return None
+
+    fig = _apply_brand(fig, title)
+    return fig.to_json()
+
+
+# ── Row extraction helper ─────────────────────────────────────────────────────
+
+def _rows_to_chart_data(result: dict) -> Optional[List[Dict]]:
+    """Convert result['data'] rows+columns → list of dicts for Plotly chart endpoint."""
+    raw = result.get("data")
+    if not raw or not isinstance(raw, dict):
+        return None
+    rows    = raw.get("rows", [])
+    columns = raw.get("columns", [])
+    if not rows or not columns:
+        return None
+    return [dict(zip(columns, row)) for row in rows[:200]]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -512,6 +648,7 @@ async def chat(req: ChatRequest, request: Request):
     return {
         "answer":              clean,
         "data":                _extract_structured_data(result),
+        "chart_data":          _rows_to_chart_data(result) if settings.plotly_charts_enabled else None,
         "confidence":          confidence,
         "sources_used":        tables,
         "processing_time_ms":  round(latency_ms),
@@ -733,6 +870,50 @@ async def cache_clear(request: Request):
         "message": "Cache is disabled",
         "request_id": request_id,
     }
+
+
+@app.post("/api/chart")
+async def api_chart(req: ChartRequest, request: Request):
+    """
+    Generate a Plotly chart from tabular data.
+    Body: {question, sql, data: [{col: val, ...}, ...]}
+    Returns: {fig: "<json_string>"}  — client must JSON.parse(fig) before passing to Plotly.
+    Disabled when PLOTLY_CHARTS_ENABLED=false in .env.
+    """
+    request_id = str(uuid.uuid4())[:8]
+    _check_rate(request, 60, request_id=request_id)
+
+    if not settings.plotly_charts_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Charts are disabled (PLOTLY_CHARTS_ENABLED=false)", "request_id": request_id},
+        )
+
+    if not req.data:
+        raise HTTPException(status_code=400, detail={"error": "no data", "request_id": request_id})
+
+    try:
+        df = pd.DataFrame(req.data)
+
+        # Try to coerce numeric-looking string columns
+        for col in df.select_dtypes(include="object").columns:
+            try:
+                df[col] = pd.to_numeric(df[col])
+            except (ValueError, TypeError):
+                pass
+
+        fig_json = _generate_chart_heuristic(df, title=req.question[:80] if req.question else "Chart")
+
+        if not fig_json:
+            raise HTTPException(status_code=422, detail={"error": "cannot visualize this data", "request_id": request_id})
+
+        return {"fig": fig_json, "request_id": request_id}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        LOGGER.warning("[RID:%s] Chart generation error: %s", request_id, exc)
+        raise HTTPException(status_code=500, detail={"error": "chart generation failed", "request_id": request_id})
 
 
 @app.post("/transcribe")

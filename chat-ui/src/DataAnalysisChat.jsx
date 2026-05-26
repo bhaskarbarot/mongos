@@ -578,6 +578,65 @@ function TimingBadge({ ms }) {
   return <Badge color={color}>⏱ {label}</Badge>;
 }
 
+// ─── PlotlyChart ─────────────────────────────────────────────────────────────
+// Renders a Plotly chart inside the bot message bubble.
+// Two-effect design: Effect 1 fetches the fig JSON; Effect 2 calls Plotly.newPlot
+// after the div is in the DOM. This avoids rendering into a display:none element.
+function PlotlyChart({ question, sql, chartData, apiUrl }) {
+  const divRef  = useRef(null);
+  const [figData, setFigData] = useState(null);  // parsed Plotly fig object
+  const [failed, setFailed]   = useState(false);
+
+  // Effect 1 — fetch chart JSON (runs once on mount; StrictMode-safe via cancelled flag)
+  useEffect(() => {
+    if (!chartData?.length || !window.Plotly) return;
+    let cancelled = false;
+
+    fetch(`${apiUrl}/api/chart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: question || "Chart", sql: sql || "", data: chartData }),
+    })
+      .then(r => r.json())
+      .then(result => {
+        if (cancelled) return;       // StrictMode first-pass — ignore stale fetch
+        if (!result.fig) { setFailed(true); return; }
+        setFigData(JSON.parse(result.fig));
+      })
+      .catch(() => { if (!cancelled) setFailed(true); });
+
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Effect 2 — call Plotly.newPlot once figData arrives and div is in DOM
+  useEffect(() => {
+    if (!figData || !divRef.current) return;
+    window.Plotly.newPlot(divRef.current, figData.data, figData.layout, {
+      responsive: true,
+      displayModeBar: true,
+      modeBarButtonsToRemove: ["lasso2d", "select2d"],
+      toImageButtonOptions: {
+        format: "png",
+        filename: (question || "chart").slice(0, 40),
+        height: 500,
+        width: 900,
+        scale: 2,
+      },
+    });
+  }, [figData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Nothing to chart
+  if (!chartData?.length || failed) return null;
+
+  return (
+    <div className="chart-box">
+      {!figData && <div className="chart-loading">Generating chart…</div>}
+      {/* div always in DOM so Plotly has dimensions when it renders */}
+      <div ref={divRef} style={{ width: "100%", minHeight: figData ? 380 : 0 }} />
+    </div>
+  );
+}
+
 function MessageBubble({ msg, apiUrl, onCorrectionApplied, onLearned }) {
   const isUser = msg.role === "user";
   const parsedContent = (() => {
@@ -619,6 +678,14 @@ function MessageBubble({ msg, apiUrl, onCorrectionApplied, onLearned }) {
         </div>
         {!isUser && (
           <div className="message-extras">
+            {msg.chart_data?.length > 0 && (
+              <PlotlyChart
+                question={msg._userQuery || ""}
+                sql={typeof msg.query_used === "string" ? msg.query_used : ""}
+                chartData={msg.chart_data}
+                apiUrl={apiUrl}
+              />
+            )}
             <StructuredData data={msg.data} answerHasTable={answerHasTable} />
             <div className="message-action-row">
               <CopyButton text={msg.content} />
@@ -1053,6 +1120,16 @@ export default function DataAnalysisChat() {
     return () => clearInterval(t);
   }, [checkHealth]);
 
+  useEffect(() => {
+    const onResize = () => {
+      document.querySelectorAll(".chart-box .js-plotly-plot").forEach(el => {
+        if (el.offsetParent !== null && window.Plotly) window.Plotly.Plots.resize(el);
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const refreshLearnings = useCallback(() => {
     apiGet(apiUrl, "/feedback/learnings").then(r => r && setLearnings(r));
   }, [apiUrl]);
@@ -1116,6 +1193,7 @@ export default function DataAnalysisChat() {
         id: uid(), role: "assistant",
         content: resp.answer || "(No response)",
         data: resp.data,
+        chart_data: resp.chart_data || null,
         sources_used: resp.sources_used || [],
         confidence: resp.confidence,
         processing_time_ms: resp.processing_time_ms,

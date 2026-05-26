@@ -88,6 +88,11 @@ class Settings:
     # DECOMPOSER_ENABLED=false → skip decomposer, pass raw query as single sub-query directly to SQL
     decomposer_enabled: bool = os.getenv("DECOMPOSER_ENABLED", "true").strip().lower() == "true"
 
+    # ── Plotly charts toggle ──────────────────────────────────────────────────
+    # PLOTLY_CHARTS_ENABLED=true  → /api/chart active; chart_data returned in /chat
+    # PLOTLY_CHARTS_ENABLED=false → charts off; chart_data=null; /api/chart → 503
+    plotly_charts_enabled: bool = os.getenv("PLOTLY_CHARTS_ENABLED", "true").strip().lower() == "true"
+
     # ── Misc ──────────────────────────────────────────────────────────────────
     strict_grounded_mode: bool = os.getenv("STRICT_GROUNDED_MODE", "false").lower() == "true"
     log_file:             str  = os.getenv("QUERY_LOG_FILE", "logs/query.log")

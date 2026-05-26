@@ -15,6 +15,7 @@ export default defineConfig({
       '/feedback':           { target: 'http://localhost:8000', changeOrigin: true },
       '/cache':              { target: 'http://localhost:8000', changeOrigin: true },
       '/transcribe':         { target: 'http://localhost:8000', changeOrigin: true },
+      '/api':                { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
 })

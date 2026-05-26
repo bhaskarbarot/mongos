@@ -14,3 +14,7 @@ crewai>=0.80.0
 langgraph>=0.2.0
 mcp>=1.0.0
 anthropic
+
+# chart generation
+pandas
+plotly
