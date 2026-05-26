@@ -3,3 +3,11 @@ logs/
 automation/node_modules/
 # Added by code-review-graph
 .code-review-graph/
+
+# Compiled Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Query examples (auto-generated, not for version control)
+mcp_server/query_examples.json
