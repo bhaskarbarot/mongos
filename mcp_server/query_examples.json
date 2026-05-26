@@ -10639,5 +10639,116 @@
       "deals"
     ],
     "saved_at": "2026-05-22T13:43:05.376955"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals WHERE stage = 'Lost' AND dealLostAt >= '2024-05-22'",
+    "sql": "SELECT COUNT(*) FROM \"deals\" WHERE stage = 'Closed Lost' AND \"dealLostAt\" >= '2024-05-22' AND NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-22T13:48:43.370999"
+  },
+  {
+    "natural_query": "Total revenue of 2024 to till date?",
+    "sql": "SELECT COALESCE(SUM(i.grandtotal_in_usd), 0) AS total_revenue_usd FROM \"invoices\" i WHERE NOT i.deleted AND i.payment_status = 'paid' AND i.payment_date >= '2024-01-01' AND i.payment_date <= '2026-05-22'",
+    "tables": [
+      "invoices"
+    ],
+    "saved_at": "2026-05-22T13:49:15.544934"
+  },
+  {
+    "natural_query": "give me all companies list with created date",
+    "sql": "SELECT c.\"companyName\", c.\"createdAt\" FROM \"companies\" c WHERE NOT c.deleted",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-22T13:52:41.580101"
+  },
+  {
+    "natural_query": "show companies by list",
+    "sql": "SELECT c.\"companyName\" FROM \"companies\" c WHERE NOT c.deleted ORDER BY c.\"companyName\"",
+    "tables": [
+      "companies"
+    ],
+    "saved_at": "2026-05-22T13:54:18.671762"
+  },
+  {
+    "natural_query": "count of lost leads in last 6 months",
+    "sql": "SELECT COUNT(ct._id) AS lost_lead_count FROM \"contacts\" ct WHERE ct.\"lifecycleStage\" = 'Lead' AND NOT ct.deleted AND ct.\"leadStatus\" = 'Lost' AND ct.\"createdAt\" >= '2025-11-27'",
+    "tables": [
+      "contacts"
+    ],
+    "saved_at": "2026-05-26T04:17:43.613067"
+  },
+  {
+    "natural_query": "how many companies added in 2025?",
+    "sql": "SELECT COUNT(*) AS company_count FROM \"companies\" WHERE NOT deleted AND EXTRACT(YEAR FROM \"createdAt\") = 2025",
+    "tables": [
+      "companies",
+      "createdAt"
+    ],
+    "saved_at": "2026-05-26T04:29:19.589962"
+  },
+  {
+    "natural_query": "how many companies added in 2024?",
+    "sql": "SELECT COUNT(*) AS company_count FROM \"companies\" WHERE NOT deleted AND EXTRACT(YEAR FROM \"createdAt\") = 2024",
+    "tables": [
+      "companies",
+      "createdAt"
+    ],
+    "saved_at": "2026-05-26T04:30:37.167115"
+  },
+  {
+    "natural_query": "how many customer added in 2025?",
+    "sql": "SELECT COUNT(*) AS customer_count FROM \"companies\" WHERE NOT deleted AND \"lifecycleStage\" = 'Customer' AND EXTRACT(YEAR FROM \"createdAt\") = 2025",
+    "tables": [
+      "companies",
+      "createdAt"
+    ],
+    "saved_at": "2026-05-26T04:30:41.210562"
+  },
+  {
+    "natural_query": "how many customer added in 2024?",
+    "sql": "SELECT COUNT(*) AS customer_count FROM \"companies\" WHERE NOT deleted AND \"lifecycleStage\" = 'Customer' AND EXTRACT(YEAR FROM \"createdAt\") = 2024",
+    "tables": [
+      "companies",
+      "createdAt"
+    ],
+    "saved_at": "2026-05-26T04:30:44.915582"
+  },
+  {
+    "natural_query": "how many customer added last year?",
+    "sql": "SELECT COUNT(*) AS customer_count FROM \"companies\" WHERE NOT deleted AND \"lifecycleStage\" = 'Customer' AND EXTRACT(YEAR FROM \"createdAt\") = 2025",
+    "tables": [
+      "companies",
+      "createdAt"
+    ],
+    "saved_at": "2026-05-26T04:30:54.542060"
+  },
+  {
+    "natural_query": "SELECT COUNT(*) FROM deals WHERE stage = 'Lost' AND dealLostAt >= '2024-05-26'",
+    "sql": "SELECT COUNT(*) FROM \"deals\" WHERE stage = 'Closed Lost' AND \"dealLostAt\" >= '2024-05-26' AND NOT deleted",
+    "tables": [
+      "deals"
+    ],
+    "saved_at": "2026-05-26T04:31:02.457580"
+  },
+  {
+    "natural_query": "i want all companies of 2025 give me that list",
+    "sql": "SELECT c.\"companyName\", c.industry, c.country, c.\"lifecycleStage\", c.\"leadStatus\" FROM \"companies\" c WHERE NOT c.deleted AND EXTRACT(YEAR FROM c.\"createdAt\") = 2025",
+    "tables": [
+      "c",
+      "companies"
+    ],
+    "saved_at": "2026-05-26T04:31:37.972117"
+  },
+  {
+    "natural_query": "share me all companies list of 2025",
+    "sql": "SELECT c.\"companyName\", c.industry, c.country, c.\"lifecycleStage\", c.\"leadStatus\", c.\"createdAt\" FROM \"companies\" c WHERE NOT c.deleted AND EXTRACT(YEAR FROM c.\"createdAt\") = 2025",
+    "tables": [
+      "c",
+      "companies"
+    ],
+    "saved_at": "2026-05-26T04:32:08.476324"
   }
 ]

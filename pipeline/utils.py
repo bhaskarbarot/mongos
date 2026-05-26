@@ -496,7 +496,13 @@ _SQL_PSEUDO = frozenset({
 
 def check_hallucinated_tables(sql: str) -> Optional[str]:
     """Return correction hint if SQL references a table that doesn't exist in DB."""
-    used = re.findall(r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?', sql, re.IGNORECASE)
+    # Strip function calls whose FROM arg is a column, not a table
+    # e.g. EXTRACT(YEAR FROM "createdAt") — "createdAt" is a column, not a table
+    sql_scan = re.sub(r'\bEXTRACT\s*\([^)]+\)', 'EXTRACT(x)', sql, flags=re.IGNORECASE)
+    sql_scan = re.sub(r'\bDATE_PART\s*\([^)]+\)', 'DATE_PART(x)', sql_scan, flags=re.IGNORECASE)
+    sql_scan = re.sub(r'\bDATE_TRUNC\s*\([^)]+\)', 'DATE_TRUNC(x)', sql_scan, flags=re.IGNORECASE)
+    sql_scan = re.sub(r'\bAT\s+TIME\s+ZONE\b[^,)\n]+', '', sql_scan, flags=re.IGNORECASE)
+    used = re.findall(r'\b(?:FROM|JOIN)\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?', sql_scan, re.IGNORECASE)
     fake = [t for t in used if t.lower() not in _REAL_DB_TABLES and t.lower() not in _SQL_PSEUDO]
     if fake:
         return (
