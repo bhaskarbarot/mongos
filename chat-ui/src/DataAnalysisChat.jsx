@@ -372,6 +372,14 @@ function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
   const sql     = msg.query_used     || "";
   const summary = typeof msg.content === "string" ? msg.content.slice(0, 200) : "";
 
+  // After a correction is applied, briefly show confirmation then reset to idle
+  // so the user can keep giving feedback until they hit 👍.
+  useEffect(() => {
+    if (state !== "corrected") return;
+    const t = setTimeout(() => setState("idle"), 2500);
+    return () => clearTimeout(t);
+  }, [state]);
+
   // 👍 handler — save golden example (only once per query)
   const handleLike = async () => {
     if (!query || !sql) { setState("liked"); return; }
@@ -453,7 +461,7 @@ function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
     return (
       <div style={STYLE.confirm}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
-        Answer updated! Correction saved for future queries.
+        Answer updated! Was this better?
       </div>
     );
   }
@@ -654,7 +662,7 @@ function PlotlyChart({ question, sql, chartData, apiUrl }) {
   );
 }
 
-function MessageBubble({ msg, apiUrl, onCorrectionApplied, onLearned }) {
+function MessageBubble({ msg, apiUrl, chartsEnabled, onCorrectionApplied, onLearned }) {
   const isUser = msg.role === "user";
   const parsedContent = (() => {
     if (isUser || typeof msg.content !== "string") {
@@ -695,7 +703,7 @@ function MessageBubble({ msg, apiUrl, onCorrectionApplied, onLearned }) {
         </div>
         {!isUser && (
           <div className="message-extras">
-            {msg.chart_data?.length > 0 && (
+            {chartsEnabled && msg.chart_data?.length > 0 && (
               <PlotlyChart
                 question={msg._userQuery || ""}
                 sql={typeof msg.query_used === "string" ? msg.query_used : ""}
@@ -1102,6 +1110,16 @@ export default function DataAnalysisChat() {
   // Session state
   const [sessions, setSessions] = useState(loadSessions);
   const [activeSessionId, setActiveSessionId] = useState(null);
+
+  // Chart toggle — persisted in localStorage
+  const [chartsEnabled, setChartsEnabled] = useState(
+    () => localStorage.getItem("chartsEnabled") !== "false"
+  );
+  const toggleCharts = () => setChartsEnabled(prev => {
+    const next = !prev;
+    localStorage.setItem("chartsEnabled", String(next));
+    return next;
+  });
 
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -1560,6 +1578,22 @@ export default function DataAnalysisChat() {
             {backendUp === null ? "Connecting…" : backendUp ? "Online" : "Offline"}
           </span>
         </div>
+        <button
+          className={`btn-chart-toggle${chartsEnabled ? "" : " btn-chart-toggle--off"}`}
+          onClick={toggleCharts}
+          title={chartsEnabled ? "Charts enabled — click to disable" : "Charts disabled — click to enable"}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <path d="M7 16V10M11 16V8M15 16v-4M19 16V6"/>
+          </svg>
+          {chartsEnabled ? "Charts" : "Charts off"}
+          {!chartsEnabled && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{marginLeft:3}}>
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          )}
+        </button>
         <button className="btn-new-chat" onClick={clearChat}>New Chat</button>
       </header>
 
@@ -1574,6 +1608,7 @@ export default function DataAnalysisChat() {
                     key={m.id}
                     msg={m}
                     apiUrl={apiUrl}
+                    chartsEnabled={chartsEnabled}
                     onCorrectionApplied={handleCorrectionApplied}
                     onLearned={refreshLearnings}
                   />

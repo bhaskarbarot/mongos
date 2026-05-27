@@ -102,6 +102,17 @@
 }
 .btn-new-chat:hover { background: var(--surface-raised); }
 
+.btn-chart-toggle {
+  display: flex; align-items: center; gap: 5px;
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 10px; font-size: .8em; font-weight: 600;
+  cursor: pointer; color: #CC785C; font-family: inherit;
+  transition: all .15s;
+}
+.btn-chart-toggle:hover { background: var(--surface-raised); }
+.btn-chart-toggle--off { color: var(--text-muted); opacity: .6; }
+.btn-chart-toggle--off:hover { opacity: 1; }
+
 /* ─── Messages Area ──────────────────────────────────────────────────────── */
 .chat-messages-area  { flex: 1; overflow-y: auto; padding: 20px 20px 0; }
 .chat-messages-inner { max-width: 780px; margin: 0 auto; }

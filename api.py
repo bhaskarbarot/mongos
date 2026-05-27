@@ -238,7 +238,11 @@ def _generate_chart_heuristic(df: pd.DataFrame, title: str = "Chart") -> Optiona
 
     # Drop numeric columns whose non-null values are all identical (range = 0).
     # Plotly computes dtick = range / n which becomes Infinity on zero-range axes.
-    numeric = [c for c in numeric if df[c].dropna().nunique() > 1]
+    # Also remove them from df so the fallback branch can't accidentally pick them up.
+    zero_range = [c for c in numeric if df[c].dropna().nunique() <= 1]
+    numeric    = [c for c in numeric if c not in zero_range]
+    if zero_range:
+        df = df.drop(columns=zero_range)
 
     # Nothing left to chart → bail out cleanly
     if not numeric and not categ and not datetime:
