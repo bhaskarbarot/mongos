@@ -86,13 +86,28 @@ class FeedbackManager:
     # Write operations (called from API endpoints)
     # ──────────────────────────────────────────────────────────────────────────
 
+    def has_positive(self, query: str) -> bool:
+        """Return True if a golden entry already exists for this exact query."""
+        normalized = query.strip().lower()
+        for entry in self._load():
+            if entry.get("type") == "golden" and entry.get("query", "").strip().lower() == normalized:
+                return True
+        return False
+
     def save_positive(
         self,
         query: str,
         sql: str,
         result_summary: str,
-    ) -> None:
-        """Save a user-approved (👍) golden example."""
+    ) -> bool:
+        """Save a user-approved (👍) golden example.
+
+        Returns True if saved, False if a golden entry for this query already exists
+        (duplicate — caller should tell the user they already liked this).
+        """
+        if self.has_positive(query):
+            LOGGER.info("FeedbackManager: duplicate golden skipped | query=%.80s", query)
+            return False
         self._append({
             "type":           "golden",
             "query":          query,
@@ -101,6 +116,7 @@ class FeedbackManager:
             "ts":             time.time(),
         })
         LOGGER.info("FeedbackManager: golden saved | query=%.80s", query)
+        return True
 
     def save_correction(
         self,

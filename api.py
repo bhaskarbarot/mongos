@@ -224,15 +224,31 @@ def _generate_chart_heuristic(df: pd.DataFrame, title: str = "Chart") -> Optiona
     if df.empty:
         return None
 
+    # ── Sanitise before charting ──────────────────────────────────────────────
+    # Replace Inf/-Inf with NaN, drop entirely-null columns/rows
+    df = df.replace([float("inf"), float("-inf")], pd.NA)
+    df = df.dropna(axis=1, how="all")
+    df = df.dropna(axis=0, how="all")
+    if df.empty:
+        return None
+
     numeric  = df.select_dtypes(include="number").columns.tolist()
     categ    = df.select_dtypes(include=["object", "category"]).columns.tolist()
     datetime = df.select_dtypes(include=["datetime64"]).columns.tolist()
+
+    # Drop numeric columns whose non-null values are all identical (range = 0).
+    # Plotly computes dtick = range / n which becomes Infinity on zero-range axes.
+    numeric = [c for c in numeric if df[c].dropna().nunique() > 1]
+
+    # Nothing left to chart → bail out cleanly
+    if not numeric and not categ and not datetime:
+        return None
 
     # Try parsing string columns that look like dates
     if not datetime:
         for col in categ[:]:
             try:
-                parsed = pd.to_datetime(df[col], infer_datetime_format=True, errors="raise")
+                parsed = pd.to_datetime(df[col], errors="raise")
                 df = df.copy()
                 df[col] = parsed
                 datetime.append(col)
@@ -717,15 +733,24 @@ async def feedback_positive(req: PositiveFeedbackRequest, request: Request):
         raise HTTPException(status_code=400, detail="query and sql are required")
 
     try:
-        feedback_manager.save_positive(
+        saved = feedback_manager.save_positive(
             query=req.query.strip(),
             sql=req.sql.strip(),
             result_summary=req.result_summary.strip(),
         )
-        LOGGER.info("[RID:%s] 👍 Positive feedback saved | query=%.60s", request_id, req.query)
     except Exception as exc:
         LOGGER.warning("[RID:%s] Positive feedback save error: %s", request_id, exc)
+        saved = True  # treat errors as saved so UI shows confirmation
 
+    if not saved:
+        LOGGER.info("[RID:%s] 👍 Duplicate positive feedback | query=%.60s", request_id, req.query)
+        return {
+            "status":     "already_liked",
+            "message":    "You've already liked this response.",
+            "request_id": request_id,
+        }
+
+    LOGGER.info("[RID:%s] 👍 Positive feedback saved | query=%.60s", request_id, req.query)
     return {
         "status":     "ok",
         "message":    "Got it! I'll remember this approach.",

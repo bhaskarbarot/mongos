@@ -363,7 +363,7 @@ function QueryPlan({ plan }) {
 // 👍 → POST /feedback/positive (save golden example, show confirmation)
 // 👎 → Show inline correction form → POST /feedback/correction → replace answer
 function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
-  // "idle" | "liked" | "disliked" | "loading_like" | "loading_correct" | "corrected" | "error"
+  // "idle" | "liked" | "already_liked" | "disliked" | "loading_like" | "loading_correct" | "corrected" | "error"
   const [state, setState] = useState("idle");
   const [correctionText, setCorrectionText] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -372,18 +372,22 @@ function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
   const sql     = msg.query_used     || "";
   const summary = typeof msg.content === "string" ? msg.content.slice(0, 200) : "";
 
-  // 👍 handler — save golden example
+  // 👍 handler — save golden example (only once per query)
   const handleLike = async () => {
     if (!query || !sql) { setState("liked"); return; }
     setState("loading_like");
     try {
-      await apiPost(apiUrl, "/feedback/positive", {
+      const resp = await apiPost(apiUrl, "/feedback/positive", {
         query,
         sql,
         result_summary: summary,
       }, null);
-      setState("liked");
-      if (onLearned) onLearned();
+      if (resp?.status === "already_liked") {
+        setState("already_liked");
+      } else {
+        setState("liked");
+        if (onLearned) onLearned();
+      }
     } catch {
       setState("liked"); // still show confirmation even if save fails
     }
@@ -432,6 +436,15 @@ function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
       <div style={STYLE.confirm}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
         Got it! I&apos;ll remember this approach.
+      </div>
+    );
+  }
+
+  if (state === "already_liked") {
+    return (
+      <div style={STYLE.confirm}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+        Already saved — you&apos;ve liked this response before.
       </div>
     );
   }
@@ -611,18 +624,22 @@ function PlotlyChart({ question, sql, chartData, apiUrl }) {
   // Effect 2 — call Plotly.newPlot once figData arrives and div is in DOM
   useEffect(() => {
     if (!figData || !divRef.current) return;
-    window.Plotly.newPlot(divRef.current, figData.data, figData.layout, {
-      responsive: true,
-      displayModeBar: true,
-      modeBarButtonsToRemove: ["lasso2d", "select2d"],
-      toImageButtonOptions: {
-        format: "png",
-        filename: (question || "chart").slice(0, 40),
-        height: 500,
-        width: 900,
-        scale: 2,
-      },
-    });
+    try {
+      window.Plotly.newPlot(divRef.current, figData.data, figData.layout, {
+        responsive: true,
+        displayModeBar: true,
+        modeBarButtonsToRemove: ["lasso2d", "select2d"],
+        toImageButtonOptions: {
+          format: "png",
+          filename: (question || "chart").slice(0, 40),
+          height: 500,
+          width: 900,
+          scale: 2,
+        },
+      });
+    } catch {
+      setFailed(true); // hide chart box silently — never crash the page
+    }
   }, [figData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Nothing to chart
