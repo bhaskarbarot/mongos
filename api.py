@@ -196,6 +196,7 @@ class CorrectionFeedbackRequest(BaseModel):
     sql: str            # bad SQL that the user rejected
     user_feedback: str  # what the user says was wrong / what they want
     history: List[ChatMessage] = []  # conversation history for context
+    agent_type: Optional[str] = None  # "simple" | "medium" | "complex" — determines correction path
 
 class ChartRequest(BaseModel):
     question: str = "Chart"
@@ -792,8 +793,53 @@ async def feedback_correction(req: CorrectionFeedbackRequest, request: Request):
         from agents.simple_agent import _format_rows_as_text, _narrate_result
 
         query_str    = req.query.strip()
-        prev_sql     = req.sql.strip()
         feedback_str = req.user_feedback.strip()
+        agent_type   = (req.agent_type or "simple").lower()
+
+        # ── Medium / Complex path: re-run through the full pipeline ─────────────
+        # Single-SQL regeneration is not enough for multi-step analysis queries.
+        # Re-run with the correction appended so all sub-queries use the right context.
+        if agent_type in ("medium", "complex"):
+            LOGGER.info("[RID:%s] Correction via full pipeline re-run (agent=%s)", request_id, agent_type)
+            corrected_query = f"{query_str}\n\n[User correction: {feedback_str}]"
+            loop = asyncio.get_event_loop()
+            pipeline_result = await asyncio.wait_for(
+                loop.run_in_executor(None, run_agent_query, corrected_query, []),
+                timeout=120,
+            )
+            clean_answer = _clean_answer(pipeline_result.get("answer", ""))
+            new_sql = pipeline_result.get("sql_queries", [None])[0] or req.sql
+            if not clean_answer:
+                return {
+                    "status":     "error",
+                    "answer":     "Could not generate a corrected response. Try rephrasing your correction.",
+                    "sql_used":   None,
+                    "request_id": request_id,
+                }
+            feedback_manager.save_correction(
+                query=query_str,
+                bad_sql=req.sql.strip(),
+                user_feedback=feedback_str,
+                good_sql=new_sql,
+            )
+            return {
+                "status":     "ok",
+                "answer":     clean_answer,
+                "sql_used":   new_sql,
+                "rows":       [],
+                "columns":    [],
+                "request_id": request_id,
+            }
+
+        # ── Simple path: regenerate a single SQL ─────────────────────────────────
+        # For complex-agent responses, query_used is a multi-SQL block joined by \n\n.
+        # Strip the "… and N more queries" truncation line and keep only the first SQL
+        # so the regeneration prompt receives a clean single statement as context.
+        raw_sql = req.sql.strip()
+        if "\n\n… and " in raw_sql:
+            raw_sql = raw_sql.split("\n\n… and ")[0].strip()
+        # Take only the first SQL if multiple are separated by blank lines
+        prev_sql = raw_sql.split("\n\n")[0].strip()
 
         # ── Self-heal loop: up to 3 attempts ─────────────────────────────────
         MAX_ATTEMPTS = 3

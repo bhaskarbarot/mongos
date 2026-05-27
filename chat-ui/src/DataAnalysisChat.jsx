@@ -368,9 +368,10 @@ function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
   const [correctionText, setCorrectionText] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const query   = msg.resolved_query || msg._userQuery || "";
-  const sql     = msg.query_used     || "";
-  const summary = typeof msg.content === "string" ? msg.content.slice(0, 200) : "";
+  const query     = msg.resolved_query || msg._userQuery || "";
+  const sql       = msg.query_used     || "";
+  const summary   = typeof msg.content === "string" ? msg.content.slice(0, 200) : "";
+  const agentType = msg.agent_type     || "simple";
 
   // After a correction is applied, briefly show confirmation then reset to idle
   // so the user can keep giving feedback until they hit 👍.
@@ -419,6 +420,7 @@ function FeedbackButtons({ msg, apiUrl, onCorrectionApplied, onLearned }) {
         sql,
         user_feedback: correctionText.trim(),
         history: [],
+        agent_type: agentType,
       }, null, 120000);
 
       if (resp && resp.status === "ok" && resp.answer) {

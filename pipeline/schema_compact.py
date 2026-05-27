@@ -292,8 +292,18 @@ RULES:
     "overdue tasks" → createtasks WHERE due_date < NOW() AND status != 'Completed' AND NOT deleted
     "activity logs" → activitylogs (columns: action, module, recordId, userId, createdAt)
     "deal stage"    → deals.stage — see exact values above, never guess stage names
-    "lead status"   → contacts.leadStatus or companies.leadStatus (text column)
+    "lead status"   → contacts.leadStatus (text column — stores the name, NOT an _id)
+                      EXACT values in DB (NEVER guess, NEVER lowercase):
+                      'New' | 'Attempted to Contact' | 'Contact in Future' | 'Contacted'
+                      'Not Contacted' | 'Pre-Qualified' | 'Not Qualified'
+                      'Lost Lead' | 'Junk Lead' | 'Qualified' | 'Proposition'
+                      ✓ "junk leads"   → contacts WHERE "leadStatus" = 'Junk Lead'
+                      ✓ "new leads"    → contacts WHERE "leadStatus" = 'New'
+                      ✓ "lost leads"   → contacts WHERE "leadStatus" = 'Lost Lead'
+                      ✓ Always combine with: AND "lifecycleStage" = 'Lead' AND NOT deleted
     "lead source"   → contacts.source → JOIN "sources" s ON s._id = ct.source
+                      ✓ sources column is "sourceName" (NOT "name"):
+                        SELECT s."sourceName", COUNT(*) FROM "sources" s JOIN "contacts" ct ON ct.source = s._id GROUP BY s."sourceName"
     "phone"         → contacts."phoneNumber" or companies."phoneNumber" or outreaches.phone
     "email opened"  → no isRead column; emails table tracks sent/received but not open status
 
