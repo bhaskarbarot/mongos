@@ -201,7 +201,12 @@ def complex_decompose_node(state: ComplexState) -> Dict:
         "- Deal pipeline      : deals (stage, dealWonAt, dealLostAt)\n"
         "- Tasks today/overdue: createtasks (due_date, status)\n"
         "- Company health     : companies + invoices + deals\n"
-        "- Leaderboard        : users + sales + deals + targets\n\n"
+        "- Leaderboard        : users + sales + deals + targets\n"
+        "- Junk/Lost/New/Qualified leads: BOTH companies AND contacts WHERE \"leadStatus\"='Junk Lead'/'Lost Lead'/'New'/etc.\n"
+        "  leadStatus EXACT values: 'New'|'Attempted to Contact'|'Contact in Future'|'Contacted'|'Not Contacted'|'Pre-Qualified'|'Not Qualified'|'Lost Lead'|'Junk Lead'|'Qualified'|'Proposition'\n"
+        "  COUNT junk leads: (SELECT COUNT(*) FROM \"companies\" WHERE \"leadStatus\"='Junk Lead' AND \"lifecycleStage\"='Lead' AND NOT deleted) + (SELECT COUNT(*) FROM \"contacts\" WHERE \"leadStatus\"='Junk Lead' AND \"lifecycleStage\"='Lead' AND NOT deleted)\n"
+        "  sources column MUST be quoted: s.\"sourceName\" — NEVER s.name or s.sourcename\n"
+        "  UNION ALL rule: wrap each SELECT in () and put ORDER BY at the very end only\n\n"
 
         "Zero hallucination: only reference tables and columns that exist in the schema."
     )

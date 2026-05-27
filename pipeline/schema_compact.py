@@ -292,14 +292,26 @@ RULES:
     "overdue tasks" → createtasks WHERE due_date < NOW() AND status != 'Completed' AND NOT deleted
     "activity logs" → activitylogs (columns: action, module, recordId, userId, createdAt)
     "deal stage"    → deals.stage — see exact values above, never guess stage names
-    "lead status"   → contacts.leadStatus (text column — stores the name, NOT an _id)
+    "lead status"   → BOTH contacts.leadStatus AND companies.leadStatus store this (text column)
                       EXACT values in DB (NEVER guess, NEVER lowercase):
                       'New' | 'Attempted to Contact' | 'Contact in Future' | 'Contacted'
                       'Not Contacted' | 'Pre-Qualified' | 'Not Qualified'
                       'Lost Lead' | 'Junk Lead' | 'Qualified' | 'Proposition'
-                      ✓ "junk leads"   → contacts WHERE "leadStatus" = 'Junk Lead'
-                      ✓ "new leads"    → contacts WHERE "leadStatus" = 'New'
-                      ✓ "lost leads"   → contacts WHERE "leadStatus" = 'Lost Lead'
+                      ✓ "junk leads" COUNT → add both tables (never UNION for counts):
+                        SELECT
+                          (SELECT COUNT(*) FROM "companies" WHERE "leadStatus"='Junk Lead' AND "lifecycleStage"='Lead' AND NOT deleted)
+                          + (SELECT COUNT(*) FROM "contacts" WHERE "leadStatus"='Junk Lead' AND "lifecycleStage"='Lead' AND NOT deleted)
+                          AS total_junk_leads
+                      ✓ "junk leads" list → wrap each SELECT in () before UNION ALL, ORDER BY at end only:
+                        SELECT * FROM (
+                          (SELECT "companyName" AS name, source FROM "companies" WHERE "leadStatus"='Junk Lead' AND "lifecycleStage"='Lead' AND NOT deleted)
+                          UNION ALL
+                          (SELECT CONCAT("firstName",' ',"lastName"), source FROM "contacts" WHERE "leadStatus"='Junk Lead' AND "lifecycleStage"='Lead' AND NOT deleted)
+                        ) t ORDER BY name
+                      ✗ NEVER put ORDER BY inside individual UNION parts — PostgreSQL syntax error
+                      ✓ sources."sourceName" MUST use double quotes (case-sensitive): s."sourceName"
+                      ✓ "new leads"    → companies OR contacts WHERE "leadStatus" = 'New'
+                      ✓ "lost leads"   → companies OR contacts WHERE "leadStatus" = 'Lost Lead'
                       ✓ Always combine with: AND "lifecycleStage" = 'Lead' AND NOT deleted
     "lead source"   → contacts.source → JOIN "sources" s ON s._id = ct.source
                       ✓ sources column is "sourceName" (NOT "name"):

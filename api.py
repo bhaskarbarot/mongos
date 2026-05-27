@@ -804,11 +804,14 @@ async def feedback_correction(req: CorrectionFeedbackRequest, request: Request):
             corrected_query = f"{query_str}\n\n[User correction: {feedback_str}]"
             loop = asyncio.get_event_loop()
             pipeline_result = await asyncio.wait_for(
-                loop.run_in_executor(None, run_agent_query, corrected_query, []),
+                loop.run_in_executor(
+                    None,
+                    functools.partial(run_agent_query, _get_agent(), corrected_query),
+                ),
                 timeout=120,
             )
             clean_answer = _clean_answer(pipeline_result.get("answer", ""))
-            new_sql = pipeline_result.get("sql_queries", [None])[0] or req.sql
+            new_sql = (pipeline_result.get("sql_queries") or [None])[0] or req.sql
             if not clean_answer:
                 return {
                     "status":     "error",

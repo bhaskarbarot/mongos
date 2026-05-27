@@ -219,6 +219,9 @@ def _cache_key(query: str) -> str:
 
 
 def sql_cache_get(query: str) -> Optional[str]:
+    from config import settings
+    if settings.cache_disabled:
+        return None
     k = _cache_key(query)
     with _cache_lock:
         entry = _SQL_CACHE.get(k)
@@ -229,6 +232,9 @@ def sql_cache_get(query: str) -> Optional[str]:
 
 
 def sql_cache_set(query: str, sql: str) -> None:
+    from config import settings
+    if settings.cache_disabled:
+        return
     k = _cache_key(query)
     with _cache_lock:
         if len(_SQL_CACHE) >= _SQL_CACHE_MAX:

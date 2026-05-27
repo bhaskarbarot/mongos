@@ -95,6 +95,7 @@ class Settings:
 
     # ── Misc ──────────────────────────────────────────────────────────────────
     strict_grounded_mode: bool = os.getenv("STRICT_GROUNDED_MODE", "false").lower() == "true"
+    cache_disabled:       bool = os.getenv("CACHE_DISABLED", "false").lower() == "true"
     log_file:             str  = os.getenv("QUERY_LOG_FILE", "logs/query.log")
     max_retries:          int  = int(os.getenv("AGENT_MAX_RETRIES", "0"))
     allowed_origins:      str  = os.getenv(

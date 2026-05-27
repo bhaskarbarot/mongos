@@ -425,7 +425,12 @@ def decompose_node(state: MediumState) -> Dict:
         "- Pipeline health    : deals (lastActivity, stage, createdAt)\n"
         "- Tasks              : createtasks (status, priority, due_date, createdBy)\n"
         "- Users/reps         : users (name, isActive, department)\n"
-        "- Companies at risk  : companies + invoices/sales JOIN to check last activity\n\n"
+        "- Companies at risk  : companies + invoices/sales JOIN to check last activity\n"
+        "- Junk/Lost/New leads: BOTH companies AND contacts WHERE \"leadStatus\"='Junk Lead'/'Lost Lead'/'New'/etc.\n"
+        "  leadStatus exact values: 'New'|'Attempted to Contact'|'Contact in Future'|'Contacted'|'Not Contacted'|'Pre-Qualified'|'Not Qualified'|'Lost Lead'|'Junk Lead'|'Qualified'|'Proposition'\n"
+        "  COUNT junk leads: (SELECT COUNT(*) FROM \"companies\" WHERE \"leadStatus\"='Junk Lead' AND \"lifecycleStage\"='Lead' AND NOT deleted) + (SELECT COUNT(*) FROM \"contacts\" WHERE \"leadStatus\"='Junk Lead' AND \"lifecycleStage\"='Lead' AND NOT deleted)\n"
+        "  sources column MUST be quoted: s.\"sourceName\" — NEVER s.name or s.sourcename\n"
+        "  UNION ALL rule: wrap each SELECT in () and ORDER BY at end only — never inside individual parts\n\n"
 
         "DATE RULE: The schema above has a CURRENT DATE CONTEXT block — use those exact\n"
         "dates/months for any date filtering. Never guess dates.\n\n"
